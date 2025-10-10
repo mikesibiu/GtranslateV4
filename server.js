@@ -155,8 +155,14 @@ const io = socketIo(server, {
             // Whitelist of allowed origins
             const allowedOrigins = [
                 'http://localhost:3003',
-                'http://127.0.0.1:3003'
+                'http://127.0.0.1:3003',
+                'https://gtranslate-v4-96dfeefd9842.herokuapp.com'
             ];
+
+            // Also allow Heroku app URL from environment
+            if (process.env.HEROKU_APP_NAME) {
+                allowedOrigins.push(`https://${process.env.HEROKU_APP_NAME}.herokuapp.com`);
+            }
 
             if (allowedOrigins.includes(origin)) {
                 callback(null, true);
