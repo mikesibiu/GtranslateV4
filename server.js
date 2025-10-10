@@ -28,6 +28,23 @@ const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || '5
 const INACTIVITY_TIMEOUT = parseInt(process.env.INACTIVITY_TIMEOUT || String(30 * 60 * 1000));
 const MAX_AUDIO_CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
 
+// ===== LOGGING SETUP =====
+// Initialize logger FIRST before using it
+const logger = winston.createLogger({
+    level: 'debug',  // Enable debug logging
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.printf(({ timestamp, level, message, ...meta }) => {
+            const metaStr = Object.keys(meta).length ? ` | ${JSON.stringify(meta)}` : '';
+            return `[${timestamp}] [${level.toUpperCase()}] ${message}${metaStr}`;
+        })
+    ),
+    transports: [
+        new winston.transports.Console(),
+        new winston.transports.File({ filename: 'gtranslate-v4.log' })
+    ]
+});
+
 // ===== GOOGLE CLOUD CREDENTIALS SETUP =====
 // Support both file-based (local/Docker) and environment variable (Heroku) credentials
 let googleCredentials;
@@ -40,6 +57,7 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
         logger.info('✅ Using Google credentials from environment variable');
     } catch (error) {
         logger.error('❌ Failed to parse GOOGLE_CREDENTIALS_JSON environment variable');
+        logger.error('Error:', error.message);
         process.exit(1);
     }
 } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -58,22 +76,6 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
     // Local development: credentials from default file
     CREDENTIALS_PATH = path.join(__dirname, 'google-credentials.json');
 }
-
-// ===== LOGGING SETUP =====
-const logger = winston.createLogger({
-    level: 'debug',  // Enable debug logging
-    format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.printf(({ timestamp, level, message, ...meta }) => {
-            const metaStr = Object.keys(meta).length ? ` | ${JSON.stringify(meta)}` : '';
-            return `[${timestamp}] [${level.toUpperCase()}] ${message}${metaStr}`;
-        })
-    ),
-    transports: [
-        new winston.transports.Console(),
-        new winston.transports.File({ filename: 'gtranslate-v4.log' })
-    ]
-});
 
 // ===== CHECK CREDENTIALS =====
 if (googleCredentials) {
