@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  gtranslate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: gtranslate-v4:latest
+    container_name: gtranslate-v4
+    ports:
+      - "3003:3003"
+    volumes:
+      # Mount Google credentials (REQUIRED - update path to your credentials file)
+      - ./google-credentials.json:/app/google-credentials.json:ro
+      # Mount logs directory for persistence
+      - ./logs:/app/logs
+    environment:
+      # Server configuration
+      - NODE_ENV=production
+      - PORT=3003
+
+      # Google Cloud credentials path (inside container)
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/google-credentials.json
+
+      # Connection limits
+      - MAX_CONNECTIONS=50
+      - MAX_CONNECTIONS_PER_IP=5
+
+      # Inactivity timeout (30 minutes in milliseconds)
+      - INACTIVITY_TIMEOUT=1800000
+
+    restart: unless-stopped
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+
+    # Read-only root filesystem (except for logs)
+    read_only: true
+    tmpfs:
+      - /tmp

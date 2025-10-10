@@ -1,0 +1,72 @@
+# AI Development Rules for Claude Code
+
+## Core Principles
+
+### 1. Test-Driven Development (MANDATORY)
+- **ALWAYS update tests IMMEDIATELY after fixing a bug**
+- **ALWAYS run ALL tests after EVERY fix**
+- Never claim a fix is complete without running tests
+- Integration tests must validate real-world behavior, not just happy paths
+
+### 2. Trust Building Through Verification
+- Don't just write code - VERIFY it works
+- If you make a claim (e.g., "this fixes the issue"), PROVE it with test output
+- Run tests before presenting solutions to the user
+- If tests fail, fix and rerun - don't present failures
+
+### 3. Test Coverage Requirements
+When creating a new feature:
+1. Write unit tests (logic validation)
+2. Write integration tests (end-to-end validation)
+3. Run ALL tests before marking work complete
+4. Update tests when bugs are discovered
+5. Rerun ALL tests after fixing bugs
+
+### 4. Debugging Workflow
+When a bug is reported:
+1. Add debug logging to understand the issue
+2. Create a test that reproduces the bug
+3. Fix the bug
+4. Update ALL related tests
+5. Run ALL tests (unit + integration)
+6. Only then report the fix to the user
+
+### 5. Communication Standards
+- Don't tell the user to test manually - YOU test first
+- Show test results as proof of fixes
+- Be honest about failures - don't hide them
+- If something doesn't work, say so immediately
+
+### 6. Code Quality Standards
+- Don't use deprecated APIs (e.g., ScriptProcessorNode)
+- Validate buffer sizes and data formats
+- Add proper error handling
+- Include debug logging for critical paths
+
+## Project-Specific Rules
+
+### GTranslate V4
+- Audio chunks must be 8192 bytes (4096 samples × 2 bytes)
+- Always verify Google Cloud API integration
+- Test with real audio streaming scenarios
+- Validate both interim and final results
+- Check server logs for errors
+
+## Test Files
+- `test-streaming-speech.js` - Unit tests (12 tests)
+- `test-integration.js` - Integration tests (9 tests)
+- Run both test suites after every change
+
+## Never Do This
+❌ Fix code without updating tests
+❌ Update tests without running them
+❌ Tell user "it should work now" without proof
+❌ Skip integration tests
+❌ Ignore failed tests
+
+## Always Do This
+✅ Update tests immediately after bug fixes
+✅ Run ALL tests after EVERY change
+✅ Show test results to user
+✅ Add new tests for new bugs discovered
+✅ Verify fixes work in real scenarios
