@@ -1333,11 +1333,9 @@
             }
 
             addTranslation(data) {
-                // In EarBuds mode, ignore interim translations completely
-                if (this.currentMode === 'earbuds' && data.isInterim) {
-                    console.log('🎧 EarBuds mode: Skipping interim translation');
-                    return;
-                }
+                // In EarBuds mode, accept ALL translations (both 10s forced and natural finals)
+                // Don't filter out interim because server's 10s forced translations are marked as interim
+                // In Talks/QA modes, we still want to show interim translations anyway
 
                 this.translationCount++;
                 this.wordsTranslated += data.original.split(/\s+/).length;
@@ -1648,26 +1646,38 @@
 
                 // O(1) lookup from voice cache instead of O(n) search
                 const langVoices = this.voiceCache.get(speechLang) ||
-                                   this.voiceCache.get(speechLang.split('-')[0]) ||
+                                   this.voiceCache.get(speechLang.split('-')[0)) ||
                                    [];
 
-                // Find best voice from pre-filtered list
+                // Find best voice from pre-filtered list - prioritize most natural sounding
                 const preferredVoice =
+                    // Priority 1: Google high-quality voices (most natural)
                     langVoices.find(voice =>
-                        voice.name.includes('Premium') ||
-                        voice.name.includes('Enhanced') ||
-                        voice.name.includes('Neural') ||
-                        voice.localService === false
-                    ) || langVoices[0];  // Fallback to first match
+                        voice.name.includes('Google') &&
+                        (voice.name.includes('Natural') || voice.name.includes('Wavenet') || voice.name.includes('Neural'))
+                    ) ||
+                    // Priority 2: Apple high-quality voices (Siri-quality)
+                    langVoices.find(voice =>
+                        (voice.name.includes('Samantha') ||
+                         voice.name.includes('Karen') ||
+                         voice.name.includes('Tessa') ||
+                         voice.name.includes('Alex') ||
+                         voice.name.includes('Premium') ||
+                         voice.name.includes('Enhanced'))
+                    ) ||
+                    // Priority 3: Any cloud/remote voice
+                    langVoices.find(voice => voice.localService === false) ||
+                    // Priority 4: Any local voice with correct language
+                    langVoices[0];
 
                 if (preferredVoice) {
                     utterance.voice = preferredVoice;
                     console.log(`🔊 Using voice: ${preferredVoice.name} (${preferredVoice.lang})`);
                 }
 
-                // Speech settings - use user-configured rate
+                // Speech settings - use user-configured rate with slight pitch variation for naturalness
                 utterance.rate = this.speechRate;
-                utterance.pitch = 1.0;
+                utterance.pitch = 1.05; // Slightly higher pitch sounds more natural
                 utterance.volume = 1.0;
 
                 // Event handlers
