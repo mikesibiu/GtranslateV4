@@ -1646,7 +1646,7 @@
 
                 // O(1) lookup from voice cache instead of O(n) search
                 const langVoices = this.voiceCache.get(speechLang) ||
-                                   this.voiceCache.get(speechLang.split('-')[0)) ||
+                                   this.voiceCache.get(speechLang.split('-')[0]) ||
                                    [];
 
                 // Find best voice from pre-filtered list - prioritize most natural sounding
