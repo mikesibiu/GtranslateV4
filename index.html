@@ -750,6 +750,9 @@
                 this.sessionTranslations = [];
                 this.MAX_SESSION_TRANSLATIONS = 1000; // Prevent memory exhaustion
 
+                // Mode tracking
+                this.currentMode = 'talks'; // Default mode: talks, qa, or earbuds
+
                 // Text-to-Speech
                 this.ttsEnabled = false;
                 this.speechSynthesis = window.speechSynthesis;
@@ -960,6 +963,11 @@
                 });
 
                 this.socket.on('interim-result', (data) => {
+                    // In EarBuds mode, don't show interim results
+                    if (this.currentMode === 'earbuds') {
+                        this.interimText.textContent = 'Listening... (waiting for final translation)';
+                        return;
+                    }
                     this.interimText.textContent = sanitizeText(data.text) || 'Listening...';
                 });
 
@@ -1009,6 +1017,9 @@
                         // Add active class to clicked option
                         option.classList.add('active');
 
+                        // Update current mode
+                        this.currentMode = option.dataset.mode;
+
                         // Update translation interval
                         this.translationInterval = parseInt(option.dataset.interval);
 
@@ -1032,7 +1043,7 @@
                             this.isSpeaking = false;
                         }
 
-                        console.log(`Mode changed: ${option.dataset.mode}, Interval: ${this.translationInterval}ms, Summary: ${this.summaryInterval}ms, TTS: ${enableTTS}`);
+                        console.log(`Mode changed: ${this.currentMode}, Interval: ${this.translationInterval}ms, Summary: ${this.summaryInterval}ms, TTS: ${enableTTS}`);
                     });
                 });
             }
@@ -1322,6 +1333,12 @@
             }
 
             addTranslation(data) {
+                // In EarBuds mode, ignore interim translations completely
+                if (this.currentMode === 'earbuds' && data.isInterim) {
+                    console.log('🎧 EarBuds mode: Skipping interim translation');
+                    return;
+                }
+
                 this.translationCount++;
                 this.wordsTranslated += data.original.split(/\s+/).length;
 
