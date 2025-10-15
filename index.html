@@ -636,15 +636,7 @@
                 <div class="mode-toggle">
                     <button class="mode-option active" data-mode="talks" data-interval="10000">Talks (10s)</button>
                     <button class="mode-option" data-mode="qa" data-interval="4000" data-summary-interval="30000">Q&A (4s/30s)</button>
-                </div>
-            </div>
-
-            <div class="control-row">
-                <div class="control-group">
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="checkbox" id="ttsEnabled" style="width: 20px; height: 20px; cursor: pointer;">
-                        <span>🔊 Read translations aloud (Text-to-Speech)</span>
-                    </label>
+                    <button class="mode-option" data-mode="earbuds" data-interval="10000" data-enable-tts="true">🎧 EarBuds (10s)</button>
                 </div>
             </div>
 
@@ -854,7 +846,6 @@
                 this.gainSlider = document.getElementById('gainSlider');
                 this.gainValue = document.getElementById('gainValue');
                 this.exportBtn = document.getElementById('exportBtn');
-                this.ttsCheckbox = document.getElementById('ttsEnabled');
                 this.ttsRateContainer = document.getElementById('ttsRateContainer');
                 this.ttsRateSlider = document.getElementById('ttsRate');
                 this.ttsRateValue = document.getElementById('ttsRateValue');
@@ -862,22 +853,6 @@
                 this.startBtn.addEventListener('click', () => this.startRecording());
                 this.stopBtn.addEventListener('click', () => this.stopRecording());
                 this.exportBtn.addEventListener('click', () => this.exportSession());
-
-                // TTS toggle
-                this.ttsCheckbox.addEventListener('change', (e) => {
-                    this.ttsEnabled = e.target.checked;
-                    console.log(`🔊 Text-to-Speech ${this.ttsEnabled ? 'enabled' : 'disabled'}`);
-
-                    // Show/hide rate control
-                    this.ttsRateContainer.style.display = this.ttsEnabled ? 'block' : 'none';
-
-                    // Stop any currently playing speech and clear queue
-                    if (!this.ttsEnabled && this.speechSynthesis) {
-                        this.speechSynthesis.cancel();
-                        this.ttsQueue = [];
-                        this.isSpeaking = false;
-                    }
-                });
 
                 // TTS rate control
                 this.ttsRateSlider.addEventListener('input', (e) => {
@@ -1041,7 +1016,23 @@
                         this.summaryInterval = option.dataset.summaryInterval ?
                             parseInt(option.dataset.summaryInterval) : null;
 
-                        console.log(`Mode changed: ${option.dataset.mode}, Interval: ${this.translationInterval}ms, Summary: ${this.summaryInterval}ms`);
+                        // Handle TTS auto-enable for EarBuds mode
+                        const enableTTS = option.dataset.enableTts === 'true';
+                        this.ttsEnabled = enableTTS;
+
+                        // Show/hide TTS rate control based on TTS state
+                        if (this.ttsRateContainer) {
+                            this.ttsRateContainer.style.display = enableTTS ? 'block' : 'none';
+                        }
+
+                        // Stop any currently playing speech if TTS is being disabled
+                        if (!enableTTS && this.speechSynthesis) {
+                            this.speechSynthesis.cancel();
+                            this.ttsQueue = [];
+                            this.isSpeaking = false;
+                        }
+
+                        console.log(`Mode changed: ${option.dataset.mode}, Interval: ${this.translationInterval}ms, Summary: ${this.summaryInterval}ms, TTS: ${enableTTS}`);
                     });
                 });
             }
