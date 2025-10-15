@@ -639,6 +639,15 @@
                 </div>
             </div>
 
+            <div class="control-row">
+                <div class="control-group">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="ttsEnabled" style="width: 20px; height: 20px; cursor: pointer;">
+                        <span>🔊 Read translations aloud (Text-to-Speech)</span>
+                    </label>
+                </div>
+            </div>
+
             <div class="button-group">
                 <button id="startBtn" class="btn btn-start">
                     <span class="btn-text-full">🎤 Start Listening</span>
@@ -734,6 +743,11 @@
                 // Session export data
                 this.sessionTranslations = [];
 
+                // Text-to-Speech
+                this.ttsEnabled = false;
+                this.speechSynthesis = window.speechSynthesis;
+                this.currentUtterance = null;
+
                 // Check browser compatibility on startup
                 this.checkBrowserCompatibility();
 
@@ -813,10 +827,22 @@
                 this.gainSlider = document.getElementById('gainSlider');
                 this.gainValue = document.getElementById('gainValue');
                 this.exportBtn = document.getElementById('exportBtn');
+                this.ttsCheckbox = document.getElementById('ttsEnabled');
 
                 this.startBtn.addEventListener('click', () => this.startRecording());
                 this.stopBtn.addEventListener('click', () => this.stopRecording());
                 this.exportBtn.addEventListener('click', () => this.exportSession());
+
+                // TTS toggle
+                this.ttsCheckbox.addEventListener('change', (e) => {
+                    this.ttsEnabled = e.target.checked;
+                    console.log(`🔊 Text-to-Speech ${this.ttsEnabled ? 'enabled' : 'disabled'}`);
+
+                    // Stop any currently playing speech
+                    if (!this.ttsEnabled && this.speechSynthesis) {
+                        this.speechSynthesis.cancel();
+                    }
+                });
 
                 // Gain control slider
                 this.gainSlider.addEventListener('input', (e) => {
@@ -1255,6 +1281,11 @@
                 this.stopSummaryTimer();
                 this.updateStatus('Ready to start', 'ready');
                 this.interimText.textContent = 'Waiting for speech...';
+
+                // Stop any playing speech
+                if (this.speechSynthesis) {
+                    this.speechSynthesis.cancel();
+                }
             }
 
             addTranslation(data) {
@@ -1274,6 +1305,9 @@
 
                     // Enable export button once we have translations
                     this.exportBtn.disabled = false;
+
+                    // Speak final translations aloud (not interim)
+                    this.speakTranslation(data.translated, this.targetLanguage.value);
                 }
 
                 // Q&A Mode: Track interim translations for summary
@@ -1428,6 +1462,69 @@
                 URL.revokeObjectURL(url);
 
                 console.log(`✅ Session exported: ${filename} (${this.sessionTranslations.length} translations)`);
+            }
+
+            speakTranslation(text, targetLanguage) {
+                if (!this.ttsEnabled || !this.speechSynthesis) {
+                    return;
+                }
+
+                // Cancel any currently playing speech
+                this.speechSynthesis.cancel();
+
+                // Create utterance
+                const utterance = new SpeechSynthesisUtterance(text);
+                this.currentUtterance = utterance;
+
+                // Map target language codes to speech synthesis language codes
+                const langMap = {
+                    'en': 'en-US',
+                    'en-US': 'en-US',
+                    'es': 'es-ES',
+                    'fr': 'fr-FR',
+                    'de': 'de-DE',
+                    'it': 'it-IT',
+                    'pt': 'pt-PT',
+                    'ru': 'ru-RU',
+                    'ja': 'ja-JP',
+                    'ko': 'ko-KR',
+                    'zh': 'zh-CN',
+                    'ar': 'ar-SA',
+                    'hi': 'hi-IN',
+                    'ro': 'ro-RO'
+                };
+
+                // Set language for voice
+                const speechLang = langMap[targetLanguage] || targetLanguage || 'en-US';
+                utterance.lang = speechLang;
+
+                // Try to find a voice that matches the target language
+                const voices = this.speechSynthesis.getVoices();
+                const matchingVoice = voices.find(voice =>
+                    voice.lang.startsWith(speechLang.split('-')[0])
+                );
+
+                if (matchingVoice) {
+                    utterance.voice = matchingVoice;
+                    console.log(`🔊 Using voice: ${matchingVoice.name} (${matchingVoice.lang})`);
+                }
+
+                // Speech settings
+                utterance.rate = 0.9; // Slightly slower for clarity
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                // Event handlers
+                utterance.onstart = () => {
+                    console.log(`🔊 Speaking: "${text}"`);
+                };
+
+                utterance.onerror = (event) => {
+                    console.error('🔊 Speech synthesis error:', event.error);
+                };
+
+                // Speak
+                this.speechSynthesis.speak(utterance);
             }
 
             updateAudioLevel(level) {
