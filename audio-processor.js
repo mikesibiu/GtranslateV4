@@ -7,8 +7,9 @@ class AudioProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
         this.isRecording = true;
-        this.buffer = [];
         this.bufferSize = 4096; // Accumulate to 4096 samples before sending
+        this.buffer = new Float32Array(this.bufferSize); // Pre-allocated typed array
+        this.bufferIndex = 0;
 
         // Listen for messages from main thread
         this.port.onmessage = (event) => {
@@ -30,37 +31,44 @@ class AudioProcessor extends AudioWorkletProcessor {
 
         const inputData = input[0]; // First channel (mono)
 
-        // Accumulate samples
+        // Accumulate samples into pre-allocated buffer
         for (let i = 0; i < inputData.length; i++) {
-            this.buffer.push(inputData[i]);
-        }
+            this.buffer[this.bufferIndex++] = inputData[i];
 
-        // Send when buffer is full
-        if (this.buffer.length >= this.bufferSize) {
-            // Calculate audio level for visualization
-            let maxLevel = 0;
-            for (let i = 0; i < this.buffer.length; i++) {
-                maxLevel = Math.max(maxLevel, Math.abs(this.buffer[i]));
+            // Send when buffer is full
+            if (this.bufferIndex >= this.bufferSize) {
+                this.sendBuffer();
+                this.bufferIndex = 0; // Reset index
             }
-
-            // Convert Float32 to Int16
-            const int16Data = new Int16Array(this.buffer.length);
-            for (let i = 0; i < this.buffer.length; i++) {
-                const s = Math.max(-1, Math.min(1, this.buffer[i]));
-                int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-            }
-
-            // Send audio data and level to main thread
-            this.port.postMessage({
-                audioData: int16Data.buffer,
-                level: maxLevel  // 0.0 to 1.0
-            }, [int16Data.buffer]); // Transfer ownership for performance
-
-            // Clear buffer
-            this.buffer = [];
         }
 
         return true; // Keep processor alive
+    }
+
+    sendBuffer() {
+        // Single-pass: calculate level AND convert to Int16
+        let maxLevel = 0;
+        const int16Data = new Int16Array(this.bufferSize);
+
+        for (let i = 0; i < this.bufferSize; i++) {
+            const sample = this.buffer[i];
+            const absSample = Math.abs(sample);
+
+            // Update max level (avoid function call overhead)
+            if (absSample > maxLevel) {
+                maxLevel = absSample;
+            }
+
+            // Convert to Int16 (clamp inline for performance)
+            const clamped = sample < -1 ? -1 : (sample > 1 ? 1 : sample);
+            int16Data[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
+        }
+
+        // Send audio data and level to main thread
+        this.port.postMessage({
+            audioData: int16Data.buffer,
+            level: maxLevel  // 0.0 to 1.0
+        }, [int16Data.buffer]); // Transfer ownership for performance
     }
 }
 

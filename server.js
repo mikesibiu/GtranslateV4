@@ -703,22 +703,43 @@ io.on('connection', (socket) => {
     let audioRateLimitWindow = Date.now();
     const MAX_AUDIO_BYTES_PER_SECOND = 1024 * 1024 * 2; // 2MB/sec max
 
+    // Detect audio format once for efficiency
+    let audioDataFormat = null;
+
     socket.on('audio-data', (audioData) => {
         if (recognizeStream && sessionActive && recognizeStream.writable) {
             try {
                 updateActivity(); // Reset inactivity timer on audio
                 audioChunkCount++;
 
-                // Convert to Buffer if needed (Socket.IO sends as ArrayBuffer or Buffer)
+                // Detect format once, reuse for all subsequent chunks
+                if (!audioDataFormat) {
+                    if (audioData instanceof Buffer) {
+                        audioDataFormat = 'buffer';
+                    } else if (audioData instanceof ArrayBuffer) {
+                        audioDataFormat = 'arraybuffer';
+                    } else if (audioData.buffer) {
+                        audioDataFormat = 'typed-array';
+                    } else {
+                        audioDataFormat = 'unknown';
+                    }
+                    logger.info(`📊 Audio format detected: ${audioDataFormat}`, { clientId });
+                }
+
+                // Fast path based on detected format
                 let buffer;
-                if (audioData instanceof Buffer) {
-                    buffer = audioData;
-                } else if (audioData instanceof ArrayBuffer) {
-                    buffer = Buffer.from(audioData);
-                } else if (audioData.buffer) {
-                    buffer = Buffer.from(audioData.buffer);
-                } else {
-                    buffer = Buffer.from(audioData);
+                switch (audioDataFormat) {
+                    case 'buffer':
+                        buffer = audioData;
+                        break;
+                    case 'arraybuffer':
+                        buffer = Buffer.from(audioData);
+                        break;
+                    case 'typed-array':
+                        buffer = Buffer.from(audioData.buffer);
+                        break;
+                    default:
+                        buffer = Buffer.from(audioData);
                 }
 
                 // Validate chunk size to prevent DoS attacks
