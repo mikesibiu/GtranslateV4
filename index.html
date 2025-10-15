@@ -648,6 +648,14 @@
                 </div>
             </div>
 
+            <div class="control-row" id="ttsRateContainer" style="display: none;">
+                <div class="control-group">
+                    <label for="ttsRate">Speech Rate: <span id="ttsRateValue">1.0x</span></label>
+                    <input type="range" id="ttsRate" min="0.8" max="1.4" step="0.1" value="1.0"
+                           style="width: 100%; cursor: pointer;">
+                </div>
+            </div>
+
             <div class="button-group">
                 <button id="startBtn" class="btn btn-start">
                     <span class="btn-text-full">🎤 Start Listening</span>
@@ -707,13 +715,18 @@
 
     <script>
         // Unicode sanitization function to prevent formatting-based attacks
+        // Compile regex once for performance
+        const SANITIZE_REGEX = /[\u202E\u202D\u202C\u200E\u200F\u200B-\u200D\uFEFF\u0000-\u001F\u007F-\u009F]/g;
+
         function sanitizeText(text) {
             if (!text) return '';
-            return text
-                .replace(/[\u202E\u202D\u202C\u200E\u200F]/g, '') // Remove RTL/LTR override characters
-                .replace(/[\u200B-\u200D\uFEFF]/g, '') // Remove zero-width characters
-                .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
-                .trim();
+            return text.replace(SANITIZE_REGEX, '').trim();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         class GTranslateV4Client {
@@ -733,6 +746,7 @@
                 this.summaryInterval = null; // For Q&A mode summary interval
                 this.summaryTimer = null; // Timer for creating summaries
                 this.interimTranslations = []; // Track interim translations for Q&A mode
+                this.interimElements = new Set(); // Track interim DOM elements for fast removal
                 this.audioWorkletLoaded = false; // Prevent loading module multiple times
 
                 // Network quality monitoring
@@ -742,11 +756,24 @@
 
                 // Session export data
                 this.sessionTranslations = [];
+                this.MAX_SESSION_TRANSLATIONS = 1000; // Prevent memory exhaustion
 
                 // Text-to-Speech
                 this.ttsEnabled = false;
                 this.speechSynthesis = window.speechSynthesis;
                 this.currentUtterance = null;
+                this.ttsQueue = []; // Queue for pending translations to speak
+                this.isSpeaking = false; // Track if currently speaking
+                this.speechRate = 1.0; // Default speech rate
+                this.voiceCache = new Map(); // Cache voices by language for fast lookup
+
+                // Initialize voice cache
+                if (this.speechSynthesis) {
+                    this.speechSynthesis.addEventListener('voiceschanged', () => {
+                        this.buildVoiceCache();
+                    });
+                    this.buildVoiceCache();
+                }
 
                 // Check browser compatibility on startup
                 this.checkBrowserCompatibility();
@@ -828,6 +855,9 @@
                 this.gainValue = document.getElementById('gainValue');
                 this.exportBtn = document.getElementById('exportBtn');
                 this.ttsCheckbox = document.getElementById('ttsEnabled');
+                this.ttsRateContainer = document.getElementById('ttsRateContainer');
+                this.ttsRateSlider = document.getElementById('ttsRate');
+                this.ttsRateValue = document.getElementById('ttsRateValue');
 
                 this.startBtn.addEventListener('click', () => this.startRecording());
                 this.stopBtn.addEventListener('click', () => this.stopRecording());
@@ -838,10 +868,22 @@
                     this.ttsEnabled = e.target.checked;
                     console.log(`🔊 Text-to-Speech ${this.ttsEnabled ? 'enabled' : 'disabled'}`);
 
-                    // Stop any currently playing speech
+                    // Show/hide rate control
+                    this.ttsRateContainer.style.display = this.ttsEnabled ? 'block' : 'none';
+
+                    // Stop any currently playing speech and clear queue
                     if (!this.ttsEnabled && this.speechSynthesis) {
                         this.speechSynthesis.cancel();
+                        this.ttsQueue = [];
+                        this.isSpeaking = false;
                     }
+                });
+
+                // TTS rate control
+                this.ttsRateSlider.addEventListener('input', (e) => {
+                    this.speechRate = parseFloat(e.target.value);
+                    this.ttsRateValue.textContent = `${this.speechRate.toFixed(1)}x`;
+                    console.log(`🔊 Speech rate set to ${this.speechRate.toFixed(1)}x`);
                 });
 
                 // Gain control slider
@@ -1303,6 +1345,15 @@
                         translated: data.translated
                     });
 
+                    // Prevent memory exhaustion with auto-export
+                    if (this.sessionTranslations.length > this.MAX_SESSION_TRANSLATIONS) {
+                        console.warn(`⚠️ Session translation limit reached (${this.MAX_SESSION_TRANSLATIONS}), auto-exporting oldest 500...`);
+
+                        // Export oldest 500 to file
+                        const oldTranslations = this.sessionTranslations.splice(0, 500);
+                        this.exportPartialSession(oldTranslations);
+                    }
+
                     // Enable export button once we have translations
                     this.exportBtn.disabled = false;
 
@@ -1320,26 +1371,46 @@
 
                 // If this is a final translation (not interim), clear all previous interim translations
                 if (!data.isInterim) {
-                    // Remove all interim (yellow) translations
-                    const interimItems = this.resultsContainer.querySelectorAll('.translation-item.interim');
-                    interimItems.forEach(item => item.remove());
+                    this.clearInterimTranslations();
                 }
 
+                // Use template literals for faster HTML construction
                 const item = document.createElement('div');
                 item.className = data.isInterim ? 'translation-item interim' : 'translation-item';
 
-                const originalDiv = document.createElement('div');
-                originalDiv.className = 'original';
-                originalDiv.textContent = `📝 ${sanitizeText(data.original)}`;
+                item.innerHTML = `
+                    <div class="original">📝 ${escapeHtml(sanitizeText(data.original))}</div>
+                    <div class="translated">💬 ${escapeHtml(sanitizeText(data.translated))}</div>
+                `;
 
-                const translatedDiv = document.createElement('div');
-                translatedDiv.className = 'translated';
-                translatedDiv.textContent = `💬 ${sanitizeText(data.translated)}`;
+                // Track interim elements for fast removal
+                if (data.isInterim) {
+                    this.interimElements.add(item);
+                }
 
-                item.appendChild(originalDiv);
-                item.appendChild(translatedDiv);
+                // Use fragment to batch DOM operations
+                const fragment = document.createDocumentFragment();
+                fragment.appendChild(item);
+                this.resultsContainer.insertBefore(fragment, this.resultsContainer.firstChild);
 
-                this.resultsContainer.insertBefore(item, this.resultsContainer.firstChild);
+                // Limit DOM size to prevent performance degradation
+                const maxItems = 50;
+                while (this.resultsContainer.children.length > maxItems) {
+                    const lastChild = this.resultsContainer.lastChild;
+                    // Remove from interim tracking if applicable
+                    this.interimElements.delete(lastChild);
+                    this.resultsContainer.removeChild(lastChild);
+                }
+            }
+
+            clearInterimTranslations() {
+                // O(n) removal without DOM queries
+                this.interimElements.forEach(element => {
+                    if (element.parentNode) {
+                        element.parentNode.removeChild(element);
+                    }
+                });
+                this.interimElements.clear();
             }
 
             startSessionTimer() {
@@ -1386,25 +1457,20 @@
                 const combinedTranslated = this.interimTranslations.map(t => t.translated).join(' ');
 
                 // Remove all interim (yellow) translations from display
-                const interimItems = this.resultsContainer.querySelectorAll('.translation-item.interim');
-                interimItems.forEach(item => item.remove());
+                this.clearInterimTranslations();
 
                 // Create final summary translation (white)
                 const item = document.createElement('div');
                 item.className = 'translation-item'; // Final translation (not interim)
 
-                const originalDiv = document.createElement('div');
-                originalDiv.className = 'original';
-                originalDiv.textContent = `📝 ${sanitizeText(combinedOriginal)}`;
+                item.innerHTML = `
+                    <div class="original">📝 ${escapeHtml(sanitizeText(combinedOriginal))}</div>
+                    <div class="translated">💬 ${escapeHtml(sanitizeText(combinedTranslated))}</div>
+                `;
 
-                const translatedDiv = document.createElement('div');
-                translatedDiv.className = 'translated';
-                translatedDiv.textContent = `💬 ${sanitizeText(combinedTranslated)}`;
-
-                item.appendChild(originalDiv);
-                item.appendChild(translatedDiv);
-
-                this.resultsContainer.insertBefore(item, this.resultsContainer.firstChild);
+                const fragment = document.createDocumentFragment();
+                fragment.appendChild(item);
+                this.resultsContainer.insertBefore(fragment, this.resultsContainer.firstChild);
 
                 // Clear interim translations array
                 this.interimTranslations = [];
@@ -1456,12 +1522,46 @@
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = filename;
+                a.style.display = 'none';
                 document.body.appendChild(a);
                 a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+
+                // Cleanup with delay to ensure download starts
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
 
                 console.log(`✅ Session exported: ${filename} (${this.sessionTranslations.length} translations)`);
+            }
+
+            exportPartialSession(translations) {
+                const exportData = {
+                    sessionDate: new Date().toISOString(),
+                    translationCount: translations.length,
+                    isPartialExport: true,
+                    note: 'Auto-exported due to reaching session limit',
+                    translations: translations
+                };
+
+                const dateStr = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+                const filename = `gtranslate-partial-${dateStr}.json`;
+
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+
+                console.log(`📦 Partial session auto-exported: ${filename} (${translations.length} translations)`);
             }
 
             speakTranslation(text, targetLanguage) {
@@ -1469,8 +1569,48 @@
                     return;
                 }
 
-                // Cancel any currently playing speech
-                this.speechSynthesis.cancel();
+                // Add to queue
+                this.ttsQueue.push({ text, targetLanguage });
+                console.log(`📝 Added to TTS queue (${this.ttsQueue.length} pending)`);
+
+                // Start processing queue if not already speaking
+                if (!this.isSpeaking) {
+                    this.processNextInQueue();
+                }
+            }
+
+            buildVoiceCache() {
+                this.voiceCache.clear();
+                const voices = this.speechSynthesis.getVoices();
+
+                // Group voices by language code for instant O(1) lookup
+                voices.forEach(voice => {
+                    const baseLang = voice.lang.split('-')[0];
+
+                    if (!this.voiceCache.has(voice.lang)) {
+                        this.voiceCache.set(voice.lang, []);
+                    }
+                    if (!this.voiceCache.has(baseLang)) {
+                        this.voiceCache.set(baseLang, []);
+                    }
+
+                    this.voiceCache.get(voice.lang).push(voice);
+                    this.voiceCache.get(baseLang).push(voice);
+                });
+
+                console.log(`✅ Voice cache built: ${this.voiceCache.size} language variants, ${voices.length} total voices`);
+            }
+
+            processNextInQueue() {
+                // Check if queue is empty
+                if (this.ttsQueue.length === 0) {
+                    this.isSpeaking = false;
+                    return;
+                }
+
+                // Get next item from queue
+                const { text, targetLanguage } = this.ttsQueue.shift();
+                this.isSpeaking = true;
 
                 // Create utterance
                 const utterance = new SpeechSynthesisUtterance(text);
@@ -1498,29 +1638,45 @@
                 const speechLang = langMap[targetLanguage] || targetLanguage || 'en-US';
                 utterance.lang = speechLang;
 
-                // Try to find a voice that matches the target language
-                const voices = this.speechSynthesis.getVoices();
-                const matchingVoice = voices.find(voice =>
-                    voice.lang.startsWith(speechLang.split('-')[0])
-                );
+                // O(1) lookup from voice cache instead of O(n) search
+                const langVoices = this.voiceCache.get(speechLang) ||
+                                   this.voiceCache.get(speechLang.split('-')[0]) ||
+                                   [];
 
-                if (matchingVoice) {
-                    utterance.voice = matchingVoice;
-                    console.log(`🔊 Using voice: ${matchingVoice.name} (${matchingVoice.lang})`);
+                // Find best voice from pre-filtered list
+                const preferredVoice =
+                    langVoices.find(voice =>
+                        voice.name.includes('Premium') ||
+                        voice.name.includes('Enhanced') ||
+                        voice.name.includes('Neural') ||
+                        voice.localService === false
+                    ) || langVoices[0];  // Fallback to first match
+
+                if (preferredVoice) {
+                    utterance.voice = preferredVoice;
+                    console.log(`🔊 Using voice: ${preferredVoice.name} (${preferredVoice.lang})`);
                 }
 
-                // Speech settings
-                utterance.rate = 0.9; // Slightly slower for clarity
+                // Speech settings - use user-configured rate
+                utterance.rate = this.speechRate;
                 utterance.pitch = 1.0;
                 utterance.volume = 1.0;
 
                 // Event handlers
                 utterance.onstart = () => {
-                    console.log(`🔊 Speaking: "${text}"`);
+                    console.log(`🔊 Speaking (${this.ttsQueue.length} in queue): "${text.substring(0, 50)}..."`);
+                };
+
+                utterance.onend = () => {
+                    console.log(`✅ Finished speaking`);
+                    // Process next item in queue
+                    this.processNextInQueue();
                 };
 
                 utterance.onerror = (event) => {
                     console.error('🔊 Speech synthesis error:', event.error);
+                    // Continue to next item even on error
+                    this.processNextInQueue();
                 };
 
                 // Speak
