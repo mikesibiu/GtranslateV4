@@ -1333,10 +1333,33 @@
             }
 
             addTranslation(data) {
-                // In EarBuds mode, accept ALL translations (both 10s forced and natural finals)
-                // Don't filter out interim because server's 10s forced translations are marked as interim
-                // In Talks/QA modes, we still want to show interim translations anyway
+                // EarBuds mode special handling: only display/speak every 10 seconds
+                // Skip displaying the translation-result events entirely - rely only on visual feedback
+                if (this.currentMode === 'earbuds') {
+                    // Speak ALL translations in EarBuds mode (including 10s interim forced translations)
+                    this.speakTranslation(data.translated, this.targetLanguage.value);
 
+                    // Update stats
+                    this.translationCount++;
+                    this.wordsTranslated += data.original.split(/\s+/).length;
+                    this.translationCountEl.textContent = `${this.translationCount} translations`;
+                    this.wordsTranslatedEl.textContent = this.wordsTranslated;
+
+                    // Store for export (only true finals)
+                    if (!data.isInterim) {
+                        this.sessionTranslations.push({
+                            timestamp: new Date().toISOString(),
+                            original: data.original,
+                            translated: data.translated
+                        });
+                        this.exportBtn.disabled = false;
+                    }
+
+                    // Don't display anything on screen in EarBuds mode - it's audio only
+                    return;
+                }
+
+                // Normal mode (Talks/Q&A): Display everything as before
                 this.translationCount++;
                 this.wordsTranslated += data.original.split(/\s+/).length;
 
@@ -1363,7 +1386,7 @@
                     // Enable export button once we have translations
                     this.exportBtn.disabled = false;
 
-                    // Speak final translations aloud (not interim)
+                    // Speak final translations aloud (not interim) - only in non-EarBuds modes if TTS enabled
                     this.speakTranslation(data.translated, this.targetLanguage.value);
                 }
 
