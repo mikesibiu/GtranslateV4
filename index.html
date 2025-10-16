@@ -723,6 +723,18 @@
             </div>
         </div>
 
+        <!-- Voice Selection (for testing) -->
+        <div class="control-row" id="voiceSelectionContainer" style="display: none; margin-top: 15px;">
+            <label for="voiceSelect" style="font-size: 0.9em; margin-bottom: 5px; display: block;">🎤 Voice Selection:</label>
+            <select id="voiceSelect" class="voice-select" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ddd;">
+                <option value="auto">Auto (Best Quality)</option>
+                <option value="google-natural">Google Natural/Neural</option>
+                <option value="apple-premium">Apple Premium (Siri)</option>
+                <option value="cloud">Any Cloud Voice</option>
+                <option value="local">Local Device Voice</option>
+            </select>
+        </div>
+
         <div class="interim-box">
             <div class="interim-label">INTERIM RESULT:</div>
             <div id="interimText" class="interim-text">Waiting for speech...</div>
@@ -821,6 +833,7 @@
                 this.ttsQueue = []; // Queue for pending translations to speak
                 this.isSpeaking = false; // Track if currently speaking
                 this.speechRate = 0.9; // Default speech rate (slower = less anxious/rushed)
+                this.voicePreference = 'auto'; // Voice selection preference
                 this.voiceCache = new Map(); // Cache voices by language for fast lookup
 
                 // Initialize voice cache
@@ -910,6 +923,8 @@
                 this.exportBtn = document.getElementById('exportBtn');
                 this.ttsRateContainer = document.getElementById('ttsRateContainer');
                 this.ttsRateSelect = document.getElementById('ttsRate');
+                this.voiceSelectionContainer = document.getElementById('voiceSelectionContainer');
+                this.voiceSelect = document.getElementById('voiceSelect');
 
                 this.startBtn.addEventListener('click', () => this.startRecording());
                 this.stopBtn.addEventListener('click', () => this.stopRecording());
@@ -919,6 +934,12 @@
                 this.ttsRateSelect.addEventListener('change', (e) => {
                     this.speechRate = parseFloat(e.target.value);
                     console.log(`🔊 Speech rate set to ${this.speechRate.toFixed(1)}x`);
+                });
+
+                // Voice selection control
+                this.voiceSelect.addEventListener('change', (e) => {
+                    this.voicePreference = e.target.value;
+                    console.log(`🎤 Voice preference set to: ${this.voicePreference}`);
                 });
             }
 
@@ -1078,9 +1099,12 @@
                         const enableTTS = option.dataset.enableTts === 'true';
                         this.ttsEnabled = enableTTS;
 
-                        // Show/hide TTS rate control based on TTS state
+                        // Show/hide TTS rate control and voice selection based on TTS state
                         if (this.ttsRateContainer) {
                             this.ttsRateContainer.style.display = enableTTS ? 'flex' : 'none';
+                        }
+                        if (this.voiceSelectionContainer) {
+                            this.voiceSelectionContainer.style.display = enableTTS ? 'block' : 'none';
                         }
 
                         // Stop any currently playing speech if TTS is being disabled
@@ -1719,26 +1743,61 @@
                                    this.voiceCache.get(speechLang.split('-')[0]) ||
                                    [];
 
-                // Find best voice from pre-filtered list - prioritize most natural sounding
-                const preferredVoice =
-                    // Priority 1: Google high-quality voices (most natural)
-                    langVoices.find(voice =>
-                        voice.name.includes('Google') &&
-                        (voice.name.includes('Natural') || voice.name.includes('Wavenet') || voice.name.includes('Neural'))
-                    ) ||
-                    // Priority 2: Apple high-quality voices (Siri-quality)
-                    langVoices.find(voice =>
-                        (voice.name.includes('Samantha') ||
-                         voice.name.includes('Karen') ||
-                         voice.name.includes('Tessa') ||
-                         voice.name.includes('Alex') ||
-                         voice.name.includes('Premium') ||
-                         voice.name.includes('Enhanced'))
-                    ) ||
-                    // Priority 3: Any cloud/remote voice
-                    langVoices.find(voice => voice.localService === false) ||
-                    // Priority 4: Any local voice with correct language
-                    langVoices[0];
+                // Find best voice based on user preference
+                let preferredVoice;
+
+                switch(this.voicePreference) {
+                    case 'google-natural':
+                        preferredVoice = langVoices.find(voice =>
+                            voice.name.includes('Google') &&
+                            (voice.name.includes('Natural') || voice.name.includes('Wavenet') || voice.name.includes('Neural'))
+                        );
+                        break;
+                    case 'apple-premium':
+                        preferredVoice = langVoices.find(voice =>
+                            (voice.name.includes('Samantha') ||
+                             voice.name.includes('Karen') ||
+                             voice.name.includes('Tessa') ||
+                             voice.name.includes('Alex') ||
+                             voice.name.includes('Premium') ||
+                             voice.name.includes('Enhanced'))
+                        );
+                        break;
+                    case 'cloud':
+                        preferredVoice = langVoices.find(voice => voice.localService === false);
+                        break;
+                    case 'local':
+                        preferredVoice = langVoices.find(voice => voice.localService === true);
+                        break;
+                    case 'auto':
+                    default:
+                        // Auto mode - prioritize most natural sounding
+                        preferredVoice =
+                            // Priority 1: Google high-quality voices (most natural)
+                            langVoices.find(voice =>
+                                voice.name.includes('Google') &&
+                                (voice.name.includes('Natural') || voice.name.includes('Wavenet') || voice.name.includes('Neural'))
+                            ) ||
+                            // Priority 2: Apple high-quality voices (Siri-quality)
+                            langVoices.find(voice =>
+                                (voice.name.includes('Samantha') ||
+                                 voice.name.includes('Karen') ||
+                                 voice.name.includes('Tessa') ||
+                                 voice.name.includes('Alex') ||
+                                 voice.name.includes('Premium') ||
+                                 voice.name.includes('Enhanced'))
+                            ) ||
+                            // Priority 3: Any cloud/remote voice
+                            langVoices.find(voice => voice.localService === false) ||
+                            // Priority 4: Any local voice with correct language
+                            langVoices[0];
+                        break;
+                }
+
+                // Fallback if preference didn't find a voice
+                if (!preferredVoice && langVoices.length > 0) {
+                    preferredVoice = langVoices[0];
+                }
 
                 if (preferredVoice) {
                     utterance.voice = preferredVoice;
@@ -1750,9 +1809,12 @@
                 utterance.pitch = 0.95; // Slightly lower pitch for calmer, less anxious sound (1.0 can sound stressed)
                 utterance.volume = 1.0; // Note: Browser-controlled, use device volume to adjust
 
+                console.log(`🔊 TTS Settings: rate=${utterance.rate}, pitch=${utterance.pitch}, volume=${utterance.volume}`);
+
                 // Event handlers
                 utterance.onstart = () => {
                     console.log(`🔊 Speaking (${this.ttsQueue.length} in queue): "${text.substring(0, 50)}..."`);
+                    console.log(`🔊 Actual utterance rate: ${utterance.rate}, pitch: ${utterance.pitch}`);
                 };
 
                 utterance.onend = () => {
