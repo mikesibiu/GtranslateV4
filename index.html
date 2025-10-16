@@ -711,10 +711,13 @@
                 <div class="control-group-inline" id="ttsRateContainer" style="display: none;">
                     <label for="ttsRate" style="font-size: 0.9em; margin-right: 5px; margin-bottom: 0;">Speech Rate:</label>
                     <select id="ttsRate" class="speed-select" aria-label="Adjust translation speech rate">
+                        <option value="0.7">0.7x</option>
+                        <option value="0.8">0.8x</option>
                         <option value="0.9">0.9x</option>
                         <option value="1.0" selected>1.0x</option>
                         <option value="1.1">1.1x</option>
                         <option value="1.2">1.2x</option>
+                        <option value="1.3">1.3x</option>
                     </select>
                 </div>
             </div>
@@ -726,9 +729,10 @@
         </div>
 
         <div class="gain-control-container">
-            <div class="gain-control-label">🔊 AUDIO GAIN CONTROL</div>
+            <div class="gain-control-label">🔊 INPUT AUDIO GAIN</div>
             <input type="range" id="gainSlider" class="gain-slider" min="1" max="20" value="10" step="0.5">
             <span class="gain-value">Gain: <span id="gainValue">10.0</span>x</span>
+            <div style="font-size: 0.75em; color: #666; margin-top: 5px;">📢 TTS volume: Use device/earbud volume controls</div>
         </div>
 
         <div class="audio-level-container">
@@ -1757,10 +1761,10 @@
                     console.log(`🔊 Using voice: ${preferredVoice.name} (${preferredVoice.lang})`);
                 }
 
-                // Speech settings - use user-configured rate with slight pitch variation for naturalness
+                // Speech settings - use user-configured rate
                 utterance.rate = this.speechRate;
-                utterance.pitch = 1.05; // Slightly higher pitch sounds more natural
-                utterance.volume = 1.0;
+                utterance.pitch = 1.0; // Natural pitch (1.05 was too robotic)
+                utterance.volume = 1.0; // Note: Browser-controlled, use device volume to adjust
 
                 // Event handlers
                 utterance.onstart = () => {
