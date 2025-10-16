@@ -1729,6 +1729,9 @@
 
                 const voices = this.speechSynthesis.getVoices();
 
+                // Log ALL available voices for debugging
+                console.log(`🎤 ALL VOICES (${voices.length} total):`, voices.map(v => `${v.name} [${v.lang}] ${v.localService ? 'Local' : 'Cloud'}`));
+
                 // Get current target language if available
                 const targetLang = this.targetLanguage?.value || 'en';
 
@@ -1738,44 +1741,20 @@
                 );
 
                 console.log(`🎤 Found ${relevantVoices.length} voices for language: ${targetLang}`);
+                console.log(`🎤 Filtered voices:`, relevantVoices.map(v => `${v.name} [${v.lang}]`));
 
                 // Clear existing options except "Auto"
                 this.voiceSelect.innerHTML = '<option value="auto">Auto (Best Quality)</option>';
 
-                // Add top 4 best quality voices
-                const topVoices = [];
-
-                // Priority 1: Google Neural/Natural
-                const googleVoice = relevantVoices.find(v =>
-                    v.name.includes('Google') &&
-                    (v.name.includes('Natural') || v.name.includes('Neural') || v.name.includes('Wavenet'))
-                );
-                if (googleVoice) topVoices.push(googleVoice);
-
-                // Priority 2: Apple Premium/Enhanced
-                const appleVoice = relevantVoices.find(v =>
-                    v.name.includes('Premium') || v.name.includes('Enhanced') ||
-                    v.name.includes('Samantha') || v.name.includes('Alex')
-                );
-                if (appleVoice && !topVoices.includes(appleVoice)) topVoices.push(appleVoice);
-
-                // Priority 3: Any cloud voice
-                const cloudVoice = relevantVoices.find(v => v.localService === false);
-                if (cloudVoice && !topVoices.includes(cloudVoice)) topVoices.push(cloudVoice);
-
-                // Priority 4: Best local voice
-                const localVoice = relevantVoices.find(v => v.localService === true);
-                if (localVoice && !topVoices.includes(localVoice)) topVoices.push(localVoice);
-
-                // Add them to dropdown
-                topVoices.forEach((voice, index) => {
+                // Add ALL relevant voices (not just top 4) so user can see everything
+                relevantVoices.forEach((voice) => {
                     const option = document.createElement('option');
                     option.value = voice.name;
                     option.textContent = `${voice.name} ${voice.localService ? '(Local)' : '(Cloud)'}`;
                     this.voiceSelect.appendChild(option);
                 });
 
-                console.log(`🎤 Populated dropdown with ${topVoices.length} voices:`, topVoices.map(v => v.name));
+                console.log(`🎤 Populated dropdown with ${relevantVoices.length} voices`);
             }
 
             processNextInQueue() {
