@@ -842,6 +842,7 @@
                 this.speechRate = 0.9; // Default speech rate (slower = less anxious/rushed)
                 this.voicePreference = 'auto'; // Voice selection preference
                 this.voiceCache = new Map(); // Cache voices by language for fast lookup
+                this.lastSpokenText = ''; // Track last spoken text to prevent duplicates
 
                 // Initialize voice cache
                 if (this.speechSynthesis) {
@@ -1689,9 +1690,27 @@
                     return;
                 }
 
+                // Normalize text for comparison (trim whitespace, lowercase)
+                const normalizedText = text.trim().toLowerCase();
+
+                // Skip if this is a duplicate of the last spoken text
+                if (normalizedText === this.lastSpokenText) {
+                    console.log(`⏭️ Skipping duplicate: "${text.substring(0, 50)}..."`);
+                    return;
+                }
+
+                // Skip if already in queue
+                const alreadyInQueue = this.ttsQueue.some(item =>
+                    item.text.trim().toLowerCase() === normalizedText
+                );
+                if (alreadyInQueue) {
+                    console.log(`⏭️ Already in queue, skipping: "${text.substring(0, 50)}..."`);
+                    return;
+                }
+
                 // Add to queue
                 this.ttsQueue.push({ text, targetLanguage });
-                console.log(`📝 Added to TTS queue (${this.ttsQueue.length} pending)`);
+                console.log(`📝 Added to TTS queue (${this.ttsQueue.length} pending): "${text.substring(0, 50)}..."`);
 
                 // Start processing queue if not already speaking
                 if (!this.isSpeaking) {
@@ -1767,6 +1786,9 @@
                 // Get next item from queue
                 const { text, targetLanguage } = this.ttsQueue.shift();
                 this.isSpeaking = true;
+
+                // Track this as the last spoken text (for duplicate detection)
+                this.lastSpokenText = text.trim().toLowerCase();
 
                 // Create utterance
                 const utterance = new SpeechSynthesisUtterance(text);
