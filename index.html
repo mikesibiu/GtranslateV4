@@ -1699,6 +1699,63 @@
                 });
 
                 console.log(`✅ Voice cache built: ${this.voiceCache.size} language variants, ${voices.length} total voices`);
+
+                // Update voice dropdown with available voices
+                this.populateVoiceDropdown();
+            }
+
+            populateVoiceDropdown() {
+                if (!this.voiceSelect) return;
+
+                const voices = this.speechSynthesis.getVoices();
+
+                // Get current target language if available
+                const targetLang = this.targetLanguage?.value || 'en';
+
+                // Filter voices for current language
+                const relevantVoices = voices.filter(v =>
+                    v.lang.startsWith(targetLang) || v.lang.split('-')[0] === targetLang
+                );
+
+                console.log(`🎤 Found ${relevantVoices.length} voices for language: ${targetLang}`);
+
+                // Clear existing options except "Auto"
+                this.voiceSelect.innerHTML = '<option value="auto">Auto (Best Quality)</option>';
+
+                // Add top 4 best quality voices
+                const topVoices = [];
+
+                // Priority 1: Google Neural/Natural
+                const googleVoice = relevantVoices.find(v =>
+                    v.name.includes('Google') &&
+                    (v.name.includes('Natural') || v.name.includes('Neural') || v.name.includes('Wavenet'))
+                );
+                if (googleVoice) topVoices.push(googleVoice);
+
+                // Priority 2: Apple Premium/Enhanced
+                const appleVoice = relevantVoices.find(v =>
+                    v.name.includes('Premium') || v.name.includes('Enhanced') ||
+                    v.name.includes('Samantha') || v.name.includes('Alex')
+                );
+                if (appleVoice && !topVoices.includes(appleVoice)) topVoices.push(appleVoice);
+
+                // Priority 3: Any cloud voice
+                const cloudVoice = relevantVoices.find(v => v.localService === false);
+                if (cloudVoice && !topVoices.includes(cloudVoice)) topVoices.push(cloudVoice);
+
+                // Priority 4: Best local voice
+                const localVoice = relevantVoices.find(v => v.localService === true);
+                if (localVoice && !topVoices.includes(localVoice)) topVoices.push(localVoice);
+
+                // Add them to dropdown
+                topVoices.forEach((voice, index) => {
+                    const option = document.createElement('option');
+                    option.value = voice.name;
+                    option.textContent = `${voice.name} ${voice.localService ? '(Local)' : '(Cloud)'}`;
+                    this.voiceSelect.appendChild(option);
+                });
+
+                console.log(`🎤 Populated dropdown with ${topVoices.length} voices:`, topVoices.map(v => v.name));
             }
 
             processNextInQueue() {
@@ -1746,62 +1803,48 @@
                 // Find best voice based on user preference
                 let preferredVoice;
 
-                switch(this.voicePreference) {
-                    case 'google-natural':
-                        preferredVoice = langVoices.find(voice =>
+                if (this.voicePreference === 'auto') {
+                    // Auto mode - prioritize most natural sounding
+                    preferredVoice =
+                        // Priority 1: Google high-quality voices (most natural)
+                        langVoices.find(voice =>
                             voice.name.includes('Google') &&
                             (voice.name.includes('Natural') || voice.name.includes('Wavenet') || voice.name.includes('Neural'))
-                        );
-                        break;
-                    case 'apple-premium':
-                        preferredVoice = langVoices.find(voice =>
+                        ) ||
+                        // Priority 2: Apple high-quality voices (Siri-quality)
+                        langVoices.find(voice =>
                             (voice.name.includes('Samantha') ||
                              voice.name.includes('Karen') ||
                              voice.name.includes('Tessa') ||
                              voice.name.includes('Alex') ||
                              voice.name.includes('Premium') ||
                              voice.name.includes('Enhanced'))
-                        );
-                        break;
-                    case 'cloud':
-                        preferredVoice = langVoices.find(voice => voice.localService === false);
-                        break;
-                    case 'local':
-                        preferredVoice = langVoices.find(voice => voice.localService === true);
-                        break;
-                    case 'auto':
-                    default:
-                        // Auto mode - prioritize most natural sounding
-                        preferredVoice =
-                            // Priority 1: Google high-quality voices (most natural)
-                            langVoices.find(voice =>
-                                voice.name.includes('Google') &&
-                                (voice.name.includes('Natural') || voice.name.includes('Wavenet') || voice.name.includes('Neural'))
-                            ) ||
-                            // Priority 2: Apple high-quality voices (Siri-quality)
-                            langVoices.find(voice =>
-                                (voice.name.includes('Samantha') ||
-                                 voice.name.includes('Karen') ||
-                                 voice.name.includes('Tessa') ||
-                                 voice.name.includes('Alex') ||
-                                 voice.name.includes('Premium') ||
-                                 voice.name.includes('Enhanced'))
-                            ) ||
-                            // Priority 3: Any cloud/remote voice
-                            langVoices.find(voice => voice.localService === false) ||
-                            // Priority 4: Any local voice with correct language
-                            langVoices[0];
-                        break;
+                        ) ||
+                        // Priority 3: Any cloud/remote voice
+                        langVoices.find(voice => voice.localService === false) ||
+                        // Priority 4: Any local voice with correct language
+                        langVoices[0];
+                } else {
+                    // User selected specific voice by name
+                    const allVoices = this.speechSynthesis.getVoices();
+                    preferredVoice = allVoices.find(v => v.name === this.voicePreference);
+
+                    // Fallback to language-specific voice if exact match not found
+                    if (!preferredVoice) {
+                        preferredVoice = langVoices[0];
+                    }
                 }
 
-                // Fallback if preference didn't find a voice
+                // Final fallback if no voice found
                 if (!preferredVoice && langVoices.length > 0) {
                     preferredVoice = langVoices[0];
                 }
 
                 if (preferredVoice) {
                     utterance.voice = preferredVoice;
-                    console.log(`🔊 Using voice: ${preferredVoice.name} (${preferredVoice.lang})`);
+                    console.log(`🔊 Using voice: ${preferredVoice.name} (${preferredVoice.lang}) - Local: ${preferredVoice.localService}`);
+                } else {
+                    console.warn(`⚠️ No voice found for language: ${speechLang}, using browser default`);
                 }
 
                 // Speech settings - use user-configured rate
