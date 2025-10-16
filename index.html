@@ -735,6 +735,13 @@
             </select>
         </div>
 
+        <!-- Microphone Gain Control -->
+        <div class="control-row" style="margin-top: 15px;">
+            <label for="micGainSlider" style="font-size: 0.9em; margin-bottom: 5px; display: block;">🎤 Microphone Gain: <span id="micGainValue">5.0</span>x</label>
+            <input type="range" id="micGainSlider" min="1" max="15" value="5" step="0.5" style="width: 100%;">
+            <div style="font-size: 0.75em; color: #666; margin-top: 5px;">Adjust if audio level is too low (10-25%) or too high (>100%)</div>
+        </div>
+
         <div class="interim-box">
             <div class="interim-label">INTERIM RESULT:</div>
             <div id="interimText" class="interim-text">Waiting for speech...</div>
@@ -925,6 +932,8 @@
                 this.ttsRateSelect = document.getElementById('ttsRate');
                 this.voiceSelectionContainer = document.getElementById('voiceSelectionContainer');
                 this.voiceSelect = document.getElementById('voiceSelect');
+                this.micGainSlider = document.getElementById('micGainSlider');
+                this.micGainValue = document.getElementById('micGainValue');
 
                 this.startBtn.addEventListener('click', () => this.startRecording());
                 this.stopBtn.addEventListener('click', () => this.stopRecording());
@@ -940,6 +949,16 @@
                 this.voiceSelect.addEventListener('change', (e) => {
                     this.voicePreference = e.target.value;
                     console.log(`🎤 Voice preference set to: ${this.voicePreference}`);
+                });
+
+                // Microphone gain control
+                this.micGainSlider.addEventListener('input', (e) => {
+                    const gain = parseFloat(e.target.value);
+                    this.micGainValue.textContent = gain.toFixed(1);
+                    if (this.gainNode) {
+                        this.gainNode.gain.value = gain;
+                        console.log(`🎤 Microphone gain adjusted to ${gain.toFixed(1)}x`);
+                    }
                 });
             }
 
@@ -1225,10 +1244,11 @@
                     const source = this.audioContext.createMediaStreamSource(this.mediaStream);
                     console.log('🎤 Media stream source created');
 
-                    // Create gain node with default 1.0 gain (no amplification - AGC handles input volume)
+                    // Create gain node with user-configured gain (default 5.0x)
                     this.gainNode = this.audioContext.createGain();
-                    this.gainNode.gain.value = 1.0;
-                    console.log(`🔊 Gain node created (1.0x - AGC handles microphone volume automatically)`);
+                    const gainValue = parseFloat(this.micGainSlider.value);
+                    this.gainNode.gain.value = gainValue;
+                    console.log(`🎤 Gain node created (${gainValue.toFixed(1)}x amplification)`);
 
                     // Try AudioWorklet, fallback to ScriptProcessor
                     let usingWorklet = false;
