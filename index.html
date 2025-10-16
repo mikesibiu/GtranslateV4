@@ -488,9 +488,14 @@
             }
 
             .btn {
-                flex: 1;
-                padding: 10px 12px;
-                font-size: 0.85em;
+                flex: 0 1 auto;
+                padding: 8px 16px;
+                font-size: 0.8em;
+            }
+
+            .btn-compact {
+                padding: 8px 12px;
+                font-size: 0.75em;
             }
 
             /* Show short text on mobile, hide full text */
@@ -609,21 +614,23 @@
 
             /* Speed control mobile adjustments */
             .control-group-inline {
-                width: 100%;
-                margin-top: 8px;
-                padding: 6px 12px;
-                justify-content: center;
-                gap: 8px;
+                width: auto;
+                flex: 0 1 auto;
+                margin-top: 0;
+                padding: 4px 8px;
+                gap: 4px;
             }
 
             .control-group-inline label {
-                font-size: 0.75em !important;
-                margin-right: 3px !important;
+                font-size: 0.7em !important;
+                margin-right: 2px !important;
+                white-space: nowrap;
             }
 
             .speed-select {
-                font-size: 0.8em;
-                padding: 5px 10px;
+                font-size: 0.7em;
+                padding: 4px 8px;
+                min-width: 50px;
             }
         }
     </style>
