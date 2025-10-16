@@ -95,6 +95,35 @@
             display: flex;
             gap: 15px;
             justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .control-group-inline {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            background: #f5f5f5;
+            padding: 8px 15px;
+            border-radius: 25px;
+        }
+
+        .speed-select {
+            padding: 6px 12px;
+            border: 2px solid #667eea;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+            background: white;
+            color: #667eea;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .speed-select:hover {
+            background: #667eea;
+            color: white;
         }
 
         /* Mode Toggle */
@@ -150,6 +179,11 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
+        }
+
+        .btn-compact {
+            padding: 12px 30px;
+            font-size: 1em;
         }
 
         .btn-start {
@@ -572,6 +606,25 @@
             .interim-text {
                 font-size: 0.95em;
             }
+
+            /* Speed control mobile adjustments */
+            .control-group-inline {
+                width: 100%;
+                margin-top: 8px;
+                padding: 6px 12px;
+                justify-content: center;
+                gap: 8px;
+            }
+
+            .control-group-inline label {
+                font-size: 0.75em !important;
+                margin-right: 3px !important;
+            }
+
+            .speed-select {
+                font-size: 0.8em;
+                padding: 5px 10px;
+            }
         }
     </style>
 </head>
@@ -640,22 +693,23 @@
                 </div>
             </div>
 
-            <div class="control-row" id="ttsRateContainer" style="display: none;">
-                <div class="control-group">
-                    <label for="ttsRate">Speech Rate: <span id="ttsRateValue">1.0x</span></label>
-                    <input type="range" id="ttsRate" min="0.8" max="1.4" step="0.1" value="1.0"
-                           style="width: 100%; cursor: pointer;">
-                </div>
-            </div>
-
             <div class="button-group">
-                <button id="startBtn" class="btn btn-start">
-                    <span class="btn-text-full">🎤 Start Listening</span>
+                <button id="startBtn" class="btn btn-start btn-compact">
+                    <span class="btn-text-full">🎤 Start</span>
                     <span class="btn-text-short">🎤 Start</span>
                 </button>
-                <button id="stopBtn" class="btn btn-stop" disabled>
+                <button id="stopBtn" class="btn btn-stop btn-compact" disabled>
                     ⏹️ Stop
                 </button>
+                <div class="control-group-inline" id="ttsRateContainer" style="display: none;">
+                    <label for="ttsRate" style="font-size: 0.9em; margin-right: 5px; margin-bottom: 0;">Speech Rate:</label>
+                    <select id="ttsRate" class="speed-select" aria-label="Adjust translation speech rate">
+                        <option value="0.9">0.9x</option>
+                        <option value="1.0" selected>1.0x</option>
+                        <option value="1.1">1.1x</option>
+                        <option value="1.2">1.2x</option>
+                    </select>
+                </div>
             </div>
         </div>
 
@@ -850,17 +904,15 @@
                 this.gainValue = document.getElementById('gainValue');
                 this.exportBtn = document.getElementById('exportBtn');
                 this.ttsRateContainer = document.getElementById('ttsRateContainer');
-                this.ttsRateSlider = document.getElementById('ttsRate');
-                this.ttsRateValue = document.getElementById('ttsRateValue');
+                this.ttsRateSelect = document.getElementById('ttsRate');
 
                 this.startBtn.addEventListener('click', () => this.startRecording());
                 this.stopBtn.addEventListener('click', () => this.stopRecording());
                 this.exportBtn.addEventListener('click', () => this.exportSession());
 
-                // TTS rate control
-                this.ttsRateSlider.addEventListener('input', (e) => {
+                // TTS rate control (dropdown)
+                this.ttsRateSelect.addEventListener('change', (e) => {
                     this.speechRate = parseFloat(e.target.value);
-                    this.ttsRateValue.textContent = `${this.speechRate.toFixed(1)}x`;
                     console.log(`🔊 Speech rate set to ${this.speechRate.toFixed(1)}x`);
                 });
 
@@ -1033,7 +1085,7 @@
 
                         // Show/hide TTS rate control based on TTS state
                         if (this.ttsRateContainer) {
-                            this.ttsRateContainer.style.display = enableTTS ? 'block' : 'none';
+                            this.ttsRateContainer.style.display = enableTTS ? 'flex' : 'none';
                         }
 
                         // Stop any currently playing speech if TTS is being disabled
