@@ -728,12 +728,8 @@
             <div id="interimText" class="interim-text">Waiting for speech...</div>
         </div>
 
-        <div class="gain-control-container">
-            <div class="gain-control-label">🔊 INPUT AUDIO GAIN</div>
-            <input type="range" id="gainSlider" class="gain-slider" min="1" max="20" value="10" step="0.5">
-            <span class="gain-value">Gain: <span id="gainValue">10.0</span>x</span>
-            <div style="font-size: 0.75em; color: #666; margin-top: 5px;">📢 TTS volume: Use device/earbud volume controls</div>
-        </div>
+        <!-- Gain control removed - AGC (Automatic Gain Control) handles input volume automatically -->
+        <!-- TTS volume is controlled by device physical volume buttons/settings -->
 
         <div class="audio-level-container">
             <div class="audio-level-label">🎤 AUDIO LEVEL:</div>
@@ -911,8 +907,6 @@
                 this.wordsTranslatedEl = document.getElementById('wordsTranslated');
                 this.audioLevelBar = document.getElementById('audioLevelBar');
                 this.audioLevelText = document.getElementById('audioLevelText');
-                this.gainSlider = document.getElementById('gainSlider');
-                this.gainValue = document.getElementById('gainValue');
                 this.exportBtn = document.getElementById('exportBtn');
                 this.ttsRateContainer = document.getElementById('ttsRateContainer');
                 this.ttsRateSelect = document.getElementById('ttsRate');
@@ -925,16 +919,6 @@
                 this.ttsRateSelect.addEventListener('change', (e) => {
                     this.speechRate = parseFloat(e.target.value);
                     console.log(`🔊 Speech rate set to ${this.speechRate.toFixed(1)}x`);
-                });
-
-                // Gain control slider
-                this.gainSlider.addEventListener('input', (e) => {
-                    const gain = parseFloat(e.target.value);
-                    this.gainValue.textContent = gain.toFixed(1);
-                    if (this.gainNode) {
-                        this.gainNode.gain.value = gain;
-                        console.log(`🔊 Gain adjusted to ${gain.toFixed(1)}x`);
-                    }
                 });
             }
 
@@ -1217,11 +1201,10 @@
                     const source = this.audioContext.createMediaStreamSource(this.mediaStream);
                     console.log('🎤 Media stream source created');
 
-                    // Create gain node to amplify system audio (BlackHole is often quiet)
+                    // Create gain node with default 1.0 gain (no amplification - AGC handles input volume)
                     this.gainNode = this.audioContext.createGain();
-                    const currentGain = parseFloat(this.gainSlider.value);
-                    this.gainNode.gain.value = currentGain;
-                    console.log(`🔊 Gain node created (${currentGain}x amplification)`);
+                    this.gainNode.gain.value = 1.0;
+                    console.log(`🔊 Gain node created (1.0x - AGC handles microphone volume automatically)`);
 
                     // Try AudioWorklet, fallback to ScriptProcessor
                     let usingWorklet = false;
@@ -1309,10 +1292,11 @@
                         };
                     }
 
-                    // Connect: source → gain → processor → destination
+                    // Connect: source → gain → processor
+                    // NOTE: Do NOT connect to audioContext.destination - that routes mic audio to speakers/earbuds!
                     source.connect(this.gainNode);
                     this.gainNode.connect(this.processor);
-                    this.processor.connect(this.audioContext.destination);
+                    // Processor sends data via WebSocket only, no audio output needed
 
                     // Start streaming on server (with validated inputs)
                     console.log('📤 CLIENT: Sending translation interval:', this.translationInterval, 'ms');
