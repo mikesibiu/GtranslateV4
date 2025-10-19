@@ -956,10 +956,18 @@
                 this.micGainSlider.addEventListener('input', (e) => {
                     const gain = parseFloat(e.target.value);
                     this.micGainValue.textContent = gain.toFixed(1);
+
+                    // Update both the Web Audio gain node AND the AudioWorklet gain
                     if (this.gainNode) {
                         this.gainNode.gain.value = gain;
-                        console.log(`🎤 Microphone gain adjusted to ${gain.toFixed(1)}x`);
                     }
+
+                    // Send new gain to AudioWorklet if it's running
+                    if (this.processor && this.processor.port) {
+                        this.processor.port.postMessage({ command: 'setGain', value: gain });
+                    }
+
+                    console.log(`🎤 Microphone gain adjusted to ${gain.toFixed(1)}x`);
                 });
             }
 
@@ -1268,7 +1276,13 @@
                             // Create AudioWorkletNode
                             this.processor = new AudioWorkletNode(this.audioContext, 'audio-processor');
                             usingWorklet = true;
-                            console.log('✅ Using AudioWorklet for audio processing');
+
+                            // Send gain value to AudioWorklet
+                            const gainValue = this.micGainSlider && this.micGainSlider.value ?
+                                              parseFloat(this.micGainSlider.value) : 10.0;
+                            this.processor.port.postMessage({ command: 'setGain', value: gainValue });
+
+                            console.log(`✅ Using AudioWorklet for audio processing (gain: ${gainValue}x)`);
                         } catch (workletError) {
                             console.warn('⚠️ AudioWorklet failed, falling back to ScriptProcessor:', workletError);
                         }
@@ -1342,15 +1356,16 @@
                     source.connect(this.gainNode);
                     this.gainNode.connect(this.processor);
 
-                    // CRITICAL: Connect processor to a GainNode set to 0 then to destination
-                    // This keeps the AudioWorklet alive without actually outputting sound
+                    // CRITICAL: Connect processor to a GainNode set to 0.001 then to destination
+                    // This keeps the AudioWorklet alive without actually outputting audible sound
                     // If we don't connect to destination, browser may stop processing audio
+                    // Note: 0.001 is imperceptible even at max volume, but not optimized away by browser
                     const silentGain = this.audioContext.createGain();
-                    silentGain.gain.value = 0; // Mute the output completely
+                    silentGain.gain.value = 0.001; // Nearly silent (avoids browser optimization)
                     this.processor.connect(silentGain);
                     silentGain.connect(this.audioContext.destination);
 
-                    console.log('🔇 Connected to destination via silent gain node (keeps AudioWorklet alive)');
+                    console.log('🔇 Connected to destination via silent gain node (0.001x - keeps AudioWorklet alive)');
 
                     // Start streaming on server (with validated inputs)
                     console.log('📤 CLIENT: Sending translation interval:', this.translationInterval, 'ms');
@@ -1405,6 +1420,7 @@
                 if (this.audioContext) {
                     this.audioContext.close();
                     this.audioContext = null;
+                    this.audioWorkletLoaded = false; // Reset flag so new AudioContext can load module
                 }
 
                 if (this.mediaStream) {
@@ -1702,14 +1718,16 @@
                 // Normalize text for comparison (trim whitespace, lowercase)
                 const normalizedText = text.trim().toLowerCase();
 
-                // Clean up old entries (older than 5 seconds)
+                // Clean up old entries - window must be 2x translation interval to prevent duplicates
+                // EarBuds mode: 10s interval requires 20s+ window
+                const DEDUP_WINDOW_MS = Math.max(this.translationInterval * 2, 12000); // 12s minimum
                 const now = Date.now();
-                this.recentlySpoken = this.recentlySpoken.filter(entry => now - entry.timestamp < 5000);
+                this.recentlySpoken = this.recentlySpoken.filter(entry => now - entry.timestamp < DEDUP_WINDOW_MS);
 
-                // Skip if this EXACT text was spoken in the last 5 seconds
+                // Skip if this EXACT text was spoken in the deduplication window
                 const isDuplicate = this.recentlySpoken.some(entry => entry.text === normalizedText);
                 if (isDuplicate) {
-                    console.log(`⏭️ Skipping duplicate (spoken < 5s ago): "${text.substring(0, 50)}..."`);
+                    console.log(`⏭️ Skipping duplicate (spoken < ${DEDUP_WINDOW_MS/1000}s ago): "${text.substring(0, 50)}..."`);
                     return;
                 }
 
