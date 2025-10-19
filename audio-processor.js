@@ -10,11 +10,15 @@ class AudioProcessor extends AudioWorkletProcessor {
         this.bufferSize = 4096; // Accumulate to 4096 samples before sending
         this.buffer = new Float32Array(this.bufferSize); // Pre-allocated typed array
         this.bufferIndex = 0;
+        this.gain = 10.0; // Default gain (will be updated from main thread)
 
         // Listen for messages from main thread
         this.port.onmessage = (event) => {
             if (event.data.command === 'stop') {
                 this.isRecording = false;
+            } else if (event.data.command === 'setGain') {
+                this.gain = event.data.value;
+                console.log(`AudioWorklet gain set to ${this.gain}x`);
             }
         };
     }
@@ -46,13 +50,14 @@ class AudioProcessor extends AudioWorkletProcessor {
     }
 
     sendBuffer() {
-        // Single-pass: calculate level AND convert to Int16
+        // Single-pass: apply gain, calculate level AND convert to Int16
         let maxLevel = 0;
         const int16Data = new Int16Array(this.bufferSize);
 
         for (let i = 0; i < this.bufferSize; i++) {
-            const sample = this.buffer[i];
-            const absSample = Math.abs(sample);
+            // Apply gain amplification
+            const amplifiedSample = this.buffer[i] * this.gain;
+            const absSample = Math.abs(amplifiedSample);
 
             // Update max level (avoid function call overhead)
             if (absSample > maxLevel) {
@@ -60,7 +65,7 @@ class AudioProcessor extends AudioWorkletProcessor {
             }
 
             // Convert to Int16 (clamp inline for performance)
-            const clamped = sample < -1 ? -1 : (sample > 1 ? 1 : sample);
+            const clamped = amplifiedSample < -1 ? -1 : (amplifiedSample > 1 ? 1 : amplifiedSample);
             int16Data[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
         }
 
