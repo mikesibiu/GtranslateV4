@@ -1293,12 +1293,13 @@
                     const source = this.audioContext.createMediaStreamSource(this.mediaStream);
                     console.log('🎤 Media stream source created');
 
-                    // Create gain node with user-configured gain (default 10.0x)
+                    // Create gain node to store gain value (used by ScriptProcessor fallback)
+                    // Note: Not connected to audio graph for AudioWorklet (gain applied inside worklet)
                     this.gainNode = this.audioContext.createGain();
                     const gainValue = this.micGainSlider && this.micGainSlider.value ?
                                       parseFloat(this.micGainSlider.value) : 10.0;
                     this.gainNode.gain.value = gainValue;
-                    console.log(`🎤 Gain node created (${gainValue.toFixed(1)}x amplification)`);
+                    console.log(`🎤 Gain value set to ${gainValue.toFixed(1)}x`);
 
                     // Try AudioWorklet, fallback to ScriptProcessor
                     let usingWorklet = false;
@@ -1336,18 +1337,25 @@
                             if (!this.isRecording) return;
 
                             const inputData = event.inputBuffer.getChannelData(0);
+                            const gain = this.gainNode ? this.gainNode.gain.value : 10.0;
 
-                            // Calculate audio level
+                            // Single-pass: apply gain, calculate level, and convert to Int16
                             let maxLevel = 0;
-                            for (let i = 0; i < inputData.length; i++) {
-                                maxLevel = Math.max(maxLevel, Math.abs(inputData[i]));
-                            }
-
-                            // Convert Float32 to Int16
                             const int16Data = new Int16Array(inputData.length);
+
                             for (let i = 0; i < inputData.length; i++) {
-                                const s = Math.max(-1, Math.min(1, inputData[i]));
-                                int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                                // Apply gain amplification
+                                const amplifiedSample = inputData[i] * gain;
+                                const absSample = Math.abs(amplifiedSample);
+
+                                // Update max level
+                                if (absSample > maxLevel) {
+                                    maxLevel = absSample;
+                                }
+
+                                // Convert to Int16 (clamp inline)
+                                const clamped = amplifiedSample < -1 ? -1 : (amplifiedSample > 1 ? 1 : amplifiedSample);
+                                int16Data[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
                             }
 
                             // Update visual level meter
@@ -1392,20 +1400,30 @@
                         };
                     }
 
-                    // Connect: source → gain → processor
-                    source.connect(this.gainNode);
-                    this.gainNode.connect(this.processor);
+                    // Connect audio graph based on processor type
+                    if (usingWorklet) {
+                        // AudioWorklet: source → processor (gain applied inside worklet) → silent output
+                        // Do NOT use Web Audio gainNode - would apply gain twice (10x × 10x = 100x!)
+                        source.connect(this.processor);
 
-                    // CRITICAL: Connect processor to a GainNode set to 0.001 then to destination
-                    // This keeps the AudioWorklet alive without actually outputting audible sound
-                    // If we don't connect to destination, browser may stop processing audio
-                    // Note: 0.001 is imperceptible even at max volume, but not optimized away by browser
-                    const silentGain = this.audioContext.createGain();
-                    silentGain.gain.value = 0.001; // Nearly silent (avoids browser optimization)
-                    this.processor.connect(silentGain);
-                    silentGain.connect(this.audioContext.destination);
+                        // CRITICAL: Connect processor to a GainNode set to 0.001 then to destination
+                        // This keeps the AudioWorklet alive without actually outputting audible sound
+                        // If we don't connect to destination, browser may stop processing audio
+                        // Note: 0.001 is imperceptible even at max volume, but not optimized away by browser
+                        const silentGain = this.audioContext.createGain();
+                        silentGain.gain.value = 0.001; // Nearly silent (avoids browser optimization)
+                        this.processor.connect(silentGain);
+                        silentGain.connect(this.audioContext.destination);
 
-                    console.log('🔇 Connected to destination via silent gain node (0.001x - keeps AudioWorklet alive)');
+                        console.log('🔇 AudioWorklet connected: source → processor (gain in worklet) → silent output (0.001x)');
+                    } else {
+                        // ScriptProcessor: source → processor (gain applied inside processor code)
+                        // Gain is applied manually in onaudioprocess handler
+                        source.connect(this.processor);
+                        this.processor.connect(this.audioContext.destination);
+
+                        console.log('🔇 ScriptProcessor connected: source → processor (gain in handler) → destination');
+                    }
 
                     // Start streaming on server (with validated inputs)
                     console.log('📤 CLIENT: Sending translation interval:', this.translationInterval, 'ms');
