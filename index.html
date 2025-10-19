@@ -844,6 +844,9 @@
                 this.voiceCache = new Map(); // Cache voices by language for fast lookup
                 this.recentlySpoken = []; // Track recently spoken text with timestamps (for duplicate detection)
 
+                // Screen Wake Lock (keep screen on during recording)
+                this.wakeLock = null;
+
                 // Initialize voice cache
                 if (this.speechSynthesis) {
                     this.speechSynthesis.addEventListener('voiceschanged', () => {
@@ -1147,8 +1150,45 @@
                 });
             }
 
+            async requestWakeLock() {
+                // Request screen wake lock to keep screen on during recording
+                // Critical for mobile EarBuds mode where user listens with screen off
+                if ('wakeLock' in navigator) {
+                    try {
+                        this.wakeLock = await navigator.wakeLock.request('screen');
+                        console.log('🔒 Screen wake lock acquired - screen will stay on');
+
+                        // Re-acquire wake lock if it's released (e.g., user switches tabs)
+                        this.wakeLock.addEventListener('release', () => {
+                            console.log('🔓 Wake lock released');
+                            // Don't auto re-acquire - let user control
+                        });
+                    } catch (err) {
+                        console.warn('⚠️ Could not acquire wake lock:', err.message);
+                        // Non-fatal - continue without wake lock
+                    }
+                } else {
+                    console.log('ℹ️ Wake Lock API not supported on this device');
+                }
+            }
+
+            async releaseWakeLock() {
+                if (this.wakeLock) {
+                    try {
+                        await this.wakeLock.release();
+                        this.wakeLock = null;
+                        console.log('🔓 Screen wake lock released - screen can turn off');
+                    } catch (err) {
+                        console.warn('⚠️ Error releasing wake lock:', err);
+                    }
+                }
+            }
+
             async startRecording() {
                 try {
+                    // Request wake lock to keep screen on (critical for mobile EarBuds mode)
+                    await this.requestWakeLock();
+
                     // Validate inputs before starting
                     const sourceLanguage = this.sourceLanguage.value;
                     const targetLang = this.targetLanguage.value;
@@ -1402,6 +1442,9 @@
 
             stopRecording() {
                 this.isRecording = false;
+
+                // Release wake lock - screen can turn off now
+                this.releaseWakeLock();
 
                 if (this.gainNode) {
                     this.gainNode.disconnect();
