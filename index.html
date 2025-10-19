@@ -842,7 +842,7 @@
                 this.speechRate = 0.9; // Default speech rate (slower = less anxious/rushed)
                 this.voicePreference = 'auto'; // Voice selection preference
                 this.voiceCache = new Map(); // Cache voices by language for fast lookup
-                this.lastSpokenText = ''; // Track last spoken text to prevent duplicates
+                this.recentlySpoken = []; // Track recently spoken text with timestamps (for duplicate detection)
 
                 // Initialize voice cache
                 if (this.speechSynthesis) {
@@ -1693,9 +1693,14 @@
                 // Normalize text for comparison (trim whitespace, lowercase)
                 const normalizedText = text.trim().toLowerCase();
 
-                // Skip if this is a duplicate of the last spoken text
-                if (normalizedText === this.lastSpokenText) {
-                    console.log(`⏭️ Skipping duplicate: "${text.substring(0, 50)}..."`);
+                // Clean up old entries (older than 5 seconds)
+                const now = Date.now();
+                this.recentlySpoken = this.recentlySpoken.filter(entry => now - entry.timestamp < 5000);
+
+                // Skip if this EXACT text was spoken in the last 5 seconds
+                const isDuplicate = this.recentlySpoken.some(entry => entry.text === normalizedText);
+                if (isDuplicate) {
+                    console.log(`⏭️ Skipping duplicate (spoken < 5s ago): "${text.substring(0, 50)}..."`);
                     return;
                 }
 
@@ -1787,8 +1792,11 @@
                 const { text, targetLanguage } = this.ttsQueue.shift();
                 this.isSpeaking = true;
 
-                // Track this as the last spoken text (for duplicate detection)
-                this.lastSpokenText = text.trim().toLowerCase();
+                // Track this in recently spoken list (for duplicate detection)
+                this.recentlySpoken.push({
+                    text: text.trim().toLowerCase(),
+                    timestamp: Date.now()
+                });
 
                 // Create utterance
                 const utterance = new SpeechSynthesisUtterance(text);
