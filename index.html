@@ -1245,9 +1245,10 @@
                     const source = this.audioContext.createMediaStreamSource(this.mediaStream);
                     console.log('🎤 Media stream source created');
 
-                    // Create gain node with user-configured gain (default 5.0x)
+                    // Create gain node with user-configured gain (default 10.0x)
                     this.gainNode = this.audioContext.createGain();
-                    const gainValue = parseFloat(this.micGainSlider.value);
+                    const gainValue = this.micGainSlider && this.micGainSlider.value ?
+                                      parseFloat(this.micGainSlider.value) : 10.0;
                     this.gainNode.gain.value = gainValue;
                     console.log(`🎤 Gain node created (${gainValue.toFixed(1)}x amplification)`);
 
@@ -1338,10 +1339,18 @@
                     }
 
                     // Connect: source → gain → processor
-                    // NOTE: Do NOT connect to audioContext.destination - that routes mic audio to speakers/earbuds!
                     source.connect(this.gainNode);
                     this.gainNode.connect(this.processor);
-                    // Processor sends data via WebSocket only, no audio output needed
+
+                    // CRITICAL: Connect processor to a GainNode set to 0 then to destination
+                    // This keeps the AudioWorklet alive without actually outputting sound
+                    // If we don't connect to destination, browser may stop processing audio
+                    const silentGain = this.audioContext.createGain();
+                    silentGain.gain.value = 0; // Mute the output completely
+                    this.processor.connect(silentGain);
+                    silentGain.connect(this.audioContext.destination);
+
+                    console.log('🔇 Connected to destination via silent gain node (keeps AudioWorklet alive)');
 
                     // Start streaming on server (with validated inputs)
                     console.log('📤 CLIENT: Sending translation interval:', this.translationInterval, 'ms');
