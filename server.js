@@ -286,6 +286,7 @@ io.on('connection', (socket) => {
     let sessionActive = false;
     let restartStreamTimer = null;
     let lastInterimText = '';
+    let lastTranslationTime = null; // Track when last translation happened for 15s max interval
     let lastTranslatedText = ''; // Track what we've already translated
     let translationInterval = 10000; // Store translation interval for restarts
     let lastActivityTime = Date.now();
@@ -521,34 +522,27 @@ io.on('connection', (socket) => {
                             isFinal
                         });
 
-                        // Track interim text for sentence detection
+                        // Track interim text for sentence detection + pause detection with 15s max
                         if (!isFinal) {
                             const previousInterimText = lastInterimText;
                             lastInterimText = transcript;
 
-                            // Detect sentence endings: period, question mark, exclamation, ellipsis
+                            // Detect sentence endings and text changes
                             const hasSentenceEnding = /[.!?。！？]\s*$/.test(transcript.trim());
                             const hasEllipsis = /\.{2,}\s*$/.test(transcript.trim());
-
-                            // Check if text changed (new words added)
                             const textChanged = previousInterimText !== transcript;
 
-                            // Clear existing timer if we detect a sentence ending
-                            if (hasSentenceEnding && restartStreamTimer) {
-                                logger.info('📍 Sentence ending detected, clearing timer', {
-                                    clientId,
-                                    text: transcript.substring(0, 50)
-                                });
-                                clearTimeout(restartStreamTimer);
-                                restartStreamTimer = null;
-                            }
-
-                            // Translate immediately on sentence ending (unless it's ellipsis indicating continuation)
+                            // Translate immediately on sentence ending
                             if (hasSentenceEnding && !hasEllipsis) {
-                                const newText = lastInterimText.substring(lastTranslatedText.length).trim();
+                                // Clear timer - we're translating now
+                                if (restartStreamTimer) {
+                                    clearTimeout(restartStreamTimer);
+                                    restartStreamTimer = null;
+                                }
 
+                                const newText = lastInterimText.substring(lastTranslatedText.length).trim();
                                 if (newText.length > 0) {
-                                    logger.info('✅ Sentence complete - translating immediately', {
+                                    logger.info('✅ Sentence ending - translating immediately', {
                                         clientId,
                                         text: newText.substring(0, 50)
                                     });
@@ -556,15 +550,10 @@ io.on('connection', (socket) => {
                                     accumulatedText += (accumulatedText ? ' ' : '') + newText;
 
                                     try {
-                                        const translation = await translateWithRetry(
-                                            newText,
-                                            targetLanguage,
-                                            clientId
-                                        );
-
+                                        const translation = await translateWithRetry(newText, targetLanguage, clientId);
                                         translationCount++;
 
-                                        logger.info('✅ Sentence-based translation completed', {
+                                        logger.info('✅ Sentence translation completed', {
                                             clientId,
                                             original: newText.substring(0, 50),
                                             translated: translation.substring(0, 50),
@@ -576,92 +565,96 @@ io.on('connection', (socket) => {
                                             translated: translation,
                                             accumulated: accumulatedText,
                                             count: translationCount,
-                                            isInterim: true  // Sentence-based interim translation
+                                            isInterim: true
                                         });
 
-                                        lastTranslatedText = lastInterimText; // Remember what we've translated
+                                        lastTranslatedText = lastInterimText;
                                     } catch (error) {
-                                        logger.error('Sentence translation error', {
-                                            clientId,
-                                            error: error.message
-                                        });
+                                        logger.error('Sentence translation error', { clientId, error: error.message });
                                     }
                                 }
                             }
-                            // Restart timer on EVERY new word (not just first interim)
-                            // This way, if speaker pauses, timer fires; if they keep talking, timer resets
+                            // Hybrid: Pause detection (3s) with 15s maximum
+                            // - If speaker pauses 3s: translate
+                            // - If speaking continuously: translate at 15s max
                             else {
-                                // Clear existing timer
-                                if (restartStreamTimer) {
+                                const PAUSE_THRESHOLD_MS = 3000; // 3 seconds of silence triggers translation
+                                const MAX_INTERVAL_MS = intervalMs; // 15 seconds maximum
+
+                                // Clear existing timer if text changed (new word arrived)
+                                if (textChanged && restartStreamTimer) {
                                     clearTimeout(restartStreamTimer);
                                     restartStreamTimer = null;
                                 }
 
-                                // Only start new timer if text actually changed (new words added)
-                                if (textChanged) {
-                                logger.debug(`⏱️ Starting ${intervalMs/1000}-second fallback timer (no sentence ending yet)`, {
-                                    clientId,
-                                    intervalMs,
-                                    text: transcript.substring(0, 50)
-                                });
+                                // Start/restart timer if we don't have one running
+                                if (!restartStreamTimer) {
+                                    // Track when translation window started
+                                    if (!lastTranslationTime) {
+                                        lastTranslationTime = Date.now();
+                                    }
 
-                                restartStreamTimer = setTimeout(async () => {
-                                    logger.info(`🔔 FALLBACK TIMER FIRED! Interval was: ${intervalMs}ms`, { clientId });
-                                    if (lastInterimText.trim().length > 0 && sessionActive) {
-                                        // Only translate the NEW portion (not already translated)
-                                        const newText = lastInterimText.substring(lastTranslatedText.length).trim();
+                                    const elapsedSinceLastTranslation = Date.now() - lastTranslationTime;
+                                    const timeUntilMaxInterval = Math.max(0, MAX_INTERVAL_MS - elapsedSinceLastTranslation);
 
-                                        if (newText.length > 0) {
-                                            logger.info(`⏰ Forcing translation of NEW interim text after ${intervalMs/1000}s (no sentence ending detected)`, {
-                                                clientId,
-                                                previousLength: lastTranslatedText.length,
-                                                newTextLength: newText.length,
-                                                newText: newText.substring(0, 50)
-                                            });
+                                    // Use pause threshold, but cap at remaining time until max interval
+                                    const timerDuration = Math.min(PAUSE_THRESHOLD_MS, timeUntilMaxInterval || PAUSE_THRESHOLD_MS);
 
-                                            accumulatedText += (accumulatedText ? ' ' : '') + newText;
+                                    logger.debug(`⏱️ Starting timer: ${timerDuration}ms (pause detect: ${PAUSE_THRESHOLD_MS}ms, max interval in: ${timeUntilMaxInterval}ms)`, {
+                                        clientId,
+                                        text: transcript.substring(0, 50)
+                                    });
 
-                                            try {
-                                                const translation = await translateWithRetry(
-                                                    newText,
-                                                    targetLanguage,
-                                                    clientId
-                                                );
+                                    restartStreamTimer = setTimeout(async () => {
+                                        const reason = timeUntilMaxInterval === 0 ? 'MAX_INTERVAL' : 'PAUSE_DETECTED';
+                                        logger.info(`🔔 Timer fired! Reason: ${reason}`, { clientId });
 
-                                                translationCount++;
+                                        if (lastInterimText.trim().length > 0 && sessionActive) {
+                                            const newText = lastInterimText.substring(lastTranslatedText.length).trim();
 
-                                                logger.info('✅ Fallback translation completed', {
+                                            if (newText.length > 0) {
+                                                logger.info(`⏰ Translating (${reason})`, {
                                                     clientId,
-                                                    original: newText.substring(0, 50),
-                                                    translated: translation.substring(0, 50),
-                                                    count: translationCount
+                                                    newTextLength: newText.length,
+                                                    newText: newText.substring(0, 50)
                                                 });
 
-                                                socket.emit('translation-result', {
-                                                    original: newText,
-                                                    translated: translation,
-                                                    accumulated: accumulatedText,
-                                                    count: translationCount,
-                                                    isInterim: true  // Fallback time-based translation
-                                                });
+                                                accumulatedText += (accumulatedText ? ' ' : '') + newText;
 
-                                                lastTranslatedText = lastInterimText; // Remember what we've translated
-                                                restartStreamTimer = null; // Clear timer reference
-                                            } catch (error) {
-                                                logger.error('Fallback translation error', {
-                                                    clientId,
-                                                    error: error.message
-                                                });
-                                                restartStreamTimer = null; // Clear timer reference even on error
+                                                try {
+                                                    const translation = await translateWithRetry(newText, targetLanguage, clientId);
+                                                    translationCount++;
+
+                                                    logger.info(`✅ ${reason} translation completed`, {
+                                                        clientId,
+                                                        original: newText.substring(0, 50),
+                                                        translated: translation.substring(0, 50),
+                                                        count: translationCount
+                                                    });
+
+                                                    socket.emit('translation-result', {
+                                                        original: newText,
+                                                        translated: translation,
+                                                        accumulated: accumulatedText,
+                                                        count: translationCount,
+                                                        isInterim: true
+                                                    });
+
+                                                    lastTranslatedText = lastInterimText;
+                                                    lastTranslationTime = Date.now(); // Reset max interval timer
+                                                    restartStreamTimer = null;
+                                                } catch (error) {
+                                                    logger.error('Translation error', { clientId, error: error.message });
+                                                    restartStreamTimer = null;
+                                                }
+                                            } else {
+                                                logger.debug('⏰ No new text, skipping', { clientId });
+                                                restartStreamTimer = null;
                                             }
                                         } else {
-                                            logger.debug('⏰ No new text to translate, skipping', { clientId });
                                             restartStreamTimer = null;
                                         }
-                                    } else {
-                                        restartStreamTimer = null;
-                                    }
-                                }, intervalMs); // Dynamic interval based on mode
+                                    }, timerDuration);
                                 }
                             }
                         }
