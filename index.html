@@ -1887,6 +1887,19 @@
 
                 console.log(`✅ Voice cache built: ${this.voiceCache.size} language variants, ${voices.length} total voices`);
 
+                // Log high-quality voices for debugging
+                const highQualityVoices = voices.filter(v =>
+                    v.name.includes('Neural') || v.name.includes('Wavenet') || v.name.includes('Studio') ||
+                    v.name.includes('Premium') || v.name.includes('Enhanced') || v.name.includes('Natural') ||
+                    (v.name.includes('Microsoft') && v.name.includes('Online')) ||
+                    (v.name.includes('Google') && !v.localService)
+                );
+                if (highQualityVoices.length > 0) {
+                    console.log(`🎙️ High-quality voices available:`, highQualityVoices.map(v => `${v.name} [${v.lang}]`));
+                } else {
+                    console.log(`⚠️ No high-quality voices detected. Available voices:`, voices.slice(0, 10).map(v => `${v.name} [${v.lang}]`));
+                }
+
                 // Update voice dropdown with available voices
                 this.populateVoiceDropdown();
             }
@@ -1975,23 +1988,32 @@
                 if (this.voicePreference === 'auto') {
                     // Auto mode - prioritize most natural sounding
                     preferredVoice =
-                        // Priority 1: Google high-quality voices (most natural)
+                        // Priority 1: Google Cloud voices (most natural - Neural/Wavenet/Studio)
                         langVoices.find(voice =>
                             voice.name.includes('Google') &&
-                            (voice.name.includes('Natural') || voice.name.includes('Wavenet') || voice.name.includes('Neural'))
+                            (voice.name.includes('Neural') || voice.name.includes('Studio') || voice.name.includes('Wavenet') || voice.name.includes('Natural'))
                         ) ||
-                        // Priority 2: Apple high-quality voices (Siri-quality)
+                        // Priority 2: Microsoft high-quality voices (Edge/Azure)
                         langVoices.find(voice =>
-                            (voice.name.includes('Samantha') ||
-                             voice.name.includes('Karen') ||
-                             voice.name.includes('Tessa') ||
-                             voice.name.includes('Alex') ||
-                             voice.name.includes('Premium') ||
-                             voice.name.includes('Enhanced'))
+                            (voice.name.includes('Microsoft') || voice.name.includes('Edge')) &&
+                            (voice.name.includes('Neural') || voice.name.includes('Online'))
                         ) ||
-                        // Priority 3: Any cloud/remote voice
+                        // Priority 3: Apple premium voices (macOS/iOS)
+                        langVoices.find(voice =>
+                            (voice.name.includes('Premium') || voice.name.includes('Enhanced')) ||
+                            (voice.name.includes('Samantha') || voice.name.includes('Alex') ||
+                             voice.name.includes('Karen') || voice.name.includes('Tessa') ||
+                             voice.name.includes('Flo') || voice.name.includes('Grandma') ||
+                             voice.name.includes('Eddy') || voice.name.includes('Reed'))
+                        ) ||
+                        // Priority 4: Any remote/cloud voice (usually better quality)
                         langVoices.find(voice => voice.localService === false) ||
-                        // Priority 4: Any local voice with correct language
+                        // Priority 5: English-specific high quality voices
+                        langVoices.find(voice =>
+                            voice.name.includes('Daniel') || voice.name.includes('Moira') ||
+                            voice.name.includes('Amelie') || voice.name.includes('Anna')
+                        ) ||
+                        // Priority 6: First available local voice
                         langVoices[0];
                 } else {
                     // User selected specific voice by name
@@ -2016,12 +2038,22 @@
                     console.warn(`⚠️ No voice found for language: ${speechLang}, using browser default`);
                 }
 
-                // Speech settings - use user-configured rate
-                utterance.rate = this.speechRate;
-                utterance.pitch = 0.95; // Slightly lower pitch for calmer, less anxious sound (1.0 can sound stressed)
-                utterance.volume = 1.0; // Note: Browser-controlled, use device volume to adjust
+                // Speech settings - optimize based on voice quality
+                // High-quality voices sound better at normal pitch, low-quality need lower pitch
+                const isHighQuality = preferredVoice && (
+                    preferredVoice.name.includes('Neural') ||
+                    preferredVoice.name.includes('Wavenet') ||
+                    preferredVoice.name.includes('Studio') ||
+                    preferredVoice.name.includes('Premium') ||
+                    preferredVoice.name.includes('Enhanced') ||
+                    !preferredVoice.localService
+                );
 
-                console.log(`🔊 TTS Settings: rate=${utterance.rate}, pitch=${utterance.pitch}, volume=${utterance.volume}`);
+                utterance.rate = this.speechRate;
+                utterance.pitch = isHighQuality ? 1.0 : 0.92; // Natural pitch for HQ voices, lower for robotic ones
+                utterance.volume = 1.0;
+
+                console.log(`🔊 TTS Settings: rate=${utterance.rate}, pitch=${utterance.pitch}, volume=${utterance.volume}, highQuality=${isHighQuality}`);
 
                 // Event handlers
                 utterance.onstart = () => {
