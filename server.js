@@ -521,26 +521,86 @@ io.on('connection', (socket) => {
                             isFinal
                         });
 
-                        // Track interim text for forced finalization
+                        // Track interim text for sentence detection
                         if (!isFinal) {
                             lastInterimText = transcript;
 
-                            // Start timer only if we don't have one running already
-                            if (!restartStreamTimer) {
-                                logger.debug(`⏱️ Starting ${intervalMs/1000}-second forced translation timer`, {
+                            // Detect sentence endings: period, question mark, exclamation, ellipsis
+                            // Also check for natural pauses indicated by Google Cloud (stability/confidence)
+                            const hasSentenceEnding = /[.!?。！？]\s*$/.test(transcript.trim());
+                            const hasEllipsis = /\.{2,}\s*$/.test(transcript.trim());
+
+                            // Clear existing timer if we detect a sentence ending
+                            if (hasSentenceEnding && restartStreamTimer) {
+                                logger.info('📍 Sentence ending detected, clearing timer', {
+                                    clientId,
+                                    text: transcript.substring(0, 50)
+                                });
+                                clearTimeout(restartStreamTimer);
+                                restartStreamTimer = null;
+                            }
+
+                            // Translate immediately on sentence ending (unless it's ellipsis indicating continuation)
+                            if (hasSentenceEnding && !hasEllipsis) {
+                                const newText = lastInterimText.substring(lastTranslatedText.length).trim();
+
+                                if (newText.length > 0) {
+                                    logger.info('✅ Sentence complete - translating immediately', {
+                                        clientId,
+                                        text: newText.substring(0, 50)
+                                    });
+
+                                    accumulatedText += (accumulatedText ? ' ' : '') + newText;
+
+                                    try {
+                                        const translation = await translateWithRetry(
+                                            newText,
+                                            targetLanguage,
+                                            clientId
+                                        );
+
+                                        translationCount++;
+
+                                        logger.info('✅ Sentence-based translation completed', {
+                                            clientId,
+                                            original: newText.substring(0, 50),
+                                            translated: translation.substring(0, 50),
+                                            count: translationCount
+                                        });
+
+                                        socket.emit('translation-result', {
+                                            original: newText,
+                                            translated: translation,
+                                            accumulated: accumulatedText,
+                                            count: translationCount,
+                                            isInterim: true  // Sentence-based interim translation
+                                        });
+
+                                        lastTranslatedText = lastInterimText; // Remember what we've translated
+                                    } catch (error) {
+                                        logger.error('Sentence translation error', {
+                                            clientId,
+                                            error: error.message
+                                        });
+                                    }
+                                }
+                            }
+                            // Fallback: Start timer for long utterances without sentence endings
+                            else if (!restartStreamTimer) {
+                                logger.debug(`⏱️ Starting ${intervalMs/1000}-second fallback timer (no sentence ending yet)`, {
                                     clientId,
                                     intervalMs,
                                     text: transcript.substring(0, 50)
                                 });
 
                                 restartStreamTimer = setTimeout(async () => {
-                                    logger.info(`🔔 TIMER FIRED! Interval was: ${intervalMs}ms`, { clientId });
+                                    logger.info(`🔔 FALLBACK TIMER FIRED! Interval was: ${intervalMs}ms`, { clientId });
                                     if (lastInterimText.trim().length > 0 && sessionActive) {
                                         // Only translate the NEW portion (not already translated)
                                         const newText = lastInterimText.substring(lastTranslatedText.length).trim();
 
                                         if (newText.length > 0) {
-                                            logger.info(`⏰ Forcing translation of NEW interim text after ${intervalMs/1000}s`, {
+                                            logger.info(`⏰ Forcing translation of NEW interim text after ${intervalMs/1000}s (no sentence ending detected)`, {
                                                 clientId,
                                                 previousLength: lastTranslatedText.length,
                                                 newTextLength: newText.length,
@@ -558,7 +618,7 @@ io.on('connection', (socket) => {
 
                                                 translationCount++;
 
-                                                logger.info('✅ Forced translation completed', {
+                                                logger.info('✅ Fallback translation completed', {
                                                     clientId,
                                                     original: newText.substring(0, 50),
                                                     translated: translation.substring(0, 50),
@@ -570,13 +630,13 @@ io.on('connection', (socket) => {
                                                     translated: translation,
                                                     accumulated: accumulatedText,
                                                     count: translationCount,
-                                                    isInterim: true  // 10-second forced translation
+                                                    isInterim: true  // Fallback time-based translation
                                                 });
 
                                                 lastTranslatedText = lastInterimText; // Remember what we've translated
                                                 restartStreamTimer = null; // Clear timer reference
                                             } catch (error) {
-                                                logger.error('Forced translation error', {
+                                                logger.error('Fallback translation error', {
                                                     clientId,
                                                     error: error.message
                                                 });

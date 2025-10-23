@@ -843,6 +843,7 @@
                 this.voicePreference = 'auto'; // Voice selection preference
                 this.voiceCache = new Map(); // Cache voices by language for fast lookup
                 this.recentlySpoken = []; // Track recently spoken text with timestamps (for duplicate detection)
+                this.lastDedupCleanup = 0; // Last time we cleaned up recentlySpoken array
 
                 // Screen Wake Lock (keep screen on during recording)
                 this.wakeLock = null;
@@ -1779,16 +1780,60 @@
                 // Normalize text for comparison (trim whitespace, lowercase)
                 const normalizedText = text.trim().toLowerCase();
 
-                // Clean up old entries - window must be 2x translation interval to prevent duplicates
-                // EarBuds mode: 10s interval requires 20s+ window
-                const DEDUP_WINDOW_MS = Math.max(this.translationInterval * 2, 12000); // 12s minimum
-                const now = Date.now();
-                this.recentlySpoken = this.recentlySpoken.filter(entry => now - entry.timestamp < DEDUP_WINDOW_MS);
+                // Skip empty text
+                if (normalizedText.length === 0) {
+                    return;
+                }
 
-                // Skip if this EXACT text was spoken in the deduplication window
-                const isDuplicate = this.recentlySpoken.some(entry => entry.text === normalizedText);
+                // Clean up old entries periodically (not on every call for performance)
+                const now = Date.now();
+                const safeInterval = (typeof this.translationInterval === 'number' && this.translationInterval > 0)
+                    ? this.translationInterval
+                    : 10000;
+                const DEDUP_WINDOW_MS = Math.max(safeInterval * 2, 12000);
+
+                if (!this.lastDedupCleanup || now - this.lastDedupCleanup > 5000 || this.recentlySpoken.length > 50) {
+                    this.recentlySpoken = this.recentlySpoken.filter(entry =>
+                        now - entry.timestamp < DEDUP_WINDOW_MS
+                    );
+                    this.lastDedupCleanup = now;
+                }
+
+                // Check for duplicates in recently spoken
+                const isDuplicate = this.recentlySpoken.some(entry => {
+                    // Exact match
+                    if (entry.text === normalizedText) {
+                        console.log(`⏭️ [DEDUP] Exact match - skipping`);
+                        return true;
+                    }
+
+                    // Only apply substring checks if both texts are substantial (>= 10 chars)
+                    const bothSubstantial = entry.text.length >= 10 && normalizedText.length >= 10;
+
+                    if (bothSubstantial) {
+                        // New text is subset of old (old contains new)
+                        if (entry.text.includes(normalizedText)) {
+                            console.log(`⏭️ [DEDUP] New is substring of old - skipping`);
+                            return true;
+                        }
+
+                        // Old text is subset of new (new contains old)
+                        if (normalizedText.includes(entry.text)) {
+                            const overlap = entry.text.length / normalizedText.length;
+                            const additionalChars = normalizedText.length - entry.text.length;
+
+                            // Block if >80% overlap AND less than 10 new characters
+                            if (overlap > 0.80 && additionalChars < 10) {
+                                console.log(`⏭️ [DEDUP] Too similar - ${(overlap*100).toFixed(0)}% overlap, +${additionalChars} chars`);
+                                return true;
+                            }
+                        }
+                    }
+
+                    return false;
+                });
+
                 if (isDuplicate) {
-                    console.log(`⏭️ Skipping duplicate (spoken < ${DEDUP_WINDOW_MS/1000}s ago): "${text.substring(0, 50)}..."`);
                     return;
                 }
 
@@ -1797,12 +1842,19 @@
                     item.text.trim().toLowerCase() === normalizedText
                 );
                 if (alreadyInQueue) {
-                    console.log(`⏭️ Already in queue, skipping: "${text.substring(0, 50)}..."`);
+                    console.log(`⏭️ [DEDUP] Already in queue - skipping`);
                     return;
                 }
 
                 // Add to queue
                 this.ttsQueue.push({ text, targetLanguage });
+
+                // Add to recentlySpoken IMMEDIATELY to prevent race conditions
+                this.recentlySpoken.push({
+                    text: normalizedText,
+                    timestamp: Date.now()
+                });
+
                 console.log(`📝 Added to TTS queue (${this.ttsQueue.length} pending): "${text.substring(0, 50)}..."`);
 
                 // Start processing queue if not already speaking
@@ -1880,11 +1932,8 @@
                 const { text, targetLanguage } = this.ttsQueue.shift();
                 this.isSpeaking = true;
 
-                // Track this in recently spoken list (for duplicate detection)
-                this.recentlySpoken.push({
-                    text: text.trim().toLowerCase(),
-                    timestamp: Date.now()
-                });
+                // Note: Already added to recentlySpoken in speakTranslation() to prevent race conditions
+                // Don't add again here or we'll have duplicates in the tracking array
 
                 // Create utterance
                 const utterance = new SpeechSynthesisUtterance(text);
