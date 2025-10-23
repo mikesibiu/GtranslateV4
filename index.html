@@ -696,7 +696,7 @@
                 <div class="mode-toggle">
                     <button class="mode-option active" data-mode="talks" data-interval="10000">Talks (10s)</button>
                     <button class="mode-option" data-mode="qa" data-interval="4000" data-summary-interval="30000">Q&A (4s/30s)</button>
-                    <button class="mode-option" data-mode="earbuds" data-interval="10000" data-enable-tts="true">🎧 EarBuds (10s)</button>
+                    <button class="mode-option" data-mode="earbuds" data-interval="15000" data-enable-tts="true">🎧 EarBuds (15s)</button>
                 </div>
             </div>
 
@@ -814,7 +814,7 @@
                 this.wordsTranslated = 0;
                 this.audioChunkBuffer = [];
                 this.audioBufferSize = 4096;
-                this.translationInterval = 10000; // Default: 10 seconds (Talks mode)
+                this.translationInterval = 10000; // Default: 10 seconds (Talks mode), 15s for EarBuds
                 this.summaryInterval = null; // For Q&A mode summary interval
                 this.summaryTimer = null; // Timer for creating summaries
                 this.interimTranslations = []; // Track interim translations for Q&A mode
@@ -1505,17 +1505,20 @@
                 this.updateStatus('Ready to start', 'ready');
                 this.interimText.textContent = 'Waiting for speech...';
 
-                // Stop any playing speech
+                // Stop any playing speech and clear queue
                 if (this.speechSynthesis) {
                     this.speechSynthesis.cancel();
+                    this.ttsQueue = []; // Clear pending translations
+                    this.isSpeaking = false;
+                    console.log('🔇 TTS stopped and queue cleared');
                 }
             }
 
             addTranslation(data) {
-                // EarBuds mode special handling: only display/speak every 10 seconds
+                // EarBuds mode special handling: only display/speak on sentence endings or fallback timer (15s)
                 // Skip displaying the translation-result events entirely - rely only on visual feedback
                 if (this.currentMode === 'earbuds') {
-                    // Speak ALL translations in EarBuds mode (including 10s interim forced translations)
+                    // Speak ALL translations in EarBuds mode (sentence-based + 15s fallback timer)
                     this.speakTranslation(data.translated, this.targetLanguage.value);
 
                     // Update stats
