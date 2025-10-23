@@ -523,12 +523,15 @@ io.on('connection', (socket) => {
 
                         // Track interim text for sentence detection
                         if (!isFinal) {
+                            const previousInterimText = lastInterimText;
                             lastInterimText = transcript;
 
                             // Detect sentence endings: period, question mark, exclamation, ellipsis
-                            // Also check for natural pauses indicated by Google Cloud (stability/confidence)
                             const hasSentenceEnding = /[.!?。！？]\s*$/.test(transcript.trim());
                             const hasEllipsis = /\.{2,}\s*$/.test(transcript.trim());
+
+                            // Check if text changed (new words added)
+                            const textChanged = previousInterimText !== transcript;
 
                             // Clear existing timer if we detect a sentence ending
                             if (hasSentenceEnding && restartStreamTimer) {
@@ -585,8 +588,17 @@ io.on('connection', (socket) => {
                                     }
                                 }
                             }
-                            // Fallback: Start timer for long utterances without sentence endings
-                            else if (!restartStreamTimer) {
+                            // Restart timer on EVERY new word (not just first interim)
+                            // This way, if speaker pauses, timer fires; if they keep talking, timer resets
+                            else {
+                                // Clear existing timer
+                                if (restartStreamTimer) {
+                                    clearTimeout(restartStreamTimer);
+                                    restartStreamTimer = null;
+                                }
+
+                                // Only start new timer if text actually changed (new words added)
+                                if (textChanged) {
                                 logger.debug(`⏱️ Starting ${intervalMs/1000}-second fallback timer (no sentence ending yet)`, {
                                     clientId,
                                     intervalMs,
@@ -650,6 +662,7 @@ io.on('connection', (socket) => {
                                         restartStreamTimer = null;
                                     }
                                 }, intervalMs); // Dynamic interval based on mode
+                                }
                             }
                         }
                     }
