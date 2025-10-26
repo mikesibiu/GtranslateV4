@@ -1163,9 +1163,22 @@
                     } catch (err) {
                         console.warn('⚠️ Could not acquire wake lock:', err.message);
                         // Non-fatal - continue without wake lock
+
+                        // Warn user on mobile if wake lock fails
+                        if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+                            this.updateStatus('⚠️ Screen may turn off - keep phone unlocked', 'warning');
+                        }
                     }
                 } else {
                     console.log('ℹ️ Wake Lock API not supported on this device');
+
+                    // Warn mobile users that screen must stay on
+                    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+                        this.updateStatus('⚠️ Keep screen on - app will stop if screen locks', 'warning');
+                        setTimeout(() => {
+                            this.updateStatus('Listening...', 'listening');
+                        }, 5000);
+                    }
                 }
             }
 
