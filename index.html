@@ -1063,11 +1063,7 @@
                 });
 
                 this.socket.on('interim-result', (data) => {
-                    // In EarBuds mode, don't show interim results
-                    if (this.currentMode === 'earbuds') {
-                        this.interimText.textContent = 'Listening... (waiting for final translation)';
-                        return;
-                    }
+                    // Show interim results in ALL modes (including EarBuds for visual feedback)
                     this.interimText.textContent = sanitizeText(data.text) || 'Listening...';
                 });
 
@@ -1515,33 +1511,14 @@
             }
 
             addTranslation(data) {
-                // EarBuds mode special handling: only display/speak on sentence endings or fallback timer (15s)
-                // Skip displaying the translation-result events entirely - rely only on visual feedback
+                // EarBuds mode: Enable TTS but ALSO show visual display as backup
                 if (this.currentMode === 'earbuds') {
-                    // Speak ALL translations in EarBuds mode (sentence-based + 15s fallback timer)
+                    // Speak translations in EarBuds mode (audio-first)
                     this.speakTranslation(data.translated, this.targetLanguage.value);
-
-                    // Update stats
-                    this.translationCount++;
-                    this.wordsTranslated += data.original.split(/\s+/).length;
-                    this.translationCountEl.textContent = `${this.translationCount} translations`;
-                    this.wordsTranslatedEl.textContent = this.wordsTranslated;
-
-                    // Store for export (only true finals)
-                    if (!data.isInterim) {
-                        this.sessionTranslations.push({
-                            timestamp: new Date().toISOString(),
-                            original: data.original,
-                            translated: data.translated
-                        });
-                        this.exportBtn.disabled = false;
-                    }
-
-                    // Don't display anything on screen in EarBuds mode - it's audio only
-                    return;
+                    // Continue to visual display below - don't return early
                 }
 
-                // Normal mode (Talks/Q&A): Display everything as before
+                // Display translations on screen (ALL modes including EarBuds)
                 this.translationCount++;
                 this.wordsTranslated += data.original.split(/\s+/).length;
 
