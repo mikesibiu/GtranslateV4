@@ -944,6 +944,19 @@
                 this.stopBtn.addEventListener('click', () => this.stopRecording());
                 this.exportBtn.addEventListener('click', () => this.exportSession());
 
+                // Re-acquire wake lock when page becomes visible again
+                document.addEventListener('visibilitychange', async () => {
+                    if (!document.hidden && this.isRecording && 'wakeLock' in navigator) {
+                        // Page became visible again while recording - re-acquire wake lock
+                        console.log('📱 Page visible again - re-acquiring wake lock');
+                        try {
+                            await this.requestWakeLock();
+                        } catch (err) {
+                            console.warn('⚠️ Could not re-acquire wake lock on visibility change:', err.message);
+                        }
+                    }
+                });
+
                 // TTS rate control (dropdown)
                 this.ttsRateSelect.addEventListener('change', (e) => {
                     this.speechRate = parseFloat(e.target.value);
@@ -1155,10 +1168,19 @@
                         this.wakeLock = await navigator.wakeLock.request('screen');
                         console.log('🔒 Screen wake lock acquired - screen will stay on');
 
-                        // Re-acquire wake lock if it's released (e.g., user switches tabs)
-                        this.wakeLock.addEventListener('release', () => {
-                            console.log('🔓 Wake lock released');
-                            // Don't auto re-acquire - let user control
+                        // Re-acquire wake lock automatically if it's released
+                        this.wakeLock.addEventListener('release', async () => {
+                            console.log('🔓 Wake lock released - attempting to re-acquire');
+
+                            // Only re-acquire if we're still recording
+                            if (this.isRecording) {
+                                try {
+                                    await this.requestWakeLock();
+                                    console.log('🔒 Wake lock re-acquired successfully');
+                                } catch (err) {
+                                    console.warn('⚠️ Could not re-acquire wake lock:', err.message);
+                                }
+                            }
                         });
                     } catch (err) {
                         console.warn('⚠️ Could not acquire wake lock:', err.message);
