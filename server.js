@@ -8,7 +8,7 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const speech = require('@google-cloud/speech');
-const { Translate } = require('@google-cloud/translate').v2;
+const { TranslationServiceClient } = require('@google-cloud/translate').v3;
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
@@ -99,11 +99,35 @@ const speechClient = googleCredentials
     : new speech.SpeechClient();
 
 const translateClient = googleCredentials
-    ? new Translate({ credentials: googleCredentials })
-    : new Translate();
+    ? new TranslationServiceClient({ credentials: googleCredentials })
+    : new TranslationServiceClient();
+
+// Get project ID and location for v3 API
+const projectId = googleCredentials?.project_id || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
+const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+const parent = projectId ? `projects/${projectId}/locations/${location}` : null;
+const glossaryId = 'ro-en-religious-terms';
+const glossaryPath = parent ? `${parent}/glossaries/${glossaryId}` : null;
+const glossaryEnabled = process.env.GLOSSARY_ENABLED === 'true';
+const translationModel = process.env.TRANSLATION_MODEL || 'nmt';
+
+if (!projectId) {
+    logger.error('❌ No Google Cloud project ID found - translations will fail');
+    logger.error('Set project ID via:');
+    logger.error('  1. GOOGLE_CLOUD_PROJECT environment variable');
+    logger.error('  2. GCP_PROJECT environment variable');
+    logger.error('  3. project_id in credentials JSON');
+    process.exit(1);
+}
 
 logger.info('✅ Google Cloud Speech-to-Text client initialized');
-logger.info('✅ Google Cloud Translation client initialized');
+logger.info('✅ Google Cloud Translation v3 client initialized', {
+    projectId,
+    location,
+    translationModel,
+    glossaryEnabled,
+    glossaryPath: glossaryEnabled ? glossaryPath : 'disabled'
+});
 
 // Log startup configuration
 logger.info('Server Configuration', {
@@ -191,28 +215,98 @@ app.get('/', (req, res) => {
 
 /**
  * Translation with exponential backoff retry logic
- * Handles transient failures (503, 429, network errors)
+ * Uses Translation API v3 with glossary support for improved accuracy
+ * Handles transient failures (503, 429, network errors) and glossary fallback
  */
-async function translateWithRetry(text, targetLang, clientId, maxRetries = 3) {
+async function translateWithRetry(text, targetLang, sourceLanguage, clientId, maxRetries = 3) {
+    if (!parent) {
+        logger.error('Translation failed - no project ID configured', { clientId });
+        throw new Error('Translation service not properly configured');
+    }
+
+    // Validate source language
+    if (!sourceLanguage || typeof sourceLanguage !== 'string') {
+        logger.error('Invalid source language parameter', { clientId, sourceLanguage });
+        throw new Error('Source language is required for translation');
+    }
+
+    let useGlossary = glossaryEnabled && glossaryPath;
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            const [translation] = await translateClient.translate(text, targetLang);
+            // Extract language code (e.g., 'ro' from 'ro-RO')
+            const sourceLangCode = sourceLanguage.includes('-')
+                ? sourceLanguage.split('-')[0]
+                : sourceLanguage;
+
+            // Build translation request
+            const request = {
+                parent: parent,
+                contents: [text],
+                mimeType: 'text/plain',
+                sourceLanguageCode: sourceLangCode,
+                targetLanguageCode: targetLang,
+                model: `${parent}/models/${translationModel}`,
+            };
+
+            // Add glossary if enabled and available (for domain-specific terms like religious terminology)
+            if (useGlossary) {
+                request.glossaryConfig = {
+                    glossary: glossaryPath,
+                    ignoreCase: false  // Case-sensitive matching for better accuracy
+                };
+                logger.debug('Using glossary for translation', { glossaryPath, clientId });
+            }
+
+            const [response] = await translateClient.translateText(request);
+            const translation = response.translations[0].translatedText;
+
             return translation;
         } catch (error) {
             const errorCode = error.code ? String(error.code) : '';
+            const errorMessage = error.message || '';
+
+            // Check if this is a glossary-related error
+            const isGlossaryError = errorMessage.includes('glossary') ||
+                                   errorMessage.includes('NOT_FOUND') ||
+                                   errorCode === '5'; // NOT_FOUND code
+
+            // If glossary error on first attempt with glossary, retry without glossary
+            if (isGlossaryError && useGlossary) {
+                logger.warn('Glossary not found or error, retrying without glossary', {
+                    clientId,
+                    glossaryPath,
+                    error: errorMessage
+                });
+                useGlossary = false;
+                // Don't count this as a retry attempt - try again immediately
+                attempt--;
+                continue;
+            }
+
+            // Check if error is retryable (transient network/service issues)
             const isRetryable = errorCode === '503' ||
                                errorCode === '429' ||
+                               errorCode === '14' ||  // UNAVAILABLE
+                               errorCode === '8' ||   // RESOURCE_EXHAUSTED
                                error.code === 503 ||
                                error.code === 429 ||
+                               error.code === 14 ||
+                               error.code === 8 ||
                                error.code === 'ECONNRESET' ||
-                               error.code === 'ETIMEDOUT';
+                               error.code === 'ETIMEDOUT' ||
+                               error.code === 'UNAVAILABLE' ||
+                               error.code === 'RESOURCE_EXHAUSTED';
 
             if (!isRetryable || attempt === maxRetries) {
                 logger.error('Translation failed (non-retryable or max retries)', {
                     clientId,
                     attempt,
-                    error: error.message,
-                    code: error.code
+                    error: errorMessage,
+                    code: error.code,
+                    sourceLanguage,
+                    targetLang,
+                    usedGlossary: useGlossary
                 });
                 throw error;
             }
@@ -220,7 +314,7 @@ async function translateWithRetry(text, targetLang, clientId, maxRetries = 3) {
             const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
             logger.warn(`Translation retry ${attempt}/${maxRetries}`, {
                 clientId,
-                error: error.message,
+                error: errorMessage,
                 code: error.code,
                 delayMs: delay
             });
@@ -550,7 +644,7 @@ io.on('connection', (socket) => {
                                     accumulatedText += (accumulatedText ? ' ' : '') + newText;
 
                                     try {
-                                        const translation = await translateWithRetry(newText, targetLanguage, clientId);
+                                        const translation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
                                         translationCount++;
 
                                         logger.info('✅ Sentence translation completed', {
@@ -622,7 +716,7 @@ io.on('connection', (socket) => {
                                                 accumulatedText += (accumulatedText ? ' ' : '') + newText;
 
                                                 try {
-                                                    const translation = await translateWithRetry(newText, targetLanguage, clientId);
+                                                    const translation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
                                                     translationCount++;
 
                                                     logger.info(`✅ ${reason} translation completed`, {
@@ -676,6 +770,7 @@ io.on('connection', (socket) => {
                             const translation = await translateWithRetry(
                                 transcript,
                                 targetLanguage,
+                                currentLanguage,
                                 clientId
                             );
 
