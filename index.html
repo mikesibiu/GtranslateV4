@@ -1751,8 +1751,27 @@
                 }
             }
 
-            trackBilling(type, amount, language) {
-                // Update billing data in localStorage so billing page can access it
+            async trackBilling(type, amount, language) {
+                // Send billing data to API for persistent storage in database
+                try {
+                    const response = await fetch('/api/billing/track', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ type, amount, language })
+                    });
+
+                    if (response.ok) {
+                        console.log(`💰 Billing tracked: ${type} = ${amount.toFixed(2)} for ${language || 'unknown'}`);
+                    } else {
+                        console.warn('Failed to track billing:', await response.text());
+                    }
+                } catch (e) {
+                    console.warn('Failed to track billing:', e);
+                }
+
+                // Also update localStorage as a backup/cache (for offline viewing)
                 try {
                     const billingData = JSON.parse(localStorage.getItem('gtranslate_billing_session') || '{}');
 
@@ -1802,9 +1821,8 @@
                     }
 
                     localStorage.setItem('gtranslate_billing_session', JSON.stringify(billingData));
-                    console.log(`💰 Billing tracked: ${type} = ${amount.toFixed(2)} for ${language || 'unknown'}`);
                 } catch (e) {
-                    console.warn('Failed to track billing:', e);
+                    console.warn('Failed to update localStorage billing:', e);
                 }
             }
 

@@ -593,13 +593,33 @@
         }
 
         // Simulate usage tracking (in production, this would come from the server)
-        function refreshUsage() {
-            // This is a placeholder - in production, you would fetch from server API
-            // For now, we'll just update the display
-            updateDisplay();
+        async function refreshUsage() {
+            try {
+                // Fetch from database API
+                const response = await fetch('/api/billing/summary');
+                if (response.ok) {
+                    const result = await response.json();
 
-            // Show notification
-            alert('Usage data refreshed!\n\nNote: This is client-side estimation only.\nFor actual billing, visit Google Cloud Console.');
+                    // Update sessionData with database values
+                    sessionData.sttMinutes = result.data.totals.sttMinutes;
+                    sessionData.translationChars = result.data.totals.translationChars;
+                    sessionData.glossaryChars = result.data.totals.glossaryChars;
+                    sessionData.languages = result.data.languages;
+
+                    updateDisplay();
+
+                    // Show success message
+                    const today = new Date().toLocaleDateString();
+                    alert(`✅ Usage data refreshed from database!\n\nShowing data for current month.\n\nFor actual Google Cloud billing:\nhttps://console.cloud.google.com/billing`);
+                } else {
+                    throw new Error('Failed to fetch billing data');
+                }
+            } catch (error) {
+                console.error('Failed to refresh usage:', error);
+                // Fall back to localStorage
+                loadSessionData();
+                alert('⚠️ Could not fetch from database.\nShowing cached data from localStorage.\n\nNote: Database may not be configured yet.');
+            }
         }
 
         // Fetch project ID from server (optional)
@@ -619,13 +639,48 @@
             }
         });
 
-        // Initialize
-        loadSessionData();
+        // Initialize - load from database first, fall back to localStorage
+        async function initializeBillingData() {
+            try {
+                // Try to fetch from database
+                const response = await fetch('/api/billing/summary');
+                if (response.ok) {
+                    const result = await response.json();
+                    sessionData.sttMinutes = result.data.totals.sttMinutes;
+                    sessionData.translationChars = result.data.totals.translationChars;
+                    sessionData.glossaryChars = result.data.totals.glossaryChars;
+                    sessionData.languages = result.data.languages;
+                    sessionData.startTime = Date.now();
+                    updateDisplay();
+                    console.log('✅ Loaded billing data from database');
+                } else {
+                    throw new Error('Database not available');
+                }
+            } catch (error) {
+                console.log('⚠️ Database not available, using localStorage');
+                loadSessionData();
+            }
+        }
+
+        initializeBillingData();
         fetchProjectId();
 
-        // Auto-refresh every 30 seconds
-        setInterval(() => {
-            loadSessionData();
+        // Auto-refresh from database every 30 seconds
+        setInterval(async () => {
+            try {
+                const response = await fetch('/api/billing/summary');
+                if (response.ok) {
+                    const result = await response.json();
+                    sessionData.sttMinutes = result.data.totals.sttMinutes;
+                    sessionData.translationChars = result.data.totals.translationChars;
+                    sessionData.glossaryChars = result.data.totals.glossaryChars;
+                    sessionData.languages = result.data.languages;
+                    updateDisplay();
+                }
+            } catch (error) {
+                // Fall back to localStorage on error
+                loadSessionData();
+            }
         }, 30000);
 
         // Expose function for main app to call

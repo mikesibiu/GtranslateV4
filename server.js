@@ -12,6 +12,7 @@ const { TranslationServiceClient } = require('@google-cloud/translate').v3;
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
+const billingDb = require('./billing-db');
 
 // ===== CONFIGURATION =====
 // Load environment variables if .env file exists
@@ -213,6 +214,85 @@ app.get('/', (req, res) => {
 
 app.get('/billing', (req, res) => {
     res.sendFile(path.join(__dirname, 'billing.html'));
+});
+
+// ===== BILLING API ENDPOINTS =====
+
+// Track usage (called from client)
+app.post('/api/billing/track', express.json(), async (req, res) => {
+    try {
+        const { type, amount, language } = req.body;
+
+        // Validate input
+        if (!type || !amount || !language) {
+            return res.status(400).json({ error: 'Missing required fields: type, amount, language' });
+        }
+
+        if (!['stt', 'translation', 'glossary'].includes(type)) {
+            return res.status(400).json({ error: 'Invalid type. Must be: stt, translation, or glossary' });
+        }
+
+        if (typeof amount !== 'number' || amount < 0) {
+            return res.status(400).json({ error: 'Amount must be a positive number' });
+        }
+
+        // Track usage in database
+        const success = await billingDb.trackUsage(type, amount, language);
+
+        if (success) {
+            res.json({ success: true });
+        } else {
+            res.status(500).json({ error: 'Failed to track usage' });
+        }
+    } catch (error) {
+        logger.error('Error tracking billing usage:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get usage summary
+app.get('/api/billing/summary', async (req, res) => {
+    try {
+        const { startDate, endDate } = req.query;
+
+        // Default to current month if no dates provided
+        const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        const end = endDate ? new Date(endDate) : new Date();
+
+        const summary = await billingDb.getUsageSummary(start, end);
+
+        res.json({
+            success: true,
+            startDate: start.toISOString().split('T')[0],
+            endDate: end.toISOString().split('T')[0],
+            data: summary
+        });
+    } catch (error) {
+        logger.error('Error getting billing summary:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get daily usage for charts
+app.get('/api/billing/daily', async (req, res) => {
+    try {
+        const days = parseInt(req.query.days || '30');
+
+        if (days < 1 || days > 365) {
+            return res.status(400).json({ error: 'Days must be between 1 and 365' });
+        }
+
+        const dailyUsage = await billingDb.getDailyUsage(days);
+
+        res.json({
+            success: true,
+            days,
+            data: dailyUsage
+        });
+    } catch (error) {
+        logger.error('Error getting daily usage:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 // ===== HELPER FUNCTIONS =====
@@ -1076,7 +1156,7 @@ io.on('connection', (socket) => {
 });
 
 // ===== START SERVER =====
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
     logger.info('═══════════════════════════════════════');
     logger.info('🎉 GTranslate V4 - Google Cloud Speech');
     logger.info('═══════════════════════════════════════');
@@ -1085,12 +1165,46 @@ server.listen(PORT, () => {
     logger.info('🌍 Translation: Google Cloud');
     logger.info('📝 Logging: gtranslate-v4.log');
     logger.info('═══════════════════════════════════════');
+
+    // Initialize billing database
+    const dbInitialized = billingDb.initializeDatabase(logger);
+    if (dbInitialized) {
+        await billingDb.createSchema(logger);
+
+        // Purge old billing data (older than 90 days)
+        await billingDb.purgeOldData(90, logger);
+
+        // Schedule daily purge at 2 AM
+        const scheduleDailyPurge = () => {
+            const now = new Date();
+            const next2AM = new Date(
+                now.getFullYear(),
+                now.getMonth(),
+                now.getDate() + 1,
+                2, 0, 0
+            );
+            const timeUntil2AM = next2AM.getTime() - now.getTime();
+
+            setTimeout(async () => {
+                await billingDb.purgeOldData(90, logger);
+                // Schedule next purge
+                setInterval(() => {
+                    billingDb.purgeOldData(90, logger);
+                }, 24 * 60 * 60 * 1000); // Every 24 hours
+            }, timeUntil2AM);
+        };
+
+        scheduleDailyPurge();
+        logger.info('🗑️ Scheduled daily purge of billing data older than 90 days');
+    }
+
     logger.info('✅ Ready to receive connections');
 });
 
 // ===== GRACEFUL SHUTDOWN =====
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
     logger.info('Shutting down gracefully...');
+    await billingDb.closeDatabase(logger);
     server.close(() => {
         logger.info('Server closed');
         process.exit(0);
