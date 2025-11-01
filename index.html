@@ -1076,6 +1076,12 @@
                 this.socket.on('streaming-started', (data) => {
                     console.log('🎤 Streaming started', data);
                     this.updateStatus('Listening...', 'listening');
+
+                    // Store source language for billing tracking
+                    this.currentSourceLanguage = data.sourceLanguage;
+
+                    // Start tracking STT time for billing
+                    this.sttStartTime = Date.now();
                 });
 
                 this.socket.on('interim-result', (data) => {
@@ -1086,6 +1092,19 @@
                 this.socket.on('translation-result', (data) => {
                     console.log('📥 TRANSLATION RECEIVED!', data);
                     this.addTranslation(data);
+
+                    // Track translation usage for billing
+                    if (data.translated && this.currentSourceLanguage) {
+                        const charCount = data.translated.length;
+                        // Assume glossary is used if available (you could enhance this with actual glossary status)
+                        const useGlossary = false; // Set to true when glossary is confirmed enabled
+
+                        if (useGlossary) {
+                            this.trackBilling('glossary', charCount, this.currentSourceLanguage);
+                        } else {
+                            this.trackBilling('translation', charCount, this.currentSourceLanguage);
+                        }
+                    }
                 });
 
                 this.socket.on('streaming-stopped', (data) => {
@@ -1496,6 +1515,14 @@
             stopRecording() {
                 this.isRecording = false;
 
+                // Track STT usage for billing
+                if (this.sttStartTime && this.currentSourceLanguage) {
+                    const sttDurationMs = Date.now() - this.sttStartTime;
+                    const sttMinutes = sttDurationMs / 60000;
+                    this.trackBilling('stt', sttMinutes, this.currentSourceLanguage);
+                    this.sttStartTime = null;
+                }
+
                 // Release wake lock - screen can turn off now
                 this.releaseWakeLock();
 
@@ -1721,6 +1748,63 @@
                 if (this.latencyMonitorInterval) {
                     clearInterval(this.latencyMonitorInterval);
                     this.latencyMonitorInterval = null;
+                }
+            }
+
+            trackBilling(type, amount, language) {
+                // Update billing data in localStorage so billing page can access it
+                try {
+                    const billingData = JSON.parse(localStorage.getItem('gtranslate_billing_session') || '{}');
+
+                    // Initialize if needed
+                    if (!billingData.languages) {
+                        billingData.languages = {};
+                        billingData.sttMinutes = 0;
+                        billingData.translationChars = 0;
+                        billingData.glossaryChars = 0;
+                        billingData.startTime = Date.now();
+                    }
+
+                    // Update totals
+                    switch(type) {
+                        case 'stt':
+                            billingData.sttMinutes = (billingData.sttMinutes || 0) + amount;
+                            break;
+                        case 'translation':
+                            billingData.translationChars = (billingData.translationChars || 0) + amount;
+                            break;
+                        case 'glossary':
+                            billingData.glossaryChars = (billingData.glossaryChars || 0) + amount;
+                            break;
+                    }
+
+                    // Update per-language
+                    if (language) {
+                        if (!billingData.languages[language]) {
+                            billingData.languages[language] = {
+                                sttMinutes: 0,
+                                translationChars: 0,
+                                glossaryChars: 0
+                            };
+                        }
+
+                        switch(type) {
+                            case 'stt':
+                                billingData.languages[language].sttMinutes += amount;
+                                break;
+                            case 'translation':
+                                billingData.languages[language].translationChars += amount;
+                                break;
+                            case 'glossary':
+                                billingData.languages[language].glossaryChars += amount;
+                                break;
+                        }
+                    }
+
+                    localStorage.setItem('gtranslate_billing_session', JSON.stringify(billingData));
+                    console.log(`💰 Billing tracked: ${type} = ${amount.toFixed(2)} for ${language || 'unknown'}`);
+                } catch (e) {
+                    console.warn('Failed to track billing:', e);
                 }
             }
 

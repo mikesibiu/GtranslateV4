@@ -133,6 +133,63 @@
             background: #f8f9fa;
         }
 
+        .language-card {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            transition: box-shadow 0.3s;
+        }
+
+        .language-card:hover {
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .language-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .language-name {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .language-cost {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .language-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .stat-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #333;
+        }
+
         .cost-breakdown {
             background: #f8f9fa;
             padding: 20px;
@@ -312,6 +369,13 @@
             </div>
 
             <div class="section">
+                <h2>🌍 Cost by Source Language</h2>
+                <div id="languageBreakdown">
+                    <p style="color: #666; font-style: italic;">No language data yet. Start using the app to see language-specific costs.</p>
+                </div>
+            </div>
+
+            <div class="section">
                 <h2>ℹ️ Pricing Information</h2>
                 <div class="info-box">
                     <h4>Google Cloud Speech-to-Text API</h4>
@@ -351,7 +415,8 @@
             sttMinutes: 0,
             translationChars: 0,
             glossaryChars: 0,
-            startTime: Date.now()
+            startTime: Date.now(),
+            languages: {} // Track per-language usage: { 'ro-RO': { sttMinutes, translationChars, glossaryChars }, ... }
         };
 
         // Load session data from localStorage
@@ -434,7 +499,97 @@
             // Update timestamp
             document.getElementById('lastUpdated').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
 
+            // Update language breakdown
+            updateLanguageBreakdown();
+
             saveSessionData();
+        }
+
+        // Language name mapping
+        const languageNames = {
+            'ro-RO': '🇷🇴 Romanian',
+            'ru-RU': '🇷🇺 Russian',
+            'en-US': '🇺🇸 English (US)',
+            'en-GB': '🇬🇧 English (UK)',
+            'es-ES': '🇪🇸 Spanish',
+            'fr-FR': '🇫🇷 French',
+            'de-DE': '🇩🇪 German',
+            'it-IT': '🇮🇹 Italian',
+            'pt-PT': '🇵🇹 Portuguese',
+            'pl-PL': '🇵🇱 Polish',
+            'uk-UA': '🇺🇦 Ukrainian',
+            'ja-JP': '🇯🇵 Japanese',
+            'zh-CN': '🇨🇳 Chinese (Simplified)',
+            'ko-KR': '🇰🇷 Korean',
+            'ar-SA': '🇸🇦 Arabic'
+        };
+
+        function updateLanguageBreakdown() {
+            const container = document.getElementById('languageBreakdown');
+
+            const languages = sessionData.languages || {};
+            const languageCodes = Object.keys(languages);
+
+            if (languageCodes.length === 0) {
+                container.innerHTML = '<p style="color: #666; font-style: italic;">No language data yet. Start using the app to see language-specific costs.</p>';
+                return;
+            }
+
+            // Calculate costs for each language
+            const languageData = languageCodes.map(code => {
+                const data = languages[code];
+                const sttCost = Math.max(0, data.sttMinutes - 60) * 0.024;
+                const translationCost = Math.max(0, data.translationChars - 500000) * (20 / 1000000);
+                const glossaryCost = data.glossaryChars * (25 / 1000000);
+                const totalCost = sttCost + translationCost + glossaryCost;
+
+                return {
+                    code,
+                    name: languageNames[code] || code,
+                    sttMinutes: data.sttMinutes,
+                    translationChars: data.translationChars,
+                    glossaryChars: data.glossaryChars,
+                    sttCost,
+                    translationCost,
+                    glossaryCost,
+                    totalCost
+                };
+            });
+
+            // Sort by total cost (highest first)
+            languageData.sort((a, b) => b.totalCost - a.totalCost);
+
+            // Build HTML
+            let html = '';
+            languageData.forEach(lang => {
+                html += `
+                    <div class="language-card">
+                        <div class="language-header">
+                            <div class="language-name">${lang.name}</div>
+                            <div class="language-cost">$${lang.totalCost.toFixed(4)}</div>
+                        </div>
+                        <div class="language-stats">
+                            <div class="stat-item">
+                                <div class="stat-label">Speech-to-Text</div>
+                                <div class="stat-value">${lang.sttMinutes.toFixed(2)} min</div>
+                                <div class="stat-label" style="margin-top: 5px; color: #667eea;">$${lang.sttCost.toFixed(4)}</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">Translation</div>
+                                <div class="stat-value">${lang.translationChars.toLocaleString()} chars</div>
+                                <div class="stat-label" style="margin-top: 5px; color: #667eea;">$${lang.translationCost.toFixed(4)}</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">Glossary Translation</div>
+                                <div class="stat-value">${lang.glossaryChars.toLocaleString()} chars</div>
+                                <div class="stat-label" style="margin-top: 5px; color: #667eea;">$${lang.glossaryCost.toFixed(4)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
         }
 
         // Simulate usage tracking (in production, this would come from the server)
@@ -474,7 +629,8 @@
         }, 30000);
 
         // Expose function for main app to call
-        window.trackUsage = function(type, amount) {
+        window.trackUsage = function(type, amount, language) {
+            // Track overall totals
             switch(type) {
                 case 'stt':
                     sessionData.sttMinutes += amount;
@@ -486,6 +642,30 @@
                     sessionData.glossaryChars += amount;
                     break;
             }
+
+            // Track per-language if language is provided
+            if (language) {
+                if (!sessionData.languages[language]) {
+                    sessionData.languages[language] = {
+                        sttMinutes: 0,
+                        translationChars: 0,
+                        glossaryChars: 0
+                    };
+                }
+
+                switch(type) {
+                    case 'stt':
+                        sessionData.languages[language].sttMinutes += amount;
+                        break;
+                    case 'translation':
+                        sessionData.languages[language].translationChars += amount;
+                        break;
+                    case 'glossary':
+                        sessionData.languages[language].glossaryChars += amount;
+                        break;
+                }
+            }
+
             updateDisplay();
         };
     </script>
