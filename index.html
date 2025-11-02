@@ -1640,6 +1640,11 @@
                     this.clearInterimTranslations();
                 }
 
+                // EarBuds mode: Audio-first, skip visual translation cards (only show STT interim text)
+                if (this.currentMode === 'earbuds') {
+                    return; // Skip visual display in EarBuds mode
+                }
+
                 // Use template literals for faster HTML construction
                 const item = document.createElement('div');
                 item.className = data.isInterim ? 'translation-item interim' : 'translation-item';
