@@ -1595,13 +1595,6 @@
                     }
                 }
 
-                // EarBuds mode: Enable TTS but ALSO show visual display as backup
-                if (this.currentMode === 'earbuds') {
-                    // Speak translations in EarBuds mode (audio-first)
-                    this.speakTranslation(data.translated, this.targetLanguage.value);
-                    // Continue to visual display below - don't return early
-                }
-
                 // Display translations on screen (ALL modes including EarBuds)
                 this.translationCount++;
                 this.wordsTranslated += data.original.split(/\s+/).length;
@@ -1629,7 +1622,8 @@
                     // Enable export button once we have translations
                     this.exportBtn.disabled = false;
 
-                    // Speak final translations aloud (not interim) - only in non-EarBuds modes if TTS enabled
+                    // Speak ONLY final translations (not interim) in ALL modes when TTS enabled
+                    // EarBuds mode: ttsEnabled = true (auto), Talks/Q&A: ttsEnabled = false (unless manually enabled)
                     this.speakTranslation(data.translated, this.targetLanguage.value);
                 }
 
