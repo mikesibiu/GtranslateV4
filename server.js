@@ -330,8 +330,14 @@ async function translateWithRetry(text, targetLang, sourceLanguage, clientId, ma
                 mimeType: 'text/plain',
                 sourceLanguageCode: sourceLangCode,
                 targetLanguageCode: targetLang,
-                model: `${parent}/models/${translationModel}`,
             };
+
+            // Add model parameter only if using 'nmt' (standard neural translation)
+            // Don't specify model to use Google's latest/best automatic model selection
+            if (translationModel === 'nmt') {
+                request.model = `${parent}/models/nmt`;
+            }
+            // For 'advanced', omit model parameter to use Google's best available model
 
             // Add glossary if enabled and available (for domain-specific terms like religious terminology)
             if (useGlossary) {
