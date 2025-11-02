@@ -110,7 +110,7 @@ const parent = projectId ? `projects/${projectId}/locations/${location}` : null;
 const glossaryId = 'ro-en-religious-terms';
 const glossaryPath = parent ? `${parent}/glossaries/${glossaryId}` : null;
 const glossaryEnabled = process.env.GLOSSARY_ENABLED === 'true';
-const translationModel = process.env.TRANSLATION_MODEL || 'nmt';
+const translationModel = process.env.TRANSLATION_MODEL || 'advanced';
 
 if (!projectId) {
     logger.error('❌ No Google Cloud project ID found - translations will fail');
@@ -337,7 +337,7 @@ async function translateWithRetry(text, targetLang, sourceLanguage, clientId, ma
             if (useGlossary) {
                 request.glossaryConfig = {
                     glossary: glossaryPath,
-                    ignoreCase: false  // Case-sensitive matching for better accuracy
+                    ignoreCase: true  // Case-insensitive for Romanian religious terms (Dumnezeu vs dumnezeu)
                 };
                 logger.debug('Using glossary for translation', { glossaryPath, clientId });
             }

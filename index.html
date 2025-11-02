@@ -698,7 +698,7 @@
                 <span class="mode-toggle-label">Translation Mode:</span>
                 <div class="mode-toggle">
                     <button class="mode-option active" data-mode="talks" data-interval="10000">Talks (10s)</button>
-                    <button class="mode-option" data-mode="qa" data-interval="4000" data-summary-interval="30000">Q&A (4s/30s)</button>
+                    <button class="mode-option" data-mode="qa" data-interval="8000" data-summary-interval="30000">Q&A (8s/30s)</button>
                     <button class="mode-option" data-mode="earbuds" data-interval="15000" data-enable-tts="true">🎧 EarBuds (15s)</button>
                 </div>
             </div>
@@ -1576,6 +1576,25 @@
             }
 
             addTranslation(data) {
+                // Deduplicate: skip if same translation was recently displayed
+                const normalizedTranslated = sanitizeText(data.translated).toLowerCase().trim();
+
+                if (normalizedTranslated.length > 0) {
+                    // Check last 3 translations for exact duplicates
+                    const recentTranslations = Array.from(this.resultsContainer.children)
+                        .slice(0, 3)
+                        .map(el => {
+                            const translatedEl = el.querySelector('.translated');
+                            return translatedEl ? translatedEl.textContent.replace('💬 ', '').toLowerCase().trim() : '';
+                        })
+                        .filter(t => t.length > 0);
+
+                    if (recentTranslations.some(t => t === normalizedTranslated)) {
+                        console.log('⏭️ Skipping duplicate translation:', normalizedTranslated.substring(0, 50));
+                        return;
+                    }
+                }
+
                 // EarBuds mode: Enable TTS but ALSO show visual display as backup
                 if (this.currentMode === 'earbuds') {
                     // Speak translations in EarBuds mode (audio-first)
