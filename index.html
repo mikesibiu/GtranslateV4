@@ -2161,6 +2161,29 @@
                     return;
                 }
 
+                // CRITICAL: Ensure voices are loaded before processing TTS
+                let allVoices = this.speechSynthesis.getVoices();
+
+                if (allVoices.length === 0) {
+                    console.warn('⚠️ Voices not loaded yet, retrying in 100ms...');
+                    // Don't dequeue yet - will retry
+                    this.isSpeaking = false;
+
+                    // Retry after short delay
+                    setTimeout(() => {
+                        if (this.ttsQueue.length > 0 && !this.isSpeaking) {
+                            this.processNextInQueue();
+                        }
+                    }, 100);
+                    return;
+                }
+
+                // Rebuild voice cache if empty (race condition protection)
+                if (this.voiceCache.size === 0) {
+                    console.warn('⚠️ Voice cache empty, rebuilding...');
+                    this.buildVoiceCache();
+                }
+
                 // Get next item from queue
                 const { text, targetLanguage } = this.ttsQueue.shift();
                 this.isSpeaking = true;
@@ -2248,17 +2271,27 @@
                     }
                 }
 
-                // Final fallback if no voice found
+                // Final fallback if no voice found for target language
                 if (!preferredVoice && langVoices.length > 0) {
                     preferredVoice = langVoices[0];
+                    console.warn(`⚠️ Using fallback voice for ${speechLang}: ${preferredVoice.name}`);
                 }
 
-                if (preferredVoice) {
-                    utterance.voice = preferredVoice;
-                    console.log(`🔊 Using voice: ${preferredVoice.name} (${preferredVoice.lang}) - Local: ${preferredVoice.localService}`);
-                } else {
-                    console.warn(`⚠️ No voice found for language: ${speechLang}, using browser default`);
+                // CRITICAL: If still no voice, use ANY available voice (prevents silent failure on mobile)
+                if (!preferredVoice && allVoices.length > 0) {
+                    preferredVoice = allVoices[0];
+                    console.error(`❌ No matching voice found, using first available: ${preferredVoice.name}`);
                 }
+
+                // Fail gracefully if absolutely no voices available
+                if (!preferredVoice) {
+                    console.error('❌ CRITICAL: No voices available at all! Cannot play TTS.');
+                    this.processNextInQueue(); // Skip this item and continue
+                    return;
+                }
+
+                utterance.voice = preferredVoice;
+                console.log(`🔊 Using voice: ${preferredVoice.name} (${preferredVoice.lang}) - Local: ${preferredVoice.localService}`);
 
                 // Speech settings - optimize based on voice quality
                 // High-quality voices sound better at normal pitch, low-quality need lower pitch
