@@ -765,22 +765,22 @@ io.on('connection', (socket) => {
                                 const PAUSE_THRESHOLD_MS = 3000; // 3 seconds of silence triggers translation
                                 const MAX_INTERVAL_MS = intervalMs; // 15 seconds maximum
 
-                                // Clear existing timer if text changed (new word arrived)
-                                if (textChanged && restartStreamTimer) {
+                                // Calculate time until max interval BEFORE clearing timer
+                                if (!lastTranslationTime) {
+                                    lastTranslationTime = Date.now();
+                                }
+                                const elapsedSinceLastTranslation = Date.now() - lastTranslationTime;
+                                const timeUntilMaxInterval = Math.max(0, MAX_INTERVAL_MS - elapsedSinceLastTranslation);
+
+                                // CRITICAL: Don't clear timer if max interval reached (15s elapsed)
+                                // This prevents continuous speech from delaying translations forever
+                                if (textChanged && restartStreamTimer && timeUntilMaxInterval > 0) {
                                     clearTimeout(restartStreamTimer);
                                     restartStreamTimer = null;
                                 }
 
                                 // Start/restart timer if we don't have one running
                                 if (!restartStreamTimer) {
-                                    // Track when translation window started
-                                    if (!lastTranslationTime) {
-                                        lastTranslationTime = Date.now();
-                                    }
-
-                                    const elapsedSinceLastTranslation = Date.now() - lastTranslationTime;
-                                    const timeUntilMaxInterval = Math.max(0, MAX_INTERVAL_MS - elapsedSinceLastTranslation);
-
                                     // Use pause threshold, but cap at remaining time until max interval
                                     // When timeUntilMaxInterval = 0 (15s elapsed), timer fires immediately
                                     const timerDuration = Math.min(PAUSE_THRESHOLD_MS, timeUntilMaxInterval);
