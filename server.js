@@ -782,7 +782,8 @@ io.on('connection', (socket) => {
                                     const timeUntilMaxInterval = Math.max(0, MAX_INTERVAL_MS - elapsedSinceLastTranslation);
 
                                     // Use pause threshold, but cap at remaining time until max interval
-                                    const timerDuration = Math.min(PAUSE_THRESHOLD_MS, timeUntilMaxInterval || PAUSE_THRESHOLD_MS);
+                                    // When timeUntilMaxInterval = 0 (15s elapsed), timer fires immediately
+                                    const timerDuration = Math.min(PAUSE_THRESHOLD_MS, timeUntilMaxInterval);
 
                                     logger.debug(`⏱️ Starting timer: ${timerDuration}ms (pause detect: ${PAUSE_THRESHOLD_MS}ms, max interval in: ${timeUntilMaxInterval}ms)`, {
                                         clientId,
