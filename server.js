@@ -765,52 +765,80 @@ io.on('connection', (socket) => {
                                 const PAUSE_THRESHOLD_MS = 3000; // 3 seconds of silence triggers translation
                                 const MAX_INTERVAL_MS = intervalMs; // 15 seconds maximum
 
-                                // Calculate time until max interval BEFORE clearing timer
+                                // Initialize translation time tracker
                                 if (!lastTranslationTime) {
                                     lastTranslationTime = Date.now();
                                 }
+
+                                // ARCHITECTURAL FIX: Check max interval FIRST, independent of timer
                                 const elapsedSinceLastTranslation = Date.now() - lastTranslationTime;
-                                const timeUntilMaxInterval = Math.max(0, MAX_INTERVAL_MS - elapsedSinceLastTranslation);
 
-                                // CRITICAL: Don't clear timer if max interval reached (15s elapsed)
-                                // This prevents continuous speech from delaying translations forever
-                                if (textChanged && restartStreamTimer && timeUntilMaxInterval > 0) {
-                                    clearTimeout(restartStreamTimer);
-                                    restartStreamTimer = null;
-                                }
-
-                                // Start/restart timer if we don't have one running
-                                if (!restartStreamTimer) {
-                                    // Use pause threshold, but cap at remaining time until max interval
-                                    // When timeUntilMaxInterval = 0 (15s elapsed), timer fires immediately
-                                    const timerDuration = Math.min(PAUSE_THRESHOLD_MS, timeUntilMaxInterval);
-
-                                    logger.debug(`⏱️ Starting timer: ${timerDuration}ms (pause detect: ${PAUSE_THRESHOLD_MS}ms, max interval in: ${timeUntilMaxInterval}ms)`, {
+                                if (elapsedSinceLastTranslation >= MAX_INTERVAL_MS) {
+                                    // Max interval reached - translate immediately, regardless of timer state
+                                    logger.info('⏰ MAX INTERVAL reached - translating immediately', {
                                         clientId,
-                                        text: transcript.substring(0, 50)
+                                        elapsedMs: elapsedSinceLastTranslation,
+                                        maxIntervalMs: MAX_INTERVAL_MS
                                     });
 
-                                    restartStreamTimer = setTimeout(async () => {
-                                        const reason = timeUntilMaxInterval === 0 ? 'MAX_INTERVAL' : 'PAUSE_DETECTED';
-                                        logger.info(`🔔 Timer fired! Reason: ${reason}`, { clientId });
+                                    // Clear any pending pause timer
+                                    if (restartStreamTimer) {
+                                        clearTimeout(restartStreamTimer);
+                                        restartStreamTimer = null;
+                                    }
 
-                                        if (lastInterimText.trim().length > 0 && sessionActive) {
+                                    // Translate new text
+                                    const newText = lastInterimText.substring(lastTranslatedText.length).trim();
+                                    if (newText.length > 0) {
+                                        accumulatedText += (accumulatedText ? ' ' : '') + newText;
+
+                                        try {
+                                            const translation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
+                                            translationCount++;
+
+                                            logger.info('✅ MAX_INTERVAL translation completed', {
+                                                clientId,
+                                                original: newText.substring(0, 50),
+                                                translated: translation.substring(0, 50),
+                                                count: translationCount
+                                            });
+
+                                            socket.emit('translation-result', {
+                                                original: newText,
+                                                translated: translation,
+                                                accumulated: accumulatedText,
+                                                count: translationCount,
+                                                isInterim: true
+                                            });
+
+                                            lastTranslatedText = lastInterimText;
+                                            lastTranslationTime = Date.now(); // Reset max interval timer
+                                        } catch (error) {
+                                            logger.error('MAX_INTERVAL translation error', { clientId, error: error.message });
+                                        }
+                                    }
+                                } else {
+                                    // Max interval not reached - use pause detection timer
+                                    // Only restart timer if text actually changed
+                                    if (textChanged) {
+                                        if (restartStreamTimer) {
+                                            clearTimeout(restartStreamTimer);
+                                            restartStreamTimer = null;
+                                        }
+
+                                        // Start pause detection timer
+                                        restartStreamTimer = setTimeout(async () => {
+                                            logger.info('⏰ PAUSE detected - translating', { clientId });
+
                                             const newText = lastInterimText.substring(lastTranslatedText.length).trim();
-
-                                            if (newText.length > 0) {
-                                                logger.info(`⏰ Translating (${reason})`, {
-                                                    clientId,
-                                                    newTextLength: newText.length,
-                                                    newText: newText.substring(0, 50)
-                                                });
-
+                                            if (newText.length > 0 && sessionActive) {
                                                 accumulatedText += (accumulatedText ? ' ' : '') + newText;
 
                                                 try {
                                                     const translation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
                                                     translationCount++;
 
-                                                    logger.info(`✅ ${reason} translation completed`, {
+                                                    logger.info('✅ PAUSE translation completed', {
                                                         clientId,
                                                         original: newText.substring(0, 50),
                                                         translated: translation.substring(0, 50),
@@ -827,19 +855,14 @@ io.on('connection', (socket) => {
 
                                                     lastTranslatedText = lastInterimText;
                                                     lastTranslationTime = Date.now(); // Reset max interval timer
-                                                    restartStreamTimer = null;
                                                 } catch (error) {
-                                                    logger.error('Translation error', { clientId, error: error.message });
-                                                    restartStreamTimer = null;
+                                                    logger.error('PAUSE translation error', { clientId, error: error.message });
                                                 }
-                                            } else {
-                                                logger.debug('⏰ No new text, skipping', { clientId });
-                                                restartStreamTimer = null;
                                             }
-                                        } else {
+
                                             restartStreamTimer = null;
-                                        }
-                                    }, timerDuration);
+                                        }, PAUSE_THRESHOLD_MS);
+                                    }
                                 }
                             }
                         }
