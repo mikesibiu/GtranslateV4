@@ -702,224 +702,185 @@ io.on('connection', (socket) => {
                         sessionActive
                     });
 
-                    // Send interim results to client (only if session still active)
+
+                    // Send interim results to client for visual feedback
                     if (sessionActive) {
                         socket.emit('interim-result', {
                             text: transcript,
                             isFinal
                         });
 
-                        // Track interim text for sentence detection + pause detection with 15s max
-                        if (!isFinal) {
-                            const previousInterimText = lastInterimText;
-                            lastInterimText = transcript;
+                        // Update activity timestamp
+                        updateActivity();
 
-                            // Detect sentence endings and text changes
-                            const hasSentenceEnding = /[.!?。！？]\s*$/.test(transcript.trim());
-                            const hasEllipsis = /\.{2,}\s*$/.test(transcript.trim());
-                            const textChanged = previousInterimText !== transcript;
+                        // Track text changes for pause detection
+                        const previousInterimText = lastInterimText;
+                        lastInterimText = transcript;
+                        const textChanged = previousInterimText !== transcript;
 
-                            // Translate immediately on sentence ending
-                            if (hasSentenceEnding && !hasEllipsis) {
-                                // Clear timer - we're translating now
-                                if (restartStreamTimer) {
-                                    clearTimeout(restartStreamTimer);
-                                    restartStreamTimer = null;
-                                }
-
-                                const newText = lastInterimText.substring(lastTranslatedText.length).trim();
-                                if (newText.length > 0) {
-                                    logger.info('✅ Sentence ending - translating immediately', {
-                                        clientId,
-                                        text: newText.substring(0, 50)
-                                    });
-
-                                    accumulatedText += (accumulatedText ? ' ' : '') + newText;
-
-                                    try {
-                                        const translation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
-                                        translationCount++;
-
-                                        logger.info('✅ Sentence translation completed', {
-                                            clientId,
-                                            original: newText.substring(0, 50),
-                                            translated: translation.substring(0, 50),
-                                            count: translationCount
-                                        });
-
-                                        socket.emit('translation-result', {
-                                            original: newText,
-                                            translated: translation,
-                                            accumulated: accumulatedText,
-                                            count: translationCount,
-                                            isInterim: true
-                                        });
-
-                                        lastTranslatedText = lastInterimText;
-                                    } catch (error) {
-                                        logger.error('Sentence translation error', { clientId, error: error.message });
-                                    }
-                                }
-                            }
-                            // Hybrid: Pause detection (3s) with 15s maximum
-                            // - If speaker pauses 3s: translate
-                            // - If speaking continuously: translate at 15s max
-                            else {
-                                const PAUSE_THRESHOLD_MS = 3000; // 3 seconds of silence triggers translation
-                                const MAX_INTERVAL_MS = intervalMs; // 15 seconds maximum
-
-                                // Initialize translation time tracker
-                                if (!lastTranslationTime) {
-                                    lastTranslationTime = Date.now();
-                                }
-
-                                // ARCHITECTURAL FIX: Check max interval FIRST, independent of timer
-                                const elapsedSinceLastTranslation = Date.now() - lastTranslationTime;
-
-                                if (elapsedSinceLastTranslation >= MAX_INTERVAL_MS) {
-                                    // Max interval reached - translate immediately, regardless of timer state
-                                    logger.info('⏰ MAX INTERVAL reached - translating immediately', {
-                                        clientId,
-                                        elapsedMs: elapsedSinceLastTranslation,
-                                        maxIntervalMs: MAX_INTERVAL_MS
-                                    });
-
-                                    // Clear any pending pause timer
-                                    if (restartStreamTimer) {
-                                        clearTimeout(restartStreamTimer);
-                                        restartStreamTimer = null;
-                                    }
-
-                                    // Translate new text
-                                    const newText = lastInterimText.substring(lastTranslatedText.length).trim();
-                                    if (newText.length > 0) {
-                                        accumulatedText += (accumulatedText ? ' ' : '') + newText;
-
-                                        try {
-                                            const translation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
-                                            translationCount++;
-
-                                            logger.info('✅ MAX_INTERVAL translation completed', {
-                                                clientId,
-                                                original: newText.substring(0, 50),
-                                                translated: translation.substring(0, 50),
-                                                count: translationCount
-                                            });
-
-                                            socket.emit('translation-result', {
-                                                original: newText,
-                                                translated: translation,
-                                                accumulated: accumulatedText,
-                                                count: translationCount,
-                                                isInterim: true
-                                            });
-
-                                            lastTranslatedText = lastInterimText;
-                                            lastTranslationTime = Date.now(); // Reset max interval timer
-                                        } catch (error) {
-                                            logger.error('MAX_INTERVAL translation error', { clientId, error: error.message });
-                                        }
-                                    }
-                                } else {
-                                    // Max interval not reached - use pause detection timer
-                                    // Only restart timer if text actually changed
-                                    if (textChanged) {
-                                        if (restartStreamTimer) {
-                                            clearTimeout(restartStreamTimer);
-                                            restartStreamTimer = null;
-                                        }
-
-                                        // Start pause detection timer
-                                        restartStreamTimer = setTimeout(async () => {
-                                            logger.info('⏰ PAUSE detected - translating', { clientId });
-
-                                            const newText = lastInterimText.substring(lastTranslatedText.length).trim();
-                                            if (newText.length > 0 && sessionActive) {
-                                                accumulatedText += (accumulatedText ? ' ' : '') + newText;
-
-                                                try {
-                                                    const translation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
-                                                    translationCount++;
-
-                                                    logger.info('✅ PAUSE translation completed', {
-                                                        clientId,
-                                                        original: newText.substring(0, 50),
-                                                        translated: translation.substring(0, 50),
-                                                        count: translationCount
-                                                    });
-
-                                                    socket.emit('translation-result', {
-                                                        original: newText,
-                                                        translated: translation,
-                                                        accumulated: accumulatedText,
-                                                        count: translationCount,
-                                                        isInterim: true
-                                                    });
-
-                                                    lastTranslatedText = lastInterimText;
-                                                    lastTranslationTime = Date.now(); // Reset max interval timer
-                                                } catch (error) {
-                                                    logger.error('PAUSE translation error', { clientId, error: error.message });
-                                                }
-                                            }
-
-                                            restartStreamTimer = null;
-                                        }, PAUSE_THRESHOLD_MS);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Translate on final results (even if session stopped - Google sends final after stop)
-                    if (isFinal && transcript.trim().length > 0) {
-                        // Cancel forced translation timer since we got a real final result
-                        if (restartStreamTimer) {
+                        // Clear pause detection timer if text is still changing
+                        if (textChanged && restartStreamTimer) {
                             clearTimeout(restartStreamTimer);
                             restartStreamTimer = null;
                         }
 
-                        accumulatedText += (accumulatedText ? ' ' : '') + transcript;
-                        lastInterimText = ''; // Clear interim after final
-                        lastTranslatedText = ''; // Reset for next segment
+                        // ===========================================
+                        // CENTRALIZED TRANSLATION DECISION
+                        // ===========================================
 
-                        try {
-                            const translation = await translateWithRetry(
-                                transcript,
-                                targetLanguage,
-                                currentLanguage,
-                                clientId
-                            );
+                        const decision = translationRules.shouldTranslate({
+                            text: transcript,
+                            isFinal: isFinal,
+                            timeSinceLastChange: textChanged ? 0 : (Date.now() - (lastTextChangeTime || Date.now())),
+                            trigger: isFinal ? 'final' : 'interim',
+                            clientId: clientId
+                        });
 
-                            translationCount++;
+                        // Update last text change time
+                        if (textChanged) {
+                            lastTextChangeTime = Date.now();
+                        }
 
-                            logger.info('✅ Translation completed', {
-                                clientId,
-                                original: transcript.substring(0, 50),
-                                translated: translation.substring(0, 50),
-                                count: translationCount
-                            });
+                        // ===========================================
+                        // ACT ON DECISION
+                        // ===========================================
 
-                            socket.emit('translation-result', {
-                                original: transcript,
-                                translated: translation,
-                                accumulated: accumulatedText,
-                                count: translationCount,
-                                isInterim: false  // Final Google Cloud translation
-                            });
-
-                            // Reset timer after successful final result
+                        if (decision.shouldTranslate) {
+                            // Clear any pending pause timer - we're translating now
                             if (restartStreamTimer) {
                                 clearTimeout(restartStreamTimer);
                                 restartStreamTimer = null;
                             }
-                        } catch (error) {
-                            logger.error('Translation error', {
+
+                            const newText = decision.newText;
+
+                            if (newText.length > 0) {
+                                accumulatedText = translationRules.accumulatedText;
+
+                                try {
+                                    const translation = await translateWithRetry(
+                                        newText,
+                                        targetLanguage,
+                                        currentLanguage,
+                                        clientId
+                                    );
+
+                                    translationCount++;
+
+                                    logger.info('✅ Translation completed', {
+                                        clientId,
+                                        reason: decision.reason,
+                                        confidence: decision.confidence,
+                                        original: newText.substring(0, 50),
+                                        translated: translation.substring(0, 50),
+                                        count: translationCount,
+                                        isComplete: decision.isComplete
+                                    });
+
+                                    // Record translation in rules engine
+                                    translationRules.recordTranslation(transcript, translation);
+
+                                    socket.emit('translation-result', {
+                                        original: newText,
+                                        translated: translation,
+                                        accumulated: accumulatedText,
+                                        count: translationCount,
+                                        isInterim: !decision.isComplete,  // Use rules engine's determination
+                                        reason: decision.reason  // Include reasoning for debugging
+                                    });
+
+                                    // Update tracking variables
+                                    lastTranslatedText = transcript;
+                                    lastTranslationTime = Date.now();
+
+                                    // Reset for new utterance if this was a final/complete result
+                                    if (decision.isComplete) {
+                                        translationRules.resetForNewUtterance();
+                                        lastInterimText = '';
+                                        lastTranslatedText = '';
+                                    }
+
+                                } catch (error) {
+                                    logger.error('Translation error', {
+                                        clientId,
+                                        reason: decision.reason,
+                                        error: error.message
+                                    });
+                                    socket.emit('translation-error', {
+                                        message: error.message
+                                    });
+                                }
+                            }
+                        } else {
+                            // Translation rejected - maybe start pause detection timer
+                            // Only set pause timer for interim results when max interval not reached
+                            if (!isFinal && !restartStreamTimer && textChanged) {
+                                const pauseMs = translationRules.getConfig().pauseDetectionMs;
+
+                                restartStreamTimer = setTimeout(async () => {
+                                    logger.info('⏰ PAUSE timer fired - checking rules engine', { clientId });
+
+                                    // Re-check with rules engine after pause
+                                    const pauseDecision = translationRules.shouldTranslate({
+                                        text: lastInterimText,
+                                        isFinal: false,
+                                        timeSinceLastChange: pauseMs,
+                                        trigger: 'pause',
+                                        clientId: clientId
+                                    });
+
+                                    if (pauseDecision.shouldTranslate && sessionActive) {
+                                        const newText = pauseDecision.newText;
+
+                                        if (newText.length > 0) {
+                                            accumulatedText = translationRules.accumulatedText;
+
+                                            try {
+                                                const translation = await translateWithRetry(
+                                                    newText,
+                                                    targetLanguage,
+                                                    currentLanguage,
+                                                    clientId
+                                                );
+
+                                                translationCount++;
+
+                                                logger.info('✅ PAUSE translation completed', {
+                                                    clientId,
+                                                    original: newText.substring(0, 50),
+                                                    translated: translation.substring(0, 50),
+                                                    count: translationCount
+                                                });
+
+                                                translationRules.recordTranslation(lastInterimText, translation);
+
+                                                socket.emit('translation-result', {
+                                                    original: newText,
+                                                    translated: translation,
+                                                    accumulated: accumulatedText,
+                                                    count: translationCount,
+                                                    isInterim: !pauseDecision.isComplete,
+                                                    reason: pauseDecision.reason
+                                                });
+
+                                                lastTranslatedText = lastInterimText;
+                                                lastTranslationTime = Date.now();
+
+                                            } catch (error) {
+                                                logger.error('PAUSE translation error', { clientId, error: error.message });
+                                            }
+                                        }
+                                    }
+
+                                    restartStreamTimer = null;
+                                }, pauseMs);
+                            }
+
+                            logger.debug('⏭️ Translation skipped', {
                                 clientId,
-                                error: error.message
-                            });
-                            socket.emit('translation-error', {
-                                message: error.message
+                                reason: decision.reason,
+                                textPreview: transcript.substring(0, 30),
+                                isFinal
                             });
                         }
                     }
