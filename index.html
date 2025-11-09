@@ -1610,12 +1610,13 @@
                         console.log('🔇 ScriptProcessor connected: source → processor (gain in handler) → destination');
                     }
 
-                    // Start streaming on server (with validated inputs)
-                    console.log('📤 CLIENT: Sending translation interval:', this.translationInterval, 'ms');
+                    // Start streaming on server (with validated inputs and mode)
+                    console.log('📤 CLIENT: Sending mode:', this.currentMode, 'interval:', this.translationInterval, 'ms');
                     this.socket.emit('start-streaming', {
                         sourceLanguage: sourceLanguage,
                         targetLang: targetLang,
-                        translationInterval: this.translationInterval
+                        translationInterval: this.translationInterval,
+                        mode: this.currentMode  // Send mode to server for centralized rules
                     });
 
                     this.isRecording = true;
