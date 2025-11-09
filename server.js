@@ -728,6 +728,12 @@ io.on('connection', (socket) => {
                         // CENTRALIZED TRANSLATION DECISION
                         // ===========================================
 
+                        // Safety check: If rules engine not initialized, skip translation logic
+                        if (!translationRules) {
+                            logger.error('❌ Translation rules engine not initialized!', { clientId });
+                            return;
+                        }
+
                         const decision = translationRules.shouldTranslate({
                             text: transcript,
                             isFinal: isFinal,
@@ -814,7 +820,7 @@ io.on('connection', (socket) => {
                         } else {
                             // Translation rejected - maybe start pause detection timer
                             // Only set pause timer for interim results when max interval not reached
-                            if (!isFinal && !restartStreamTimer && textChanged) {
+                            if (!isFinal && !restartStreamTimer && textChanged && translationRules) {
                                 const pauseMs = translationRules.getConfig().pauseDetectionMs;
 
                                 restartStreamTimer = setTimeout(async () => {
