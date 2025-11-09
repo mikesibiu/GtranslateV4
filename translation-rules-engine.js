@@ -134,13 +134,13 @@ class TranslationRulesEngine {
             if (qualityCheck.meetsMinimum && !qualityCheck.isFillerOnly) {
                 return this.approveTranslation(newText, 'final_result', 0.8, context.clientId, context.text);
             } else {
-                // Final result but poor quality - treat as interim for next translation
+                // Final result but poor quality - DO NOT update lastTranslatedText
+                // Only approveTranslation() should update it to prevent duplicate tracking bugs
                 this.logger.info('⏭️ Skipping low-quality final result', {
                     clientId: context.clientId,
                     text: newText.substring(0, 30),
                     reason: qualityCheck.reason
                 });
-                this.lastTranslatedText = context.text; // Track for next translation
                 return this.rejectTranslation(qualityCheck.reason, newText);
             }
         }
