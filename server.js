@@ -13,6 +13,7 @@ const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 const billingDb = require('./billing-db');
+const TranslationRulesEngine = require('./translation-rules-engine');
 
 // ===== CONFIGURATION =====
 // Load environment variables if .env file exists
@@ -480,6 +481,8 @@ io.on('connection', (socket) => {
     let restartTimeout = null; // Track the scheduled restart timeout
     let restartAttempts = 0; // Track restart attempts
     const MAX_RESTART_ATTEMPTS = 10; // Maximum auto-restart attempts
+    let translationRules = null; // Centralized translation rules engine
+    let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
 
     // Helper function to update last activity time
     function updateActivity() {
@@ -590,7 +593,7 @@ io.on('connection', (socket) => {
     }
 
     // Extract stream creation logic into separate function (fixes recursive event emission)
-    async function createRecognitionStream(sourceLanguage, targetLang, interval, isRestart = false) {
+    async function createRecognitionStream(sourceLanguage, targetLang, interval, mode = 'talks', isRestart = false) {
         try {
             currentLanguage = sourceLanguage;
             targetLanguage = targetLang;
@@ -937,7 +940,7 @@ io.on('connection', (socket) => {
     }
 
     // Socket handler for start-streaming event (validates and calls createRecognitionStream)
-    socket.on('start-streaming', async ({ sourceLanguage, targetLang, translationInterval: interval, isRestart }) => {
+    socket.on('start-streaming', async ({ sourceLanguage, targetLang, translationInterval: interval, mode, isRestart }) => {
         // Input validation
         const validLanguageCodes = /^[a-z]{2}-[A-Z]{2}$/;
         const validTargetLanguages = /^[a-z]{2}(-[A-Z]{2})?$/;
@@ -960,11 +963,24 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const validModes = ['talks', 'qna', 'earbuds'];
+        const selectedMode = mode && validModes.includes(mode) ? mode : 'talks';
+
+        // Initialize translation rules engine for this session
+        translationRules = new TranslationRulesEngine(selectedMode, logger);
+
+        logger.info('🎯 Translation rules engine initialized', {
+            clientId,
+            mode: selectedMode,
+            config: translationRules.getConfig()
+        });
+
         // Call the extracted function
         await createRecognitionStream(
             sourceLanguage || 'ro-RO',
             targetLang || 'en',
             interval || 10000,
+            selectedMode,
             isRestart || false
         );
     });
