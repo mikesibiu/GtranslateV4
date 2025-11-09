@@ -188,16 +188,7 @@ class TranslationRulesEngine {
             };
         }
 
-        // Character count check
-        if (trimmedText.length < this.MIN_CHARS_FOR_TRANSLATION) {
-            return {
-                meetsMinimum: false,
-                isFillerOnly: false,
-                reason: 'too_short'
-            };
-        }
-
-        // Word count check
+        // Word count check (most specific - check first)
         const words = trimmedText.split(/\s+/).filter(w => w.length > 0);
         if (words.length < this.MIN_WORDS_FOR_TRANSLATION) {
             return {
@@ -207,7 +198,7 @@ class TranslationRulesEngine {
             };
         }
 
-        // Filler word detection
+        // Filler word detection (check content quality)
         const nonFillerWords = words.filter(word => {
             const lowerWord = word.toLowerCase().replace(/[.,!?;:]/g, '');
             return !this.FILLER_WORDS.has(lowerWord);
@@ -218,6 +209,15 @@ class TranslationRulesEngine {
                 meetsMinimum: false,
                 isFillerOnly: true,
                 reason: 'filler_words_only'
+            };
+        }
+
+        // Character count check (sanity check - least specific)
+        if (trimmedText.length < this.MIN_CHARS_FOR_TRANSLATION) {
+            return {
+                meetsMinimum: false,
+                isFillerOnly: false,
+                reason: 'too_short'
             };
         }
 

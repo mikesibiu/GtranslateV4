@@ -1,0 +1,610 @@
+/**
+ * Unit Tests for TranslationRulesEngine
+ * Tests centralized translation decision logic
+ */
+
+const { expect } = require('chai');
+const TranslationRulesEngine = require('../translation-rules-engine');
+
+// Mock logger
+const mockLogger = {
+    info: () => {},
+    debug: () => {},
+    warn: () => {},
+    error: () => {}
+};
+
+describe('TranslationRulesEngine', () => {
+
+    describe('Mode Configurations', () => {
+        it('should load Talks mode configuration', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            const config = engine.getConfig();
+
+            expect(config.name).to.equal('Talks');
+            expect(config.translationInterval).to.equal(10000);
+            expect(config.pauseDetectionMs).to.equal(3000);
+            expect(config.displayVisualCards).to.be.true;
+        });
+
+        it('should load Q&A mode configuration', () => {
+            const engine = new TranslationRulesEngine('qna', mockLogger);
+            const config = engine.getConfig();
+
+            expect(config.name).to.equal('Q&A');
+            expect(config.translationInterval).to.equal(8000);
+            expect(config.enableSummary).to.be.true;
+            expect(config.summaryInterval).to.equal(30000);
+        });
+
+        it('should load EarBuds mode configuration', () => {
+            const engine = new TranslationRulesEngine('earbuds', mockLogger);
+            const config = engine.getConfig();
+
+            expect(config.name).to.equal('EarBuds');
+            expect(config.translationInterval).to.equal(15000);
+            expect(config.enableTTS).to.be.true;
+            expect(config.displayVisualCards).to.be.false;
+        });
+
+        it('should default to Talks mode for invalid mode', () => {
+            const engine = new TranslationRulesEngine('invalid', mockLogger);
+            const config = engine.getConfig();
+
+            expect(config.name).to.equal('Talks');
+        });
+    });
+
+    describe('Quality Checks', () => {
+        let engine;
+
+        beforeEach(() => {
+            engine = new TranslationRulesEngine('talks', mockLogger);
+        });
+
+        it('should reject empty text', () => {
+            const quality = engine.checkQuality('');
+            expect(quality.meetsMinimum).to.be.false;
+            expect(quality.reason).to.equal('empty_text');
+        });
+
+        it('should reject text that is too short', () => {
+            // Test with 3 short words (meets word count but too short overall)
+            const quality = engine.checkQuality('a b c');
+            expect(quality.meetsMinimum).to.be.false;
+            expect(quality.reason).to.equal('too_short');
+        });
+
+        it('should reject text with too few words', () => {
+            const quality = engine.checkQuality('hello world');
+            expect(quality.meetsMinimum).to.be.false;
+            expect(quality.reason).to.equal('too_few_words');
+        });
+
+        it('should reject filler words only', () => {
+            const quality = engine.checkQuality('uh um ah');
+            expect(quality.meetsMinimum).to.be.false;
+            expect(quality.isFillerOnly).to.be.true;
+            expect(quality.reason).to.equal('filler_words_only');
+        });
+
+        it('should accept quality text with minimum words', () => {
+            const quality = engine.checkQuality('this is good text');
+            expect(quality.meetsMinimum).to.be.true;
+            expect(quality.isFillerOnly).to.be.false;
+            expect(quality.reason).to.equal('quality_ok');
+        });
+
+        it('should accept text with some filler words mixed in', () => {
+            const quality = engine.checkQuality('uh this is um good text');
+            expect(quality.meetsMinimum).to.be.true;
+            expect(quality.isFillerOnly).to.be.false;
+        });
+    });
+
+    describe('Sentence Ending Detection', () => {
+        let engine;
+
+        beforeEach(() => {
+            engine = new TranslationRulesEngine('talks', mockLogger);
+        });
+
+        it('should detect period ending', () => {
+            expect(engine.detectSentenceEnding('This is a sentence.')).to.be.true;
+        });
+
+        it('should detect exclamation mark', () => {
+            expect(engine.detectSentenceEnding('This is exciting!')).to.be.true;
+        });
+
+        it('should detect question mark', () => {
+            expect(engine.detectSentenceEnding('Is this a question?')).to.be.true;
+        });
+
+        it('should not detect ellipsis as sentence ending', () => {
+            expect(engine.detectSentenceEnding('This is...')).to.be.false;
+        });
+
+        it('should not detect text without punctuation', () => {
+            expect(engine.detectSentenceEnding('this is not complete')).to.be.false;
+        });
+
+        it('should handle trailing spaces', () => {
+            expect(engine.detectSentenceEnding('This is a sentence.  ')).to.be.true;
+        });
+    });
+
+    describe('Translation Decisions - Sentence Endings', () => {
+        let engine;
+
+        beforeEach(() => {
+            engine = new TranslationRulesEngine('talks', mockLogger);
+        });
+
+        it('should approve translation for complete sentence', () => {
+            const decision = engine.shouldTranslate({
+                text: 'This is a complete sentence.',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('sentence_ending');
+            expect(decision.confidence).to.equal(1.0);
+            expect(decision.isComplete).to.be.true;
+        });
+
+        it('should reject incomplete sentence without enough words', () => {
+            const decision = engine.shouldTranslate({
+                text: 'hello there',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.false;
+            expect(decision.reason).to.equal('waiting_for_trigger');
+        });
+    });
+
+    describe('Translation Decisions - Max Interval', () => {
+        let engine;
+
+        beforeEach(() => {
+            engine = new TranslationRulesEngine('talks', mockLogger);
+            // Initialize last translation time
+            engine.lastTranslationTime = Date.now() - 11000; // 11 seconds ago
+        });
+
+        it('should approve translation when max interval reached (Talks: 10s)', () => {
+            const decision = engine.shouldTranslate({
+                text: 'this is good enough text for translation',
+                isFinal: false,
+                timeSinceLastChange: 500,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('max_interval');
+            expect(decision.confidence).to.equal(0.9);
+        });
+
+        it('should use different interval for Q&A mode (8s)', () => {
+            const qnaEngine = new TranslationRulesEngine('qna', mockLogger);
+            qnaEngine.lastTranslationTime = Date.now() - 9000; // 9 seconds ago
+
+            const decision = qnaEngine.shouldTranslate({
+                text: 'this is good enough text',
+                isFinal: false,
+                timeSinceLastChange: 500,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('max_interval');
+        });
+
+        it('should use different interval for EarBuds mode (15s)', () => {
+            const earbudsEngine = new TranslationRulesEngine('earbuds', mockLogger);
+            earbudsEngine.lastTranslationTime = Date.now() - 16000; // 16 seconds ago
+
+            const decision = earbudsEngine.shouldTranslate({
+                text: 'this is good enough text',
+                isFinal: false,
+                timeSinceLastChange: 500,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('max_interval');
+        });
+
+        it('should reject max interval translation if quality is poor', () => {
+            const decision = engine.shouldTranslate({
+                text: 'hi',  // Too short
+                isFinal: false,
+                timeSinceLastChange: 500,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.false;
+            expect(decision.reason).to.equal('max_interval_poor_quality');
+        });
+    });
+
+    describe('Translation Decisions - Final Results', () => {
+        let engine;
+
+        beforeEach(() => {
+            engine = new TranslationRulesEngine('talks', mockLogger);
+        });
+
+        it('should approve final result with quality text', () => {
+            const decision = engine.shouldTranslate({
+                text: 'this is final quality text',
+                isFinal: true,
+                timeSinceLastChange: 1000,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('final_result');
+            expect(decision.confidence).to.equal(0.8);
+        });
+
+        it('should reject final result with single word', () => {
+            const decision = engine.shouldTranslate({
+                text: 'pair',
+                isFinal: true,
+                timeSinceLastChange: 1000,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.false;
+            expect(decision.reason).to.equal('too_few_words');
+        });
+
+        it('should reject final result with filler words only', () => {
+            const decision = engine.shouldTranslate({
+                text: 'uh um ah',
+                isFinal: true,
+                timeSinceLastChange: 1000,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.false;
+            expect(decision.reason).to.equal('filler_words_only');
+        });
+    });
+
+    describe('Translation Decisions - Pause Detection', () => {
+        let engine;
+
+        beforeEach(() => {
+            engine = new TranslationRulesEngine('talks', mockLogger);
+        });
+
+        it('should approve translation after pause threshold', () => {
+            const decision = engine.shouldTranslate({
+                text: 'this is quality text after pause',
+                isFinal: false,
+                timeSinceLastChange: 3500, // > 3000ms pause
+                trigger: 'pause',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('pause_detected');
+            expect(decision.confidence).to.equal(0.7);
+        });
+
+        it('should reject if pause reached but text quality is poor', () => {
+            const decision = engine.shouldTranslate({
+                text: 'hi',
+                isFinal: false,
+                timeSinceLastChange: 3500,
+                trigger: 'pause',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.false;
+        });
+    });
+
+    describe('New Text Extraction', () => {
+        let engine;
+
+        beforeEach(() => {
+            engine = new TranslationRulesEngine('talks', mockLogger);
+        });
+
+        it('should return full text when no previous translation', () => {
+            const newText = engine.getNewText('this is new text');
+            expect(newText).to.equal('this is new text');
+        });
+
+        it('should extract only new text after previous translation', () => {
+            engine.lastTranslatedText = 'this is';
+            const newText = engine.getNewText('this is new text');
+            expect(newText).to.equal('new text');
+        });
+
+        it('should return full text if it does not start with previous', () => {
+            engine.lastTranslatedText = 'old text';
+            const newText = engine.getNewText('completely new utterance');
+            expect(newText).to.equal('completely new utterance');
+        });
+
+        it('should handle trailing/leading spaces', () => {
+            engine.lastTranslatedText = 'this is';
+            const newText = engine.getNewText('this is   new text  ');
+            expect(newText).to.equal('new text');
+        });
+    });
+
+    describe('State Management', () => {
+        let engine;
+
+        beforeEach(() => {
+            engine = new TranslationRulesEngine('talks', mockLogger);
+        });
+
+        it('should record translation and update state', () => {
+            engine.recordTranslation(
+                'original text here',
+                'translated text here'
+            );
+
+            expect(engine.lastTranslatedText).to.equal('original text here');
+            expect(engine.accumulatedText).to.include('translated text here');
+            expect(engine.translationCount).to.equal(1);
+        });
+
+        it('should accumulate multiple translations', () => {
+            engine.recordTranslation('first text', 'first translation');
+            engine.recordTranslation('second text', 'second translation');
+
+            expect(engine.accumulatedText).to.include('first translation');
+            expect(engine.accumulatedText).to.include('second translation');
+            expect(engine.translationCount).to.equal(2);
+        });
+
+        it('should reset state for new utterance', () => {
+            engine.lastTranslatedText = 'previous text';
+            engine.resetForNewUtterance();
+
+            expect(engine.lastTranslatedText).to.equal('');
+        });
+    });
+
+    describe('Metrics Tracking', () => {
+        let engine;
+
+        beforeEach(() => {
+            engine = new TranslationRulesEngine('talks', mockLogger);
+        });
+
+        it('should track approval metrics', () => {
+            // Approve one translation
+            engine.shouldTranslate({
+                text: 'This is a complete sentence.',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            const metrics = engine.getMetrics();
+            expect(metrics.totalChecks).to.equal(1);
+            expect(metrics.translationsApproved).to.equal(1);
+            expect(metrics.translationsBlocked).to.equal(0);
+            expect(metrics.approvalRate).to.equal(1.0);
+        });
+
+        it('should track rejection metrics', () => {
+            // Reject one translation
+            engine.shouldTranslate({
+                text: 'hi',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            const metrics = engine.getMetrics();
+            expect(metrics.totalChecks).to.equal(1);
+            expect(metrics.translationsApproved).to.equal(0);
+            expect(metrics.translationsBlocked).to.equal(1);
+            expect(metrics.approvalRate).to.equal(0);
+        });
+
+        it('should track block reasons', () => {
+            engine.shouldTranslate({
+                text: 'hi',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            engine.shouldTranslate({
+                text: 'hello',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            const metrics = engine.getMetrics();
+            expect(metrics.blockReasons).to.have.property('waiting_for_trigger');
+            expect(metrics.blockReasons.waiting_for_trigger).to.equal(2);
+        });
+
+        it('should calculate approval rate correctly', () => {
+            // 1 approved
+            engine.shouldTranslate({
+                text: 'This is a sentence.',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            // 2 rejected
+            engine.shouldTranslate({
+                text: 'hi',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            engine.shouldTranslate({
+                text: 'hello',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            const metrics = engine.getMetrics();
+            expect(metrics.totalChecks).to.equal(3);
+            expect(metrics.translationsApproved).to.equal(1);
+            expect(metrics.translationsBlocked).to.equal(2);
+            expect(metrics.approvalRate).to.be.closeTo(0.333, 0.01);
+        });
+    });
+
+    describe('Edge Cases', () => {
+        let engine;
+
+        beforeEach(() => {
+            engine = new TranslationRulesEngine('talks', mockLogger);
+        });
+
+        it('should handle Romanian filler words', () => {
+            const quality = engine.checkQuality('păi deci adică');
+            expect(quality.isFillerOnly).to.be.true;
+        });
+
+        it('should handle mixed language filler words', () => {
+            const quality = engine.checkQuality('um păi this is text deci good');
+            expect(quality.meetsMinimum).to.be.true;
+            expect(quality.isFillerOnly).to.be.false;
+        });
+
+        it('should handle very long text', () => {
+            const longText = 'word '.repeat(100) + 'sentence.';
+            const quality = engine.checkQuality(longText);
+            expect(quality.meetsMinimum).to.be.true;
+        });
+
+        it('should handle text with punctuation in middle', () => {
+            const decision = engine.shouldTranslate({
+                text: 'This is a sentence. But not ending',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            // Should not detect as complete (period not at end)
+            expect(decision.reason).to.not.equal('sentence_ending');
+        });
+
+        it('should initialize lastTranslationTime on first check', () => {
+            expect(engine.lastTranslationTime).to.be.null;
+
+            engine.shouldTranslate({
+                text: 'some text here',
+                isFinal: false,
+                timeSinceLastChange: 0,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            expect(engine.lastTranslationTime).to.not.be.null;
+        });
+    });
+
+    describe('Real-World Scenarios', () => {
+        it('should handle continuous speech in Talks mode', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            // Scenario: Speaker talking continuously for 12 seconds
+            engine.lastTranslationTime = Date.now() - 12000;
+
+            const decision = engine.shouldTranslate({
+                text: 'welcome to JW Broadcasting in this program we will see',
+                isFinal: false,
+                timeSinceLastChange: 100,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            // Should translate due to max interval (10s) reached
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('max_interval');
+        });
+
+        it('should handle single word from Google final result', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            const decision = engine.shouldTranslate({
+                text: 'pair',
+                isFinal: true,
+                timeSinceLastChange: 1000,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            // Should BLOCK single-word final result
+            expect(decision.shouldTranslate).to.be.false;
+            expect(decision.reason).to.equal('too_few_words');
+        });
+
+        it('should handle Q&A mode faster intervals', () => {
+            const engine = new TranslationRulesEngine('qna', mockLogger);
+            engine.lastTranslationTime = Date.now() - 9000; // 9 seconds
+
+            const decision = engine.shouldTranslate({
+                text: 'what is the main theme of this talk',
+                isFinal: false,
+                timeSinceLastChange: 100,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            // Q&A mode: 8s interval, so 9s should trigger
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('max_interval');
+        });
+
+        it('should handle EarBuds mode longer intervals', () => {
+            const engine = new TranslationRulesEngine('earbuds', mockLogger);
+            engine.lastTranslationTime = Date.now() - 12000; // 12 seconds
+
+            const decision = engine.shouldTranslate({
+                text: 'this is some continuous speech content',
+                isFinal: false,
+                timeSinceLastChange: 100,
+                trigger: 'interim',
+                clientId: 'test-123'
+            });
+
+            // EarBuds mode: 15s interval, so 12s should NOT trigger yet
+            expect(decision.shouldTranslate).to.be.false;
+            expect(decision.reason).to.equal('waiting_for_trigger');
+        });
+    });
+});
