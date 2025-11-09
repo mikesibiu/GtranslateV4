@@ -336,7 +336,10 @@ class TranslationRulesEngine {
      * Update state after successful translation
      */
     recordTranslation(originalText, translatedText) {
-        this.lastTranslatedText = originalText;
+        // NOTE: DO NOT update lastTranslatedText here!
+        // It's already set in approveTranslation() to prevent race conditions.
+        // Setting it here would overwrite newer values when translations complete out of order.
+
         this.accumulatedText += (this.accumulatedText ? ' ' : '') + translatedText;
         this.translationCount++;
     }

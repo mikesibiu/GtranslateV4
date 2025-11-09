@@ -360,12 +360,17 @@ describe('TranslationRulesEngine', () => {
         });
 
         it('should record translation and update state', () => {
+            // NOTE: recordTranslation() does NOT update lastTranslatedText anymore
+            // to prevent async race conditions. lastTranslatedText is set in approveTranslation().
             engine.recordTranslation(
                 'original text here',
                 'translated text here'
             );
 
-            expect(engine.lastTranslatedText).to.equal('original text here');
+            // Should NOT update lastTranslatedText (that's done in approveTranslation)
+            expect(engine.lastTranslatedText).to.equal('');
+
+            // Should update accumulated text and count
             expect(engine.accumulatedText).to.include('translated text here');
             expect(engine.translationCount).to.equal(1);
         });
