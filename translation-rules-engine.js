@@ -116,13 +116,13 @@ class TranslationRulesEngine {
 
         // Priority 1: Sentence ending (immediate translation)
         if (hasSentenceEnding && qualityCheck.meetsMinimum) {
-            return this.approveTranslation(newText, 'sentence_ending', 1.0, context.clientId);
+            return this.approveTranslation(newText, 'sentence_ending', 1.0, context.clientId, context.text);
         }
 
         // Priority 2: Maximum interval reached (force translation)
         if (elapsedSinceLastTranslation >= this.modeConfig.translationInterval) {
             if (qualityCheck.meetsMinimum) {
-                return this.approveTranslation(newText, 'max_interval', 0.9, context.clientId);
+                return this.approveTranslation(newText, 'max_interval', 0.9, context.clientId, context.text);
             } else {
                 // Max interval reached but text doesn't meet quality - still skip
                 return this.rejectTranslation('max_interval_poor_quality', newText);
@@ -132,7 +132,7 @@ class TranslationRulesEngine {
         // Priority 3: Final result from Google (with quality validation)
         if (context.isFinal) {
             if (qualityCheck.meetsMinimum && !qualityCheck.isFillerOnly) {
-                return this.approveTranslation(newText, 'final_result', 0.8, context.clientId);
+                return this.approveTranslation(newText, 'final_result', 0.8, context.clientId, context.text);
             } else {
                 // Final result but poor quality - treat as interim for next translation
                 this.logger.info('⏭️ Skipping low-quality final result', {
@@ -149,7 +149,7 @@ class TranslationRulesEngine {
         // This check is only reached for interim results - wait for pause timer
         if (context.timeSinceLastChange >= this.modeConfig.pauseDetectionMs) {
             if (qualityCheck.meetsMinimum) {
-                return this.approveTranslation(newText, 'pause_detected', 0.7, context.clientId);
+                return this.approveTranslation(newText, 'pause_detected', 0.7, context.clientId, context.text);
             }
         }
 
@@ -286,9 +286,15 @@ class TranslationRulesEngine {
     /**
      * Approve translation (update state and metrics)
      */
-    approveTranslation(newText, reason, confidence, clientId) {
+    approveTranslation(newText, reason, confidence, clientId, fullText) {
         this.metrics.translationsApproved++;
         this.lastTranslationTime = Date.now();
+
+        // CRITICAL: Update lastTranslatedText IMMEDIATELY to prevent race conditions
+        // Multiple final results from Google can arrive before first translation completes
+        if (fullText) {
+            this.lastTranslatedText = fullText;
+        }
 
         this.logger.info('✅ Translation APPROVED', {
             clientId,
@@ -297,7 +303,8 @@ class TranslationRulesEngine {
             mode: this.mode,
             textPreview: newText.substring(0, 50),
             wordCount: newText.split(/\s+/).length,
-            elapsedMs: Date.now() - this.lastTranslationTime
+            elapsedMs: Date.now() - this.lastTranslationTime,
+            trackedText: this.lastTranslatedText.substring(0, 50)
         });
 
         return {
