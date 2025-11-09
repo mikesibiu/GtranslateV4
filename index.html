@@ -849,6 +849,10 @@
                 this.recentlySpoken = []; // Track recently spoken text with timestamps (for duplicate detection)
                 this.lastDedupCleanup = 0; // Last time we cleaned up recentlySpoken array
 
+                // Translation display tracking (for showing target language in interim box)
+                this.lastTranslation = ''; // Last translation received (for listener interim display)
+                this.lastTranslationTime = 0; // Timestamp of last translation
+
                 // Load saved voice preference from localStorage
                 const savedVoicePreference = localStorage.getItem('gtranslate_voice_preference');
                 if (savedVoicePreference) {
@@ -1216,12 +1220,31 @@
                 });
 
                 this.socket.on('interim-result', (data) => {
-                    // Show interim results in ALL modes (including EarBuds for visual feedback)
-                    this.interimText.textContent = sanitizeText(data.text) || 'Listening...';
+                    const sourceText = sanitizeText(data.text);
+
+                    // Listener modes: Show target language (last translation) instead of source
+                    if (this.ttsEnabled || this.currentMode === 'earbuds') {
+                        // Show last translation if we have one from the last 20 seconds
+                        if (this.lastTranslation && (Date.now() - this.lastTranslationTime < 20000)) {
+                            this.interimText.textContent = this.lastTranslation + '...';
+                        } else {
+                            this.interimText.textContent = 'Listening...';
+                        }
+                    } else {
+                        // Speaker mode: Show source language (STT feedback)
+                        this.interimText.textContent = sourceText || 'Listening...';
+                    }
                 });
 
                 this.socket.on('translation-result', (data) => {
                     console.log('📥 TRANSLATION RECEIVED!', data);
+
+                    // Store last translation for interim display (listener modes)
+                    if (data.translated) {
+                        this.lastTranslation = data.translated;
+                        this.lastTranslationTime = Date.now();
+                    }
+
                     this.addTranslation(data);
 
                     // Track translation usage for billing

@@ -749,7 +749,7 @@ io.on('connection', (socket) => {
                                             translated: translation,
                                             accumulated: accumulatedText,
                                             count: translationCount,
-                                            isInterim: true
+                                            isInterim: false
                                         });
 
                                         lastTranslatedText = lastInterimText;
@@ -808,7 +808,7 @@ io.on('connection', (socket) => {
                                                 translated: translation,
                                                 accumulated: accumulatedText,
                                                 count: translationCount,
-                                                isInterim: true
+                                                isInterim: false
                                             });
 
                                             lastTranslatedText = lastInterimText;
@@ -850,7 +850,7 @@ io.on('connection', (socket) => {
                                                         translated: translation,
                                                         accumulated: accumulatedText,
                                                         count: translationCount,
-                                                        isInterim: true
+                                                        isInterim: false
                                                     });
 
                                                     lastTranslatedText = lastInterimText;
