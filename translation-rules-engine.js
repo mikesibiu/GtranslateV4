@@ -165,13 +165,52 @@ class TranslationRulesEngine {
             return fullText.trim();
         }
 
-        // If full text starts with what we've already translated, extract the new part
-        if (fullText.startsWith(this.lastTranslatedText)) {
-            return fullText.substring(this.lastTranslatedText.length).trim();
+        const trimmedFull = fullText.trim();
+        const trimmedLast = this.lastTranslatedText.trim();
+
+        // Check if we've already translated this exact text
+        if (trimmedFull === trimmedLast) {
+            return ''; // Already translated, no new text
         }
 
-        // Text doesn't start with previous - return full text (new utterance)
-        return fullText.trim();
+        // Check if last translation contains the current text (subset/duplicate)
+        // Example: last="depression and anxiety", current="depression" → skip
+        if (trimmedLast.includes(trimmedFull)) {
+            return ''; // Current text is subset of what we already translated
+        }
+
+        // Check if current text starts with last translation (continuation)
+        // Example: last="depression", current="depression and anxiety" → extract "and anxiety"
+        if (trimmedFull.startsWith(trimmedLast)) {
+            return trimmedFull.substring(trimmedLast.length).trim();
+        }
+
+        // Check if texts have significant overlap (>70% similarity)
+        const overlap = this.calculateOverlap(trimmedLast, trimmedFull);
+        if (overlap > 0.7) {
+            return ''; // Too similar, likely duplicate
+        }
+
+        // Text doesn't match previous - return full text (new utterance)
+        return trimmedFull;
+    }
+
+    /**
+     * Calculate word overlap between two texts (0.0 to 1.0)
+     */
+    calculateOverlap(text1, text2) {
+        const words1 = new Set(text1.toLowerCase().split(/\s+/));
+        const words2 = new Set(text2.toLowerCase().split(/\s+/));
+
+        let commonWords = 0;
+        for (const word of words1) {
+            if (words2.has(word)) {
+                commonWords++;
+            }
+        }
+
+        const totalWords = Math.max(words1.size, words2.size);
+        return totalWords > 0 ? commonWords / totalWords : 0;
     }
 
     /**
