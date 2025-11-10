@@ -17,6 +17,10 @@ class TranslationRulesEngine {
         this.accumulatedText = '';
         this.translationCount = 0;
 
+        // Post-translation duplicate detection (CRITICAL FIX)
+        this.recentTranslations = []; // Array of {text, timestamp}
+        this.TRANSLATION_DEDUP_WINDOW = 30000; // 30 seconds
+
         // Decision metrics
         this.metrics = {
             totalChecks: 0,
@@ -199,12 +203,13 @@ class TranslationRulesEngine {
             return extracted;
         }
 
-        // Check if texts have significant overlap (>60% similarity)
-        // Lowered from 70% to catch more duplicates like "hrănește ceea ce suntem" vs "hrănește ceea ce suntem în interior"
+        // Check if texts have significant overlap (>45% similarity)
+        // Lowered from 70% → 60% → 45% to catch more duplicates
+        // 45% threshold catches cases like "The book of Obadiah, is..." vs "The book of Obadiah is..." (50% overlap)
         const overlap = this.calculateOverlap(trimmedLast, trimmedFull);
         this.logger.debug(`📊 Overlap: ${(overlap * 100).toFixed(1)}%`);
-        if (overlap > 0.6) {
-            this.logger.info(`⛔ DUPLICATE DETECTED: ${(overlap * 100).toFixed(1)}% overlap (threshold: 60%)`);
+        if (overlap > 0.45) {
+            this.logger.info(`⛔ DUPLICATE DETECTED: ${(overlap * 100).toFixed(1)}% overlap (threshold: 45%)`);
             return ''; // Too similar, likely duplicate
         }
 
@@ -229,6 +234,84 @@ class TranslationRulesEngine {
 
         const totalWords = Math.max(words1.size, words2.size);
         return totalWords > 0 ? commonWords / totalWords : 0;
+    }
+
+    /**
+     * CRITICAL FIX: Check if translation output is a duplicate
+     * This catches cases where different source texts translate to identical output
+     * Example: "The book of Obadiah, is..." vs "The book of Obadiah is..." both → "Cartea lui Obadia..."
+     *
+     * @param {string} translation - The translated text to check
+     * @returns {boolean} True if this translation was recently shown
+     */
+    isTranslationDuplicate(translation) {
+        const normalized = translation.toLowerCase().trim();
+        const now = Date.now();
+
+        // Clean old entries (older than 30s)
+        this.recentTranslations = this.recentTranslations.filter(
+            entry => now - entry.timestamp < this.TRANSLATION_DEDUP_WINDOW
+        );
+
+        // Check for exact match or high similarity
+        for (const entry of this.recentTranslations) {
+            const entryNormalized = entry.text.toLowerCase().trim();
+
+            // Exact match (case-insensitive)
+            if (entryNormalized === normalized) {
+                this.logger.info('🚫 POST-TRANSLATION DUPLICATE: Exact match', {
+                    translation: normalized.substring(0, 50)
+                });
+                return true;
+            }
+
+            // Substring check (one contains the other with >90% overlap)
+            if (entryNormalized.includes(normalized) || normalized.includes(entryNormalized)) {
+                const overlap = Math.min(entryNormalized.length, normalized.length) /
+                               Math.max(entryNormalized.length, normalized.length);
+                if (overlap > 0.9) {
+                    this.logger.info(`🚫 POST-TRANSLATION DUPLICATE: ${(overlap * 100).toFixed(1)}% substring overlap`, {
+                        translation: normalized.substring(0, 50)
+                    });
+                    return true;
+                }
+            }
+
+            // Word overlap check (80% threshold for translated output - higher than source 45%)
+            const wordOverlap = this.calculateOverlap(entryNormalized, normalized);
+            if (wordOverlap > 0.8) {
+                this.logger.info(`🚫 POST-TRANSLATION DUPLICATE: ${(wordOverlap * 100).toFixed(1)}% word overlap (threshold: 80%)`, {
+                    translation: normalized.substring(0, 50)
+                });
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Record a translation output for duplicate detection
+     *
+     * @param {string} translation - The translated text to record
+     */
+    recordTranslatedOutput(translation) {
+        const now = Date.now();
+
+        this.recentTranslations.push({
+            text: translation,
+            timestamp: now
+        });
+
+        // Keep only last 30 seconds
+        this.recentTranslations = this.recentTranslations.filter(
+            entry => now - entry.timestamp < this.TRANSLATION_DEDUP_WINDOW
+        );
+
+        this.logger.debug('📝 Recorded translation output', {
+            translation: translation.substring(0, 50),
+            queueSize: this.recentTranslations.length
+        });
     }
 
     /**

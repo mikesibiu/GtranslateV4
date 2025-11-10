@@ -669,5 +669,133 @@ describe('TranslationRulesEngine', () => {
             expect(decision2.shouldTranslate).to.be.false;
             expect(decision2.newText).to.equal(''); // Duplicate detected
         });
+
+        it('should update threshold to 45% to catch more duplicates', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            // First translation
+            const decision1 = engine.shouldTranslate({
+                text: 'The book of Obadiah is one of the shortest',
+                isFinal: true,
+                timeSinceLastChange: 100,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            expect(decision1.shouldTranslate).to.be.true;
+
+            // Second translation: 50% overlap
+            const decision2 = engine.shouldTranslate({
+                text: 'The book of Obadiah',
+                isFinal: true,
+                timeSinceLastChange: 100,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            // Should REJECT with 50% overlap (threshold is now 45%)
+            expect(decision2.shouldTranslate).to.be.false;
+            expect(decision2.newText).to.equal('');
+        });
+    });
+
+    describe('Post-Translation Duplicate Detection (CRITICAL FIX)', () => {
+        it('should detect exact duplicate translations', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            // First translation output
+            engine.recordTranslatedOutput('Cartea lui Obadia este una dintre cele mai scurte');
+
+            // Check if same translation is duplicate
+            const isDuplicate = engine.isTranslationDuplicate('Cartea lui Obadia este una dintre cele mai scurte');
+
+            expect(isDuplicate).to.be.true;
+        });
+
+        it('should detect case-insensitive duplicate translations', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            engine.recordTranslatedOutput('Cartea lui Obadia este una dintre cele mai scurte');
+
+            // Check with different case
+            const isDuplicate = engine.isTranslationDuplicate('cartea lui obadia este una dintre cele mai scurte');
+
+            expect(isDuplicate).to.be.true;
+        });
+
+        it('should detect substring duplicates (>90% overlap)', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            engine.recordTranslatedOutput('Cartea lui Obadia este una dintre cele mai scurte din Biblie');
+
+            // Check shorter version (subset)
+            const isDuplicate = engine.isTranslationDuplicate('Cartea lui Obadia este una dintre cele mai scurte');
+
+            expect(isDuplicate).to.be.true;
+        });
+
+        it('should detect high word overlap duplicates (>80%)', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            engine.recordTranslatedOutput('Cartea lui Obadia este una dintre cele mai scurte cărți');
+
+            // 9 out of 10 words match = 90% overlap
+            const isDuplicate = engine.isTranslationDuplicate('Cartea lui Obadia este una dintre cele mai scurte');
+
+            expect(isDuplicate).to.be.true;
+        });
+
+        it('should NOT detect translations with <80% word overlap', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            engine.recordTranslatedOutput('Cartea lui Obadia este una dintre cele mai scurte');
+
+            // Only 3 out of 10 words match = 30% overlap
+            const isDuplicate = engine.isTranslationDuplicate('Depresie și anxietate sunt probleme de sănătate mintală');
+
+            expect(isDuplicate).to.be.false;
+        });
+
+        it('should clean up old translations after 30 seconds', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            engine.recordTranslatedOutput('Cartea lui Obadia');
+
+            // Manually set old timestamp
+            engine.recentTranslations[0].timestamp = Date.now() - 31000; // 31 seconds ago
+
+            // Should not detect as duplicate (too old)
+            const isDuplicate = engine.isTranslationDuplicate('Cartea lui Obadia');
+
+            expect(isDuplicate).to.be.false;
+        });
+
+        it('should track multiple translations in queue', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            engine.recordTranslatedOutput('First translation');
+            engine.recordTranslatedOutput('Second translation');
+            engine.recordTranslatedOutput('Third translation');
+
+            expect(engine.recentTranslations.length).to.equal(3);
+
+            // All should be detected as duplicates
+            expect(engine.isTranslationDuplicate('First translation')).to.be.true;
+            expect(engine.isTranslationDuplicate('Second translation')).to.be.true;
+            expect(engine.isTranslationDuplicate('Third translation')).to.be.true;
+        });
+
+        it('should solve the production bug: different English → identical Romanian', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            // Simulate: "The book of Obadiah, is one..." → "Cartea lui Obadia..."
+            engine.recordTranslatedOutput('Cartea lui Obadia este una dintre cele mai scurte');
+
+            // Simulate: "The book of Obadiah is one..." (no comma) → same Romanian
+            const isDuplicate = engine.isTranslationDuplicate('Cartea lui Obadia este una dintre cele mai scurte');
+
+            // CRITICAL: Must detect duplicate even though source texts differ
+            expect(isDuplicate).to.be.true;
+        });
     });
 });
