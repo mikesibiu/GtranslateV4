@@ -799,11 +799,11 @@ io.on('connection', (socket) => {
                                     lastTranslatedText = transcript;
                                     lastTranslationTime = Date.now();
 
-                                    // Reset for new utterance if this was a final/complete result
+                                    // Clear interim text after final result (but keep lastTranslatedText for duplicate detection!)
                                     if (decision.isComplete) {
-                                        translationRules.resetForNewUtterance();
                                         lastInterimText = '';
-                                        lastTranslatedText = '';
+                                        // NOTE: DO NOT call translationRules.resetForNewUtterance() here!
+                                        // We need lastTranslatedText to persist for duplicate detection
                                     }
 
                                 } catch (error) {
