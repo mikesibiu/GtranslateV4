@@ -168,26 +168,31 @@ class TranslationRulesEngine {
         const trimmedFull = fullText.trim();
         const trimmedLast = this.lastTranslatedText.trim();
 
-        // Check if we've already translated this exact text
-        if (trimmedFull === trimmedLast) {
+        // Normalize for case-insensitive comparison (preserves original for extraction)
+        const normalizedFull = trimmedFull.toLowerCase();
+        const normalizedLast = trimmedLast.toLowerCase();
+
+        // Check if we've already translated this exact text (case-insensitive)
+        if (normalizedFull === normalizedLast) {
             return ''; // Already translated, no new text
         }
 
         // Check if last translation contains the current text (subset/duplicate)
-        // Example: last="depression and anxiety", current="depression" → skip
-        if (trimmedLast.includes(trimmedFull)) {
+        // Example: last="Depression and Anxiety", current="depression" → skip
+        if (normalizedLast.includes(normalizedFull)) {
             return ''; // Current text is subset of what we already translated
         }
 
         // Check if current text starts with last translation (continuation)
-        // Example: last="depression", current="depression and anxiety" → extract "and anxiety"
-        if (trimmedFull.startsWith(trimmedLast)) {
+        // Example: last="Depression", current="Depression and Anxiety" → extract "and Anxiety"
+        if (normalizedFull.startsWith(normalizedLast)) {
             return trimmedFull.substring(trimmedLast.length).trim();
         }
 
-        // Check if texts have significant overlap (>70% similarity)
+        // Check if texts have significant overlap (>60% similarity)
+        // Lowered from 70% to catch more duplicates like "hrănește ceea ce suntem" vs "hrănește ceea ce suntem în interior"
         const overlap = this.calculateOverlap(trimmedLast, trimmedFull);
-        if (overlap > 0.7) {
+        if (overlap > 0.6) {
             return ''; // Too similar, likely duplicate
         }
 
