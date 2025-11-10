@@ -162,6 +162,7 @@ class TranslationRulesEngine {
      */
     getNewText(fullText) {
         if (!this.lastTranslatedText) {
+            this.logger.debug('🔍 getNewText: No previous translation, returning full text');
             return fullText.trim();
         }
 
@@ -172,31 +173,43 @@ class TranslationRulesEngine {
         const normalizedFull = trimmedFull.toLowerCase();
         const normalizedLast = trimmedLast.toLowerCase();
 
+        this.logger.debug('🔍 getNewText comparing:', {
+            current: trimmedFull.substring(0, 50),
+            last: trimmedLast.substring(0, 50)
+        });
+
         // Check if we've already translated this exact text (case-insensitive)
         if (normalizedFull === normalizedLast) {
+            this.logger.info('⛔ DUPLICATE DETECTED: Exact match (case-insensitive)');
             return ''; // Already translated, no new text
         }
 
         // Check if last translation contains the current text (subset/duplicate)
         // Example: last="Depression and Anxiety", current="depression" → skip
         if (normalizedLast.includes(normalizedFull)) {
+            this.logger.info('⛔ DUPLICATE DETECTED: Current is subset of last');
             return ''; // Current text is subset of what we already translated
         }
 
         // Check if current text starts with last translation (continuation)
         // Example: last="Depression", current="Depression and Anxiety" → extract "and Anxiety"
         if (normalizedFull.startsWith(normalizedLast)) {
-            return trimmedFull.substring(trimmedLast.length).trim();
+            const extracted = trimmedFull.substring(trimmedLast.length).trim();
+            this.logger.debug('📝 Extracting continuation:', extracted.substring(0, 30));
+            return extracted;
         }
 
         // Check if texts have significant overlap (>60% similarity)
         // Lowered from 70% to catch more duplicates like "hrănește ceea ce suntem" vs "hrănește ceea ce suntem în interior"
         const overlap = this.calculateOverlap(trimmedLast, trimmedFull);
+        this.logger.debug(`📊 Overlap: ${(overlap * 100).toFixed(1)}%`);
         if (overlap > 0.6) {
+            this.logger.info(`⛔ DUPLICATE DETECTED: ${(overlap * 100).toFixed(1)}% overlap (threshold: 60%)`);
             return ''; // Too similar, likely duplicate
         }
 
         // Text doesn't match previous - return full text (new utterance)
+        this.logger.debug('✅ New text detected, no duplication');
         return trimmedFull;
     }
 
