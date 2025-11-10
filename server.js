@@ -771,6 +771,20 @@ io.on('connection', (socket) => {
                                         clientId
                                     );
 
+                                    // CRITICAL FIX: Check for post-translation duplicates
+                                    // Different source texts can produce identical translations
+                                    if (translationRules.isTranslationDuplicate(translation)) {
+                                        logger.info('🚫 POST-TRANSLATION DUPLICATE detected - skipping emit', {
+                                            clientId,
+                                            original: newText.substring(0, 50),
+                                            translated: translation.substring(0, 50)
+                                        });
+                                        return; // Skip this duplicate translation
+                                    }
+
+                                    // Record this translation output to prevent future duplicates
+                                    translationRules.recordTranslatedOutput(translation);
+
                                     translationCount++;
 
                                     logger.info('✅ Translation completed', {
@@ -848,6 +862,19 @@ io.on('connection', (socket) => {
                                                     currentLanguage,
                                                     clientId
                                                 );
+
+                                                // CRITICAL FIX: Check for post-translation duplicates in pause timer too
+                                                if (translationRules.isTranslationDuplicate(translation)) {
+                                                    logger.info('🚫 POST-TRANSLATION DUPLICATE (pause) - skipping emit', {
+                                                        clientId,
+                                                        original: newText.substring(0, 50),
+                                                        translated: translation.substring(0, 50)
+                                                    });
+                                                    return;
+                                                }
+
+                                                // Record this translation output
+                                                translationRules.recordTranslatedOutput(translation);
 
                                                 translationCount++;
 
