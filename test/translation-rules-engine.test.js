@@ -611,5 +611,63 @@ describe('TranslationRulesEngine', () => {
             expect(decision.shouldTranslate).to.be.false;
             expect(decision.reason).to.equal('waiting_for_trigger');
         });
+
+        it('should reject case-insensitive duplicates (EN→RO bug from production)', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            // First translation: lowercase "hrănește"
+            const decision1 = engine.shouldTranslate({
+                text: 'hrănește ceea ce suntem în interior',
+                isFinal: true,
+                timeSinceLastChange: 100,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            expect(decision1.shouldTranslate).to.be.true;
+            expect(decision1.reason).to.equal('final_result');
+
+            // Second translation: uppercase "Hrănește" (subset, case-insensitive match) - should be REJECTED
+            const decision2 = engine.shouldTranslate({
+                text: 'Hrănește ceea ce suntem',
+                isFinal: true,
+                timeSinceLastChange: 100,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            // CRITICAL: Must reject despite case difference
+            // normalizedLast.includes(normalizedFull) should catch this
+            expect(decision2.shouldTranslate).to.be.false;
+            expect(decision2.newText).to.equal(''); // Empty because it's a duplicate
+        });
+
+        it('should reject duplicates with 60-70% overlap (threshold lowered)', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+
+            // First translation: 6 words
+            const decision1 = engine.shouldTranslate({
+                text: 'welcome to the program about mental health today',
+                isFinal: true,
+                timeSinceLastChange: 100,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            expect(decision1.shouldTranslate).to.be.true;
+
+            // Second translation: 4 words, 66.7% overlap (4/6)
+            const decision2 = engine.shouldTranslate({
+                text: 'welcome to the program',
+                isFinal: true,
+                timeSinceLastChange: 100,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            // Should REJECT with 66.7% overlap (threshold is now 60%)
+            expect(decision2.shouldTranslate).to.be.false;
+            expect(decision2.newText).to.equal(''); // Duplicate detected
+        });
     });
 });
