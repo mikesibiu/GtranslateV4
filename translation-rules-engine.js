@@ -413,7 +413,12 @@ class TranslationRulesEngine {
             reason,
             confidence,
             newText,
-            isComplete: reason === 'sentence_ending' || reason === 'final_result'
+            // Mark as complete for TTS/storage if: sentence ending, final result, max interval, or pause
+            // These all represent "good enough" stopping points for the user to hear translation
+            isComplete: reason === 'sentence_ending' ||
+                       reason === 'final_result' ||
+                       reason === 'max_interval' ||
+                       reason === 'pause_detected'
         };
     }
 
