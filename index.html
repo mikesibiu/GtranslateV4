@@ -823,6 +823,8 @@
                 this.interimTranslations = []; // Track interim translations for Q&A mode
                 this.interimElements = new Set(); // Track interim DOM elements for fast removal
                 this.audioWorkletLoaded = false; // Prevent loading module multiple times
+                this.lastTranslation = ''; // Store last translated text for EarBuds/TTS display
+                this.lastTranslationTime = 0; // Timestamp of last translation update
 
                 // Network quality monitoring
                 this.pingStartTime = null;
@@ -1216,12 +1218,30 @@
                 });
 
                 this.socket.on('interim-result', (data) => {
-                    // Show interim results in ALL modes (including EarBuds for visual feedback)
-                    this.interimText.textContent = sanitizeText(data.text) || 'Listening...';
+                    const sourceText = sanitizeText(data.text);
+
+                    if (this.ttsEnabled || this.currentMode === 'earbuds') {
+                        const hasRecentTranslation = this.lastTranslation &&
+                            (Date.now() - this.lastTranslationTime < 20000);
+
+                        if (hasRecentTranslation) {
+                            this.interimText.textContent = `${this.lastTranslation}...`;
+                        } else {
+                            this.interimText.textContent = 'Listening...';
+                        }
+                    } else {
+                        this.interimText.textContent = sourceText || 'Listening...';
+                    }
                 });
 
                 this.socket.on('translation-result', (data) => {
                     console.log('📥 TRANSLATION RECEIVED!', data);
+
+                    if (data.translated) {
+                        this.lastTranslation = sanitizeText(data.translated);
+                        this.lastTranslationTime = Date.now();
+                    }
+
                     this.addTranslation(data);
 
                     // Track translation usage for billing
@@ -1697,6 +1717,8 @@
                 this.stopSummaryTimer();
                 this.updateStatus('Ready to start', 'ready');
                 this.interimText.textContent = 'Waiting for speech...';
+                this.lastTranslation = '';
+                this.lastTranslationTime = 0;
 
                 // Stop any playing speech and clear queue
                 if (this.speechSynthesis) {
