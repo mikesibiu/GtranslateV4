@@ -773,45 +773,51 @@ io.on('connection', (socket) => {
 
                                     // CRITICAL FIX: Check for post-translation duplicates
                                     // Different source texts can produce identical translations
-                                    if (translationRules.isTranslationDuplicate(translation)) {
-                                        logger.info('🚫 POST-TRANSLATION DUPLICATE detected - skipping emit', {
+                                    const isDuplicate = translationRules.isTranslationDuplicate(translation);
+
+                                    if (isDuplicate) {
+                                        logger.info('🚫 POST-TRANSLATION DUPLICATE detected - skipping emit but updating state', {
                                             clientId,
                                             original: newText.substring(0, 50),
                                             translated: translation.substring(0, 50)
                                         });
-                                        return; // Skip this duplicate translation
                                     }
 
-                                    // Record this translation output to prevent future duplicates
+                                    // ALWAYS record translation output, even if duplicate
+                                    // This maintains state consistency for future duplicate detection
                                     translationRules.recordTranslatedOutput(translation);
 
-                                    translationCount++;
-
-                                    logger.info('✅ Translation completed', {
-                                        clientId,
-                                        reason: decision.reason,
-                                        confidence: decision.confidence,
-                                        original: newText.substring(0, 50),
-                                        translated: translation.substring(0, 50),
-                                        count: translationCount,
-                                        isComplete: decision.isComplete
-                                    });
-
-                                    // Record translation in rules engine
-                                    translationRules.recordTranslation(transcript, translation);
-
-                                    socket.emit('translation-result', {
-                                        original: newText,
-                                        translated: translation,
-                                        accumulated: accumulatedText,
-                                        count: translationCount,
-                                        isInterim: !decision.isComplete,  // Use rules engine's determination
-                                        reason: decision.reason  // Include reasoning for debugging
-                                    });
-
-                                    // Update tracking variables
+                                    // ALWAYS update tracking variables, even if duplicate
+                                    // These are critical for getNewText() to work correctly
                                     lastTranslatedText = transcript;
                                     lastTranslationTime = Date.now();
+
+                                    // Only emit to client if NOT a duplicate
+                                    if (!isDuplicate) {
+                                        translationCount++;
+
+                                        logger.info('✅ Translation completed', {
+                                            clientId,
+                                            reason: decision.reason,
+                                            confidence: decision.confidence,
+                                            original: newText.substring(0, 50),
+                                            translated: translation.substring(0, 50),
+                                            count: translationCount,
+                                            isComplete: decision.isComplete
+                                        });
+
+                                        // Record translation in rules engine
+                                        translationRules.recordTranslation(transcript, translation);
+
+                                        socket.emit('translation-result', {
+                                            original: newText,
+                                            translated: translation,
+                                            accumulated: accumulatedText,
+                                            count: translationCount,
+                                            isInterim: !decision.isComplete,  // Use rules engine's determination
+                                            reason: decision.reason  // Include reasoning for debugging
+                                        });
+                                    }
 
                                     // Clear interim text after final result (but keep lastTranslatedText for duplicate detection!)
                                     if (decision.isComplete) {
@@ -864,40 +870,45 @@ io.on('connection', (socket) => {
                                                 );
 
                                                 // CRITICAL FIX: Check for post-translation duplicates in pause timer too
-                                                if (translationRules.isTranslationDuplicate(translation)) {
-                                                    logger.info('🚫 POST-TRANSLATION DUPLICATE (pause) - skipping emit', {
+                                                const isPauseDuplicate = translationRules.isTranslationDuplicate(translation);
+
+                                                if (isPauseDuplicate) {
+                                                    logger.info('🚫 POST-TRANSLATION DUPLICATE (pause) - skipping emit but updating state', {
                                                         clientId,
                                                         original: newText.substring(0, 50),
                                                         translated: translation.substring(0, 50)
                                                     });
-                                                    return;
                                                 }
 
-                                                // Record this translation output
+                                                // ALWAYS record translation output, even if duplicate
                                                 translationRules.recordTranslatedOutput(translation);
 
-                                                translationCount++;
-
-                                                logger.info('✅ PAUSE translation completed', {
-                                                    clientId,
-                                                    original: newText.substring(0, 50),
-                                                    translated: translation.substring(0, 50),
-                                                    count: translationCount
-                                                });
-
-                                                translationRules.recordTranslation(lastInterimText, translation);
-
-                                                socket.emit('translation-result', {
-                                                    original: newText,
-                                                    translated: translation,
-                                                    accumulated: accumulatedText,
-                                                    count: translationCount,
-                                                    isInterim: !pauseDecision.isComplete,
-                                                    reason: pauseDecision.reason
-                                                });
-
+                                                // ALWAYS update tracking variables, even if duplicate
                                                 lastTranslatedText = lastInterimText;
                                                 lastTranslationTime = Date.now();
+
+                                                // Only emit to client if NOT a duplicate
+                                                if (!isPauseDuplicate) {
+                                                    translationCount++;
+
+                                                    logger.info('✅ PAUSE translation completed', {
+                                                        clientId,
+                                                        original: newText.substring(0, 50),
+                                                        translated: translation.substring(0, 50),
+                                                        count: translationCount
+                                                    });
+
+                                                    translationRules.recordTranslation(lastInterimText, translation);
+
+                                                    socket.emit('translation-result', {
+                                                        original: newText,
+                                                        translated: translation,
+                                                        accumulated: accumulatedText,
+                                                        count: translationCount,
+                                                        isInterim: !pauseDecision.isComplete,
+                                                        reason: pauseDecision.reason
+                                                    });
+                                                }
 
                                             } catch (error) {
                                                 logger.error('PAUSE translation error', { clientId, error: error.message });
