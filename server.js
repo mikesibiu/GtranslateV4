@@ -31,6 +31,12 @@ const INACTIVITY_TIMEOUT = parseInt(process.env.INACTIVITY_TIMEOUT || String(30 
 const MAX_AUDIO_CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
 
 // ===== LOGGING SETUP =====
+const LOG_DIR = path.join(__dirname, 'logs');
+if (!fs.existsSync(LOG_DIR)) {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+}
+const LOG_FILE = path.join(LOG_DIR, 'gtranslate-v4.log');
+
 // Initialize logger FIRST before using it
 const logger = winston.createLogger({
     level: 'debug',  // Enable debug logging
@@ -43,7 +49,7 @@ const logger = winston.createLogger({
     ),
     transports: [
         new winston.transports.Console(),
-        new winston.transports.File({ filename: 'gtranslate-v4.log' })
+        new winston.transports.File({ filename: LOG_FILE })
     ]
 });
 
@@ -207,8 +213,6 @@ const io = socketIo(server, {
     pingInterval: 25000
 });
 
-app.use(express.static(__dirname));
-
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -216,6 +220,12 @@ app.get('/', (req, res) => {
 app.get('/billing', (req, res) => {
     res.sendFile(path.join(__dirname, 'billing.html'));
 });
+
+app.get('/audio-processor.js', (req, res) => {
+    res.sendFile(path.join(__dirname, 'audio-processor.js'));
+});
+
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // ===== BILLING API ENDPOINTS =====
 
@@ -482,6 +492,7 @@ io.on('connection', (socket) => {
     let restartAttempts = 0; // Track restart attempts
     const MAX_RESTART_ATTEMPTS = 10; // Maximum auto-restart attempts
     let translationRules = null; // Centralized translation rules engine
+    let currentMode = 'talks'; // Persist selected mode across restarts
     let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
 
     // Helper function to update last activity time
@@ -582,7 +593,7 @@ io.on('connection', (socket) => {
                 // Double-check session is still active and we haven't been cancelled
                 if (sessionActive && isRestarting) {
                     isRestarting = false;
-                    createRecognitionStream(currentLanguage, targetLanguage, translationInterval, true);
+                    createRecognitionStream(currentLanguage, targetLanguage, translationInterval, currentMode, true);
                 } else {
                     isRestarting = false;
                 }
@@ -970,6 +981,7 @@ io.on('connection', (socket) => {
 
         const validModes = ['talks', 'qna', 'earbuds'];
         const selectedMode = mode && validModes.includes(mode) ? mode : 'talks';
+        currentMode = selectedMode;
 
         // Initialize translation rules engine for this session
         translationRules = new TranslationRulesEngine(selectedMode, logger);
@@ -1214,7 +1226,7 @@ server.listen(PORT, async () => {
     logger.info(`🌐 Server: http://localhost:${PORT}`);
     logger.info('🎤 Speech Recognition: Google Cloud (No timeout)');
     logger.info('🌍 Translation: Google Cloud');
-    logger.info('📝 Logging: gtranslate-v4.log');
+    logger.info(`📝 Logging: ${path.relative(__dirname, LOG_FILE)}`);
     logger.info('═══════════════════════════════════════');
 
     // Initialize billing database

@@ -1,0 +1,20 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Local runtime files
+logs
+*.log
+
+# Secrets / credentials
+.env
+.env.*
+google-credentials.json
+
+# VCS
+.git
+.gitignore
+
+# Misc
+.DS_Store

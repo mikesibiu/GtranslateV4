@@ -32,7 +32,7 @@ describe('TranslationRulesEngine', () => {
             const config = engine.getConfig();
 
             expect(config.name).to.equal('Q&A');
-            expect(config.translationInterval).to.equal(8000);
+            expect(config.translationInterval).to.equal(4000);
             expect(config.enableSummary).to.be.true;
             expect(config.summaryInterval).to.equal(30000);
         });
@@ -193,9 +193,9 @@ describe('TranslationRulesEngine', () => {
             expect(decision.confidence).to.equal(0.9);
         });
 
-        it('should use different interval for Q&A mode (8s)', () => {
+        it('should use different interval for Q&A mode (4s)', () => {
             const qnaEngine = new TranslationRulesEngine('qna', mockLogger);
-            qnaEngine.lastTranslationTime = Date.now() - 9000; // 9 seconds ago
+            qnaEngine.lastTranslationTime = Date.now() - 5000; // 5 seconds ago
 
             const decision = qnaEngine.shouldTranslate({
                 text: 'this is good enough text',
@@ -580,7 +580,7 @@ describe('TranslationRulesEngine', () => {
 
         it('should handle Q&A mode faster intervals', () => {
             const engine = new TranslationRulesEngine('qna', mockLogger);
-            engine.lastTranslationTime = Date.now() - 9000; // 9 seconds
+            engine.lastTranslationTime = Date.now() - 5000; // 5 seconds
 
             const decision = engine.shouldTranslate({
                 text: 'what is the main theme of this talk',
@@ -590,7 +590,7 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            // Q&A mode: 8s interval, so 9s should trigger
+            // Q&A mode: 4s interval, so 5s should trigger
             expect(decision.shouldTranslate).to.be.true;
             expect(decision.reason).to.equal('max_interval');
         });

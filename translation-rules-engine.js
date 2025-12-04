@@ -59,7 +59,7 @@ class TranslationRulesEngine {
             },
             qna: {
                 name: 'Q&A',
-                translationInterval: 8000,   // 8 seconds (faster for questions)
+                translationInterval: 4000,   // 4 seconds (faster for questions)
                 pauseDetectionMs: 3000,      // 3 second pause
                 requireSentenceEnding: false,
                 minWords: 3,

@@ -9,16 +9,14 @@ WORKDIR /app
 # Install build dependencies for native modules
 RUN apk add --no-cache python3 make g++
 
-# Copy package files
+# Copy package files for dependency install
 COPY package*.json ./
 
 # Install production dependencies
 RUN npm ci --only=production
 
-# Copy application files
-COPY server.js ./
-COPY index.html ./
-COPY audio-processor.js ./
+# Copy the rest of the application source
+COPY . .
 
 # Create directory for logs
 RUN mkdir -p /app/logs
