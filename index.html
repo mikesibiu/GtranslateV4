@@ -826,6 +826,7 @@
                 this.lastTranslation = ''; // Store last translated text for EarBuds/TTS display
                 this.lastTranslationTime = 0; // Timestamp of last translation update
                 this.lastEarbudsInterimSpoken = '';
+                this.wakeLockHeartbeat = null;
 
                 // Network quality monitoring
                 this.pingStartTime = null;
@@ -1341,6 +1342,7 @@
                     try {
                         this.wakeLock = await navigator.wakeLock.request('screen');
                         console.log('🔒 Screen wake lock acquired - screen will stay on');
+                        this.startWakeLockHeartbeat();
 
                         // Re-acquire wake lock automatically if it's released
                         this.wakeLock.addEventListener('release', async () => {
@@ -1378,6 +1380,34 @@
                 }
             }
 
+            startWakeLockHeartbeat() {
+                if (this.wakeLockHeartbeat || !('wakeLock' in navigator)) {
+                    return;
+                }
+
+                this.wakeLockHeartbeat = setInterval(async () => {
+                    if (!this.isRecording) {
+                        this.stopWakeLockHeartbeat();
+                        return;
+                    }
+
+                    if (!this.wakeLock) {
+                        try {
+                            await this.requestWakeLock();
+                        } catch (err) {
+                            console.warn('⚠️ Wake lock heartbeat failed:', err.message);
+                        }
+                    }
+                }, 45000); // Retry roughly every 45 seconds
+            }
+
+            stopWakeLockHeartbeat() {
+                if (this.wakeLockHeartbeat) {
+                    clearInterval(this.wakeLockHeartbeat);
+                    this.wakeLockHeartbeat = null;
+                }
+            }
+
             async releaseWakeLock() {
                 if (this.wakeLock) {
                     try {
@@ -1388,6 +1418,8 @@
                         console.warn('⚠️ Error releasing wake lock:', err);
                     }
                 }
+
+                this.stopWakeLockHeartbeat();
             }
 
             async startRecording() {
