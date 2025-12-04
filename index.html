@@ -638,7 +638,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v102 EAR-BUD TTS</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v104 EARBUD HOTFIX</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -825,6 +825,7 @@
                 this.audioWorkletLoaded = false; // Prevent loading module multiple times
                 this.lastTranslation = ''; // Store last translated text for EarBuds/TTS display
                 this.lastTranslationTime = 0; // Timestamp of last translation update
+                this.lastEarbudsInterimSpoken = '';
 
                 // Network quality monitoring
                 this.pingStartTime = null;
@@ -1780,9 +1781,16 @@
                     this.speakTranslation(data.translated, this.targetLanguage.value);
                 }
 
-                // EarBuds mode: speak even interim translations so listeners hear fast speech
+                // EarBuds mode: speak interim translations (without blocking finals)
                 if (data.isInterim && this.currentMode === 'earbuds') {
-                    this.speakTranslation(data.translated, this.targetLanguage.value);
+                    const interimSnippet = (data.translated || '').trim();
+                    if (interimSnippet.length > 0 && interimSnippet !== this.lastEarbudsInterimSpoken) {
+                        this.lastEarbudsInterimSpoken = interimSnippet;
+                        this.speakTranslation(data.translated, this.targetLanguage.value, { recordHistory: false });
+                    }
+                } else if (!data.isInterim && this.currentMode === 'earbuds') {
+                    // Reset tracker when a full translation is emitted
+                    this.lastEarbudsInterimSpoken = '';
                 }
 
                 // Q&A Mode: Track interim translations for summary
@@ -2068,7 +2076,8 @@
                 console.log(`📦 Partial session auto-exported: ${filename} (${translations.length} translations)`);
             }
 
-            speakTranslation(text, targetLanguage) {
+            speakTranslation(text, targetLanguage, options = {}) {
+                const { recordHistory = true } = options;
                 if (!this.ttsEnabled || !this.speechSynthesis) {
                     return;
                 }
@@ -2146,10 +2155,12 @@
                 this.ttsQueue.push({ text, targetLanguage });
 
                 // Add to recentlySpoken IMMEDIATELY to prevent race conditions
-                this.recentlySpoken.push({
-                    text: normalizedText,
-                    timestamp: Date.now()
-                });
+                if (recordHistory) {
+                    this.recentlySpoken.push({
+                        text: normalizedText,
+                        timestamp: Date.now()
+                    });
+                }
 
                 console.log(`📝 Added to TTS queue (${this.ttsQueue.length} pending): "${text.substring(0, 50)}..."`);
 
