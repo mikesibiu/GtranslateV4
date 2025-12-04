@@ -57,6 +57,7 @@ const logger = winston.createLogger({
 // Support both file-based (local/Docker) and environment variable (Heroku) credentials
 let googleCredentials;
 let CREDENTIALS_PATH;
+let credentialsProjectId = null;
 
 if (process.env.GOOGLE_CREDENTIALS_JSON) {
     // Heroku/Cloud deployment: credentials from environment variable
@@ -80,9 +81,25 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
         logger.error('❌ Credentials path outside allowed directories', { credPath });
         process.exit(1);
     }
+    try {
+        const rawCreds = fs.readFileSync(CREDENTIALS_PATH, 'utf8');
+        const parsedCreds = JSON.parse(rawCreds);
+        credentialsProjectId = parsedCreds.project_id || null;
+    } catch (error) {
+        logger.warn('⚠️ Unable to read project_id from credentials file', { error: error.message });
+    }
 } else {
     // Local development: credentials from default file
     CREDENTIALS_PATH = path.join(__dirname, 'google-credentials.json');
+    if (fs.existsSync(CREDENTIALS_PATH)) {
+        try {
+            const rawCreds = fs.readFileSync(CREDENTIALS_PATH, 'utf8');
+            const parsedCreds = JSON.parse(rawCreds);
+            credentialsProjectId = parsedCreds.project_id || null;
+        } catch (error) {
+            logger.warn('⚠️ Unable to read project_id from default credentials', { error: error.message });
+        }
+    }
 }
 
 // ===== CHECK CREDENTIALS =====
@@ -111,7 +128,7 @@ const translateClient = googleCredentials
     : new TranslationServiceClient();
 
 // Get project ID and location for v3 API
-const projectId = googleCredentials?.project_id || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
+const projectId = googleCredentials?.project_id || credentialsProjectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
 const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
 const parent = projectId ? `projects/${projectId}/locations/${location}` : null;
 const glossaryId = 'ro-en-religious-terms';
@@ -973,10 +990,13 @@ io.on('connection', (socket) => {
             return;
         }
 
-        if (interval !== undefined && (typeof interval !== 'number' || interval < 1000 || interval > 60000)) {
-            logger.warn('Invalid translation interval', { clientId, interval });
-            socket.emit('start-error', { message: 'Translation interval must be between 1000 and 60000 ms' });
-            return;
+        let sanitizedInterval = undefined;
+        if (interval !== undefined) {
+            if (typeof interval === 'number' && !Number.isNaN(interval) && interval >= 1000 && interval <= 60000) {
+                sanitizedInterval = interval;
+            } else {
+                logger.warn('Invalid translation interval provided, falling back to mode default', { clientId, interval });
+            }
         }
 
         const validModes = ['talks', 'qna', 'earbuds'];
@@ -985,6 +1005,7 @@ io.on('connection', (socket) => {
 
         // Initialize translation rules engine for this session
         translationRules = new TranslationRulesEngine(selectedMode, logger);
+        const modeConfig = translationRules.getConfig();
 
         logger.info('🎯 Translation rules engine initialized', {
             clientId,
@@ -996,7 +1017,7 @@ io.on('connection', (socket) => {
         await createRecognitionStream(
             sourceLanguage || 'ro-RO',
             targetLang || 'en',
-            interval || 10000,
+            sanitizedInterval || modeConfig.translationInterval || 10000,
             selectedMode,
             isRestart || false
         );
