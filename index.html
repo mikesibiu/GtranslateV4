@@ -638,7 +638,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v101 CREDENTIAL SAFEGUARD</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v102 EAR-BUD TTS</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -1776,8 +1776,12 @@
                     // Enable export button once we have translations
                     this.exportBtn.disabled = false;
 
-                    // Speak ONLY final translations (not interim) in ALL modes when TTS enabled
-                    // EarBuds mode: ttsEnabled = true (auto), Talks/Q&A: ttsEnabled = false (unless manually enabled)
+                    // Speak final translations (EarBuds auto-enables TTS)
+                    this.speakTranslation(data.translated, this.targetLanguage.value);
+                }
+
+                // EarBuds mode: speak even interim translations so listeners hear fast speech
+                if (data.isInterim && this.currentMode === 'earbuds') {
                     this.speakTranslation(data.translated, this.targetLanguage.value);
                 }
 
