@@ -42,7 +42,7 @@ describe('TranslationRulesEngine', () => {
             const config = engine.getConfig();
 
             expect(config.name).to.equal('EarBuds');
-            expect(config.translationInterval).to.equal(15000);
+            expect(config.translationInterval).to.equal(7000);
             expect(config.enableTTS).to.be.true;
             expect(config.displayVisualCards).to.be.false;
         });
@@ -209,9 +209,9 @@ describe('TranslationRulesEngine', () => {
             expect(decision.reason).to.equal('max_interval');
         });
 
-        it('should use different interval for EarBuds mode (15s)', () => {
+        it('should use different interval for EarBuds mode (7s)', () => {
             const earbudsEngine = new TranslationRulesEngine('earbuds', mockLogger);
-            earbudsEngine.lastTranslationTime = Date.now() - 16000; // 16 seconds ago
+            earbudsEngine.lastTranslationTime = Date.now() - 8000; // 8 seconds ago
 
             const decision = earbudsEngine.shouldTranslate({
                 text: 'this is good enough text',
@@ -597,7 +597,7 @@ describe('TranslationRulesEngine', () => {
 
         it('should handle EarBuds mode longer intervals', () => {
             const engine = new TranslationRulesEngine('earbuds', mockLogger);
-            engine.lastTranslationTime = Date.now() - 12000; // 12 seconds
+            engine.lastTranslationTime = Date.now() - 5000; // 5 seconds
 
             const decision = engine.shouldTranslate({
                 text: 'this is some continuous speech content',
@@ -607,7 +607,7 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            // EarBuds mode: 15s interval, so 12s should NOT trigger yet
+            // EarBuds mode: 7s interval, so 5s should NOT trigger yet
             expect(decision.shouldTranslate).to.be.false;
             expect(decision.reason).to.equal('waiting_for_trigger');
         });

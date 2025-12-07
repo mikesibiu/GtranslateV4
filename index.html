@@ -638,7 +638,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v104 EARBUD HOTFIX</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v106 EARBUD FINAL MODE</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -699,7 +699,7 @@
                 <div class="mode-toggle">
                     <button class="mode-option active" data-mode="talks" data-interval="10000">Talks (10s)</button>
                     <button class="mode-option" data-mode="qa" data-interval="4000" data-summary-interval="30000">Q&A (4s/30s)</button>
-                    <button class="mode-option" data-mode="earbuds" data-interval="15000" data-enable-tts="true">🎧 EarBuds (15s)</button>
+                    <button class="mode-option" data-mode="earbuds" data-interval="7000" data-enable-tts="true">🎧 EarBuds (7s)</button>
                 </div>
             </div>
 
@@ -817,7 +817,7 @@
                 this.wordsTranslated = 0;
                 this.audioChunkBuffer = [];
                 this.audioBufferSize = 4096;
-                this.translationInterval = 10000; // Default: 10 seconds (Talks mode), 15s for EarBuds
+                this.translationInterval = 10000; // Default: 10 seconds (Talks mode), 7s for EarBuds
                 this.summaryInterval = null; // For Q&A mode summary interval
                 this.summaryTimer = null; // Timer for creating summaries
                 this.interimTranslations = []; // Track interim translations for Q&A mode
@@ -1809,20 +1809,9 @@
                     // Enable export button once we have translations
                     this.exportBtn.disabled = false;
 
-                    // Speak final translations (EarBuds auto-enables TTS)
-                    this.speakTranslation(data.translated, this.targetLanguage.value);
-                }
-
-                // EarBuds mode: speak interim translations (without blocking finals)
-                if (data.isInterim && this.currentMode === 'earbuds') {
-                    const interimSnippet = (data.translated || '').trim();
-                    if (interimSnippet.length > 0 && interimSnippet !== this.lastEarbudsInterimSpoken) {
-                        this.lastEarbudsInterimSpoken = interimSnippet;
-                        this.speakTranslation(data.translated, this.targetLanguage.value, { recordHistory: false });
-                    }
-                } else if (!data.isInterim && this.currentMode === 'earbuds') {
-                    // Reset tracker when a full translation is emitted
+                    // Speak final translations only (EarBuds auto-enables TTS)
                     this.lastEarbudsInterimSpoken = '';
+                    this.speakTranslation(data.translated, this.targetLanguage.value);
                 }
 
                 // Q&A Mode: Track interim translations for summary
