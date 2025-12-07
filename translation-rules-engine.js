@@ -70,8 +70,8 @@ class TranslationRulesEngine {
             },
             earbuds: {
                 name: 'EarBuds',
-                translationInterval: 15000,  // 15 seconds (audio-first)
-                pauseDetectionMs: 3000,      // 3 second pause
+                translationInterval: 7000,   // 7 seconds for quicker finals
+                pauseDetectionMs: 2000,      // 2 second pause
                 requireSentenceEnding: false,
                 minWords: 3,
                 enableTTS: true,             // Always enable TTS

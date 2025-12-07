@@ -23,7 +23,7 @@ Tests that each mode (Talks, Q&A, EarBuds) loads correct configuration:
 
 - ✅ Talks: 10s interval, visual cards enabled
 - ✅ Q&A: 4s interval, summaries enabled
-- ✅ EarBuds: 15s interval, TTS enabled, no visual cards
+- ✅ EarBuds: 7s interval, TTS enabled, no visual cards
 - ✅ Invalid mode defaults to Talks
 
 ### 2. Quality Checks (6 tests) ✅
@@ -66,7 +66,7 @@ Tests mode-specific maximum translation intervals:
 
 - ✅ Talks mode: Translates after 10s
 - ✅ Q&A mode: Translates after 4s (faster)
-- ✅ EarBuds mode: Translates after 15s (slower, audio-first)
+- ✅ EarBuds mode: Translates after 7s (audio-first)
 - ✅ Rejects poor quality text even if max interval reached
 
 **Critical Fix:** Prevents single-word translations even when max interval reached.
@@ -131,7 +131,7 @@ Tests actual usage patterns:
 - ✅ **Continuous speech in Talks mode** (12s → translates at 10s)
 - ✅ **Single-word Google final result BLOCKED** ("pair" → REJECTED)
 - ✅ **Q&A mode faster intervals** (5s → translates at 4s)
-- ✅ **EarBuds mode longer intervals** (12s → waits until 15s)
+- ✅ **EarBuds mode shorter intervals** (5s → waits until 7s)
 
 ---
 
