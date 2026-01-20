@@ -854,6 +854,13 @@ io.on('connection', (socket) => {
                                         // We need lastTranslatedText to persist for duplicate detection
                                     }
 
+                                    // CRITICAL FIX: Restart stream after isFinal to prevent Google STT stalling
+                                    // Google often stalls after sending isFinal with fast continuous speech
+                                    if (isFinal && sessionActive) {
+                                        logger.info('🔄 Restarting stream after isFinal to prevent stalling', { clientId });
+                                        scheduleAutoRestart();
+                                    }
+
                                 } catch (error) {
                                     logger.error('Translation error', {
                                         clientId,
@@ -867,6 +874,14 @@ io.on('connection', (socket) => {
                             }
                         } else {
                             // Translation rejected - maybe start pause detection timer
+
+                            // CRITICAL FIX: Restart stream after isFinal even if translation rejected
+                            // Google often stalls after sending isFinal with fast continuous speech
+                            if (isFinal && sessionActive) {
+                                logger.info('🔄 Restarting stream after rejected isFinal to prevent stalling', { clientId, reason: decision.reason });
+                                scheduleAutoRestart();
+                            }
+
                             // Only set pause timer for interim results when max interval not reached
                             if (!isFinal && !restartStreamTimer && textChanged && translationRules) {
                                 const pauseMs = translationRules.getConfig().pauseDetectionMs;
