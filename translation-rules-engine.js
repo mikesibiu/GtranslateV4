@@ -70,10 +70,10 @@ class TranslationRulesEngine {
             },
             earbuds: {
                 name: 'EarBuds',
-                translationInterval: 5000,   // 5 seconds for fast speech (reduced from 7s)
-                pauseDetectionMs: 1500,      // 1.5 second pause (reduced from 2s)
+                translationInterval: 7000,   // 7 seconds for quicker finals
+                pauseDetectionMs: 2000,      // 2 second pause
                 requireSentenceEnding: false,
-                minWords: 2,                 // Reduced from 3 for fast speech
+                minWords: 3,
                 enableTTS: true,             // Always enable TTS
                 displayVisualCards: false,   // Hide translation cards (audio-only)
                 enableSummary: false
