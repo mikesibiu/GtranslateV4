@@ -508,6 +508,8 @@ io.on('connection', (socket) => {
     let restartTimeout = null; // Track the scheduled restart timeout
     let restartAttempts = 0; // Track restart attempts
     const MAX_RESTART_ATTEMPTS = 10; // Maximum auto-restart attempts
+    let audioBufferDuringRestart = []; // Buffer audio during stream restarts
+    const MAX_AUDIO_BUFFER_SIZE = 50; // Max chunks to buffer (prevent memory issues)
     let translationRules = null; // Centralized translation rules engine
     let currentMode = 'talks'; // Persist selected mode across restarts
     let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
@@ -964,6 +966,25 @@ io.on('connection', (socket) => {
                     }
                 });
 
+            // Flush buffered audio from restart gap
+            if (audioBufferDuringRestart.length > 0) {
+                logger.info('📦 Flushing buffered audio from restart', {
+                    clientId,
+                    bufferedChunks: audioBufferDuringRestart.length
+                });
+                for (const audioData of audioBufferDuringRestart) {
+                    if (recognizeStream && recognizeStream.writable) {
+                        try {
+                            const buffer = Buffer.from(audioData);
+                            recognizeStream.write(buffer);
+                        } catch (e) {
+                            // Ignore errors during flush
+                        }
+                    }
+                }
+                audioBufferDuringRestart = []; // Clear buffer
+            }
+
             socket.emit('streaming-started', {
                 sourceLanguage: currentLanguage,
                 targetLanguage
@@ -1042,6 +1063,16 @@ io.on('connection', (socket) => {
     let audioDataFormat = null;
 
     socket.on('audio-data', (audioData) => {
+        // Buffer audio during restart to prevent gaps
+        if (isRestarting && sessionActive) {
+            if (audioBufferDuringRestart.length < MAX_AUDIO_BUFFER_SIZE) {
+                audioBufferDuringRestart.push(audioData);
+            }
+            // Still update activity during restart
+            updateActivity();
+            return;
+        }
+
         if (recognizeStream && sessionActive && recognizeStream.writable) {
             try {
                 updateActivity(); // Reset inactivity timer on audio
