@@ -511,6 +511,9 @@ io.on('connection', (socket) => {
     let translationRules = null; // Centralized translation rules engine
     let currentMode = 'talks'; // Persist selected mode across restarts
     let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
+    let consecutiveInterimsWithoutFinal = 0; // Track stuck stream detection
+    const MAX_INTERIMS_WITHOUT_FINAL = 30; // Force restart after this many interims without final
+    const FORCE_FINAL_CHAR_THRESHOLD = 150; // Force translation after this many characters
 
     // Helper function to update last activity time
     function updateActivity() {
@@ -730,6 +733,25 @@ io.on('connection', (socket) => {
                         sessionActive
                     });
 
+                    // ===========================================
+                    // STUCK STREAM DETECTION (Critical Fix)
+                    // ===========================================
+                    if (isFinal) {
+                        consecutiveInterimsWithoutFinal = 0; // Reset counter on final
+                    } else {
+                        consecutiveInterimsWithoutFinal++;
+
+                        // Force stream restart if stuck (too many interims without final)
+                        if (consecutiveInterimsWithoutFinal >= MAX_INTERIMS_WITHOUT_FINAL) {
+                            logger.warn('⚠️ STT stream stuck - forcing restart', {
+                                clientId,
+                                consecutiveInterims: consecutiveInterimsWithoutFinal,
+                                transcriptLength: transcript.length
+                            });
+                            consecutiveInterimsWithoutFinal = 0;
+                            scheduleAutoRestart();
+                        }
+                    }
 
                     // Send interim results to client for visual feedback
                     if (sessionActive) {
@@ -776,10 +798,27 @@ io.on('connection', (socket) => {
                         }
 
                         // ===========================================
+                        // CHARACTER-BASED FORCED TRANSLATION (Critical Fix)
+                        // Force translation when transcript exceeds threshold in earbuds mode
+                        // ===========================================
+                        let forceTranslation = false;
+                        if (!decision.shouldTranslate &&
+                            currentMode === 'earbuds' &&
+                            transcript.length >= FORCE_FINAL_CHAR_THRESHOLD &&
+                            decision.newText.length > 0) {
+                            forceTranslation = true;
+                            logger.info('🚀 Forcing translation due to character threshold', {
+                                clientId,
+                                transcriptLength: transcript.length,
+                                threshold: FORCE_FINAL_CHAR_THRESHOLD
+                            });
+                        }
+
+                        // ===========================================
                         // ACT ON DECISION
                         // ===========================================
 
-                        if (decision.shouldTranslate) {
+                        if (decision.shouldTranslate || forceTranslation) {
                             // Clear any pending pause timer - we're translating now
                             if (restartStreamTimer) {
                                 clearTimeout(restartStreamTimer);
