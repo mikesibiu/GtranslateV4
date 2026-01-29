@@ -1,6 +1,6 @@
 {
   "name": "gtranslate-v4",
-  "version": "4.1.0",
+  "version": "4.0.0",
   "description": "Real-time speech translation using Google Cloud Speech-to-Text API",
   "main": "server.js",
   "scripts": {
