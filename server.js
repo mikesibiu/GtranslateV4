@@ -1,13 +1,21 @@
 /**
  * GTranslate V4 Server
- * Real-time speech translation using Google Cloud Speech-to-Text API
- * No timeout limitations, better accuracy
+ * Real-time speech translation using Google Cloud Speech-to-Text V2 API
+ *
+ * V2 Migration Notes:
+ * - Uses @google-cloud/speech v2 SpeechClient with EU endpoint (eu-speech.googleapis.com)
+ * - Recognizer path: projects/{project}/locations/eu/recognizers/_
+ * - Bidi streaming: config sent as first write(), audio as { audio: buffer }
+ * - Voice activity events: SPEECH_ACTIVITY_BEGIN/END with enableVoiceActivityEvents
+ * - voiceActivityTimeout.speechEndTimeout forces finals on natural 1.5s pauses
+ * - Model: 'long' (all V2 models are enhanced, no useEnhanced flag)
+ * - Stream auto-restarts after ~305s (Google Cloud limit)
  */
 
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const speech = require('@google-cloud/speech');
+const { SpeechClient } = require('@google-cloud/speech').v2;
 const { TranslationServiceClient } = require('@google-cloud/translate').v3;
 const winston = require('winston');
 const path = require('path');
@@ -63,6 +71,7 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
     // Heroku/Cloud deployment: credentials from environment variable
     try {
         googleCredentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+        credentialsProjectId = googleCredentials.project_id || null;
         logger.info('✅ Using Google credentials from environment variable');
     } catch (error) {
         logger.error('❌ Failed to parse GOOGLE_CREDENTIALS_JSON environment variable');
@@ -74,11 +83,32 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
     const credPath = path.resolve(process.env.GOOGLE_APPLICATION_CREDENTIALS);
     const appDir = path.resolve(__dirname);
 
+    // Resolve symlinks to get real path and prevent traversal attacks
+    let realCredPath;
+    try {
+        realCredPath = fs.realpathSync(credPath);
+    } catch (error) {
+        logger.error('❌ Credentials file does not exist or is not accessible', {
+            providedPath: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+            resolvedPath: credPath,
+            error: error.message
+        });
+        process.exit(1);
+    }
+
     // Only allow credentials files within the application directory or standard system paths
-    if (credPath.startsWith(appDir) || credPath.startsWith('/usr/') || credPath.startsWith('/etc/')) {
-        CREDENTIALS_PATH = credPath;
+    const allowedDirs = [appDir, '/usr/', '/etc/'];
+    const isAllowed = allowedDirs.some(dir => realCredPath.startsWith(path.resolve(dir)));
+    if (isAllowed) {
+        // Ensure it's actually a file, not a directory
+        const stats = fs.statSync(realCredPath);
+        if (!stats.isFile()) {
+            logger.error('❌ Credentials path is not a file', { realCredPath });
+            process.exit(1);
+        }
+        CREDENTIALS_PATH = realCredPath;
     } else {
-        logger.error('❌ Credentials path outside allowed directories', { credPath });
+        logger.error('❌ Credentials path outside allowed directories', { credPath, realCredPath });
         process.exit(1);
     }
     try {
@@ -119,9 +149,11 @@ if (googleCredentials) {
 }
 
 // ===== INITIALIZE GOOGLE CLOUD CLIENTS =====
-const speechClient = googleCredentials
-    ? new speech.SpeechClient({ credentials: googleCredentials })
-    : new speech.SpeechClient();
+const speechClientOpts = {
+    apiEndpoint: 'eu-speech.googleapis.com',
+    ...(googleCredentials ? { credentials: googleCredentials } : {})
+};
+const speechClient = new SpeechClient(speechClientOpts);
 
 const translateClient = googleCredentials
     ? new TranslationServiceClient({ credentials: googleCredentials })
@@ -130,6 +162,8 @@ const translateClient = googleCredentials
 // Get project ID and location for v3 API
 const projectId = googleCredentials?.project_id || credentialsProjectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
 const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+const speechLocation = 'eu';  // EU region for Romanian 'long' model
+const recognizerPath = `projects/${projectId}/locations/${speechLocation}/recognizers/_`;
 const parent = projectId ? `projects/${projectId}/locations/${location}` : null;
 const glossaryId = 'ro-en-religious-terms';
 const glossaryPath = parent ? `${parent}/glossaries/${glossaryId}` : null;
@@ -581,45 +615,59 @@ io.on('connection', (socket) => {
     }
 
     // Helper function to schedule auto-restart (prevents code duplication)
+    // Guards against double-fire from both 'end' and 'close' events
     function scheduleAutoRestart() {
-        if (sessionActive && !isRestarting) {
-            restartAttempts++;
-
-            if (restartAttempts > MAX_RESTART_ATTEMPTS) {
-                logger.error('❌ Maximum restart attempts exceeded', {
-                    clientId,
-                    attempts: restartAttempts
-                });
-                sessionActive = false;
-                cleanupStream();
-                socket.emit('recognition-error', {
-                    message: 'Stream restarted too many times. Please refresh the page and try again.',
-                    code: 'MAX_RESTARTS_EXCEEDED'
-                });
-                return;
-            }
-
-            logger.info('🔄 Auto-restarting stream...', {
-                clientId,
-                attempt: restartAttempts,
-                maxAttempts: MAX_RESTART_ATTEMPTS
-            });
-            isRestarting = true;
-            recognizeStream = null;
-
-            restartTimeout = setTimeout(() => {
-                restartTimeout = null; // Clear reference
-                // Double-check session is still active and we haven't been cancelled
-                if (sessionActive && isRestarting) {
-                    isRestarting = false;
-                    createRecognitionStream(currentLanguage, targetLanguage, translationInterval, currentMode, true);
-                } else {
-                    isRestarting = false;
-                }
-            }, 100);
-        } else {
-            recognizeStream = null;
+        if (!sessionActive || isRestarting) {
+            return; // Already restarting or session ended
         }
+
+        isRestarting = true;
+
+        // Cancel any pending restart timeout
+        if (restartTimeout) {
+            clearTimeout(restartTimeout);
+            restartTimeout = null;
+        }
+
+        restartAttempts++;
+
+        if (restartAttempts > MAX_RESTART_ATTEMPTS) {
+            logger.error('❌ Maximum restart attempts exceeded', {
+                clientId,
+                attempts: restartAttempts
+            });
+            sessionActive = false;
+            isRestarting = false;
+            cleanupStream();
+            socket.emit('recognition-error', {
+                message: 'Stream restarted too many times. Please refresh the page and try again.',
+                code: 'MAX_RESTARTS_EXCEEDED'
+            });
+            return;
+        }
+
+        logger.info('🔄 Auto-restarting stream...', {
+            clientId,
+            attempt: restartAttempts,
+            maxAttempts: MAX_RESTART_ATTEMPTS
+        });
+
+        // Clean up old stream before scheduling restart
+        recognizeStream = null;
+
+        restartTimeout = setTimeout(() => {
+            restartTimeout = null;
+            if (sessionActive && isRestarting) {
+                isRestarting = false;
+                createRecognitionStream(currentLanguage, targetLanguage, translationInterval, currentMode, true)
+                    .catch((error) => {
+                        logger.error('Failed to restart stream', { clientId, error: error.message });
+                        isRestarting = false;
+                    });
+            } else {
+                isRestarting = false;
+            }
+        }, 0); // No delay - restart immediately
     }
 
     // Extract stream creation logic into separate function (fixes recursive event emission)
@@ -648,26 +696,34 @@ io.on('connection', (socket) => {
                 finalIntervalMs: intervalMs
             });
 
-            const request = {
-                config: {
-                    encoding: 'LINEAR16',
-                    sampleRateHertz: 48000,  // Match browser's actual sample rate
-                    languageCode: currentLanguage,
-                    enableAutomaticPunctuation: true,
-                    model: 'latest_long',  // Better for continuous speech
-                    useEnhanced: true,
-                    // More aggressive final result detection
-                    maxAlternatives: 1,
-                    enableWordTimeOffsets: false,
-                    enableWordConfidence: false,
-                    enableSpeakerDiarization: false
-                },
-                interimResults: true,
-                singleUtterance: false
+            // V2 streaming config - sent as first message on bidi stream
+            const streamingConfig = {
+                recognizer: recognizerPath,
+                streamingConfig: {
+                    config: {
+                        explicitDecodingConfig: {
+                            encoding: 'LINEAR16',
+                            sampleRateHertz: clientSampleRate,
+                            audioChannelCount: 1
+                        },
+                        languageCodes: [currentLanguage],
+                        model: 'long',
+                        features: {
+                            enableAutomaticPunctuation: true,
+                            enableWordTimeOffsets: true
+                        }
+                    },
+                    streamingFeatures: {
+                        interimResults: true,
+                        enableVoiceActivityEvents: true,
+                        voiceActivityTimeout: {
+                            speechEndTimeout: { seconds: 1, nanos: 500000000 }  // 1.5s
+                        }
+                    }
+                }
             };
 
-            recognizeStream = speechClient
-                .streamingRecognize(request)
+            recognizeStream = speechClient._streamingRecognize()
                 .on('error', (error) => {
                     const errorCode = error.code ? String(error.code) : '';
                     logger.error('Speech recognition error', {
@@ -679,10 +735,9 @@ io.on('connection', (socket) => {
                     });
 
                     // Check if this is a stream timeout error (305 seconds exceeded)
-                    const isStreamTimeout = errorCode.includes('STREAM_ENDED') ||
-                                          errorCode.includes('STREAM_CLOSED') ||
-                                          errorCode.includes('OUT_OF_RANGE') ||
-                                          error.message.includes('Exceeded maximum allowed stream duration') ||
+                    // gRPC codes: 11 = OUT_OF_RANGE, 4 = DEADLINE_EXCEEDED
+                    const isStreamTimeout = error.code === 11 ||
+                                          error.code === 4 ||
                                           error.message.includes('maximum allowed stream duration');
 
                     if (isStreamTimeout && sessionActive) {
@@ -711,18 +766,43 @@ io.on('connection', (socket) => {
                     logger.debug('📡 Stream unpipe event', { clientId });
                 })
                 .on('data', async (data) => {
+                    // V2: Voice activity events never carry results - always skip
+                    if (data.speechEventType && data.speechEventType !== 'SPEECH_EVENT_TYPE_UNSPECIFIED') {
+                        logger.info('🔊 Voice activity event', {
+                            clientId,
+                            eventType: data.speechEventType
+                        });
+                        return;
+                    }
+
                     logger.info('📥 GOOGLE CLOUD DATA EVENT!', {
                         clientId,
                         hasResults: !!data.results,
                         resultsLength: data.results?.length,
+                        speechEventType: data.speechEventType,
                         rawData: JSON.stringify(data).substring(0, 200)
                     });
 
-                    const result = data.results[0];
-                    if (!result) return;
+                    // Validate V2 response structure
+                    if (!data.results || !Array.isArray(data.results) || data.results.length === 0) {
+                        logger.debug('No results in response data', { clientId });
+                        return;
+                    }
 
-                    const transcript = result.alternatives[0].transcript;
-                    const isFinal = result.isFinal;
+                    const result = data.results[0];
+                    if (!result || !result.alternatives || result.alternatives.length === 0) {
+                        logger.debug('No alternatives in result', { clientId });
+                        return;
+                    }
+
+                    const alternative = result.alternatives[0];
+                    if (!alternative.transcript) {
+                        logger.debug('Empty transcript in alternative', { clientId });
+                        return;
+                    }
+
+                    const transcript = alternative.transcript;
+                    const isFinal = result.isFinal || false;
 
                     logger.debug('📝 Recognition result', {
                         clientId,
@@ -966,6 +1046,20 @@ io.on('connection', (socket) => {
                     }
                 });
 
+            // Send V2 config as first message on bidi stream
+            try {
+                recognizeStream.write(streamingConfig);
+                logger.debug('📤 V2 streaming config written', { clientId, recognizer: recognizerPath });
+            } catch (configError) {
+                logger.error('Failed to write V2 streaming config', {
+                    clientId,
+                    error: configError.message
+                });
+                cleanupStream();
+                socket.emit('start-error', { message: 'Failed to initialize recognition stream' });
+                return;
+            }
+
             // Flush buffered audio from restart gap
             if (audioBufferDuringRestart.length > 0) {
                 logger.info('📦 Flushing buffered audio from restart', {
@@ -973,12 +1067,16 @@ io.on('connection', (socket) => {
                     bufferedChunks: audioBufferDuringRestart.length
                 });
                 for (const audioData of audioBufferDuringRestart) {
+                    if (!audioData) continue; // skip sentinel entries
                     if (recognizeStream && recognizeStream.writable) {
                         try {
                             const buffer = Buffer.from(audioData);
-                            recognizeStream.write(buffer);
+                            recognizeStream.write({ audio: buffer });
                         } catch (e) {
-                            // Ignore errors during flush
+                            logger.warn('⚠️ Error flushing buffered audio chunk', {
+                                clientId,
+                                error: e.message
+                            });
                         }
                     }
                 }
@@ -1000,7 +1098,13 @@ io.on('connection', (socket) => {
     }
 
     // Socket handler for start-streaming event (validates and calls createRecognitionStream)
-    socket.on('start-streaming', async ({ sourceLanguage, targetLang, translationInterval: interval, mode, isRestart }) => {
+    let clientSampleRate = 48000; // Default; updated by client on start-streaming
+
+    socket.on('start-streaming', async ({ sourceLanguage, targetLang, translationInterval: interval, mode, isRestart, sampleRate }) => {
+        // Accept client-reported AudioContext sample rate
+        if (typeof sampleRate === 'number' && sampleRate >= 8000 && sampleRate <= 96000) {
+            clientSampleRate = sampleRate;
+        }
         // Input validation
         const validLanguageCodes = /^[a-z]{2}-[A-Z]{2}$/;
         const validTargetLanguages = /^[a-z]{2}(-[A-Z]{2})?$/;
@@ -1067,13 +1171,19 @@ io.on('connection', (socket) => {
         if (isRestarting && sessionActive) {
             if (audioBufferDuringRestart.length < MAX_AUDIO_BUFFER_SIZE) {
                 audioBufferDuringRestart.push(audioData);
+            } else if (audioBufferDuringRestart.length === MAX_AUDIO_BUFFER_SIZE) {
+                logger.warn('⚠️ Audio buffer full during restart - dropping chunks', {
+                    clientId,
+                    bufferSize: MAX_AUDIO_BUFFER_SIZE
+                });
+                audioBufferDuringRestart.push(null); // sentinel to log only once
             }
             // Still update activity during restart
             updateActivity();
             return;
         }
 
-        if (recognizeStream && sessionActive && recognizeStream.writable) {
+        if (recognizeStream && sessionActive && !recognizeStream.destroyed && recognizeStream.writable) {
             try {
                 updateActivity(); // Reset inactivity timer on audio
                 audioChunkCount++;
@@ -1173,7 +1283,7 @@ io.on('connection', (socket) => {
                     });
                 }
 
-                const writeSuccess = recognizeStream.write(buffer);
+                const writeSuccess = recognizeStream.write({ audio: buffer });
                 if (audioChunkCount === 1) {
                     logger.info('📤 First chunk written to Google Cloud', {
                         clientId,
