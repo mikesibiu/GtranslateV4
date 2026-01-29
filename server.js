@@ -726,7 +726,7 @@ io.on('connection', (socket) => {
 
                     logger.debug('📝 Recognition result', {
                         clientId,
-                        transcript: transcript.substring(0, 50),
+                        transcript: transcript.substring(0, 200),
                         isFinal,
                         length: transcript.length,
                         sessionActive
@@ -807,8 +807,8 @@ io.on('connection', (socket) => {
                                     if (isDuplicate) {
                                         logger.info('🚫 POST-TRANSLATION DUPLICATE detected - skipping emit but updating state', {
                                             clientId,
-                                            original: newText.substring(0, 50),
-                                            translated: translation.substring(0, 50)
+                                            original: newText.substring(0, 200),
+                                            translated: translation.substring(0, 200)
                                         });
                                     }
 
@@ -829,8 +829,8 @@ io.on('connection', (socket) => {
                                             clientId,
                                             reason: decision.reason,
                                             confidence: decision.confidence,
-                                            original: newText.substring(0, 50),
-                                            translated: translation.substring(0, 50),
+                                            original: newText.substring(0, 200),
+                                            translated: translation.substring(0, 200),
                                             count: translationCount,
                                             isComplete: decision.isComplete
                                         });
@@ -908,8 +908,8 @@ io.on('connection', (socket) => {
                                                 if (isPauseDuplicate) {
                                                     logger.info('🚫 POST-TRANSLATION DUPLICATE (pause) - skipping emit but updating state', {
                                                         clientId,
-                                                        original: newText.substring(0, 50),
-                                                        translated: translation.substring(0, 50)
+                                                        original: newText.substring(0, 200),
+                                                        translated: translation.substring(0, 200)
                                                     });
                                                 }
 
@@ -926,8 +926,8 @@ io.on('connection', (socket) => {
 
                                                     logger.info('✅ PAUSE translation completed', {
                                                         clientId,
-                                                        original: newText.substring(0, 50),
-                                                        translated: translation.substring(0, 50),
+                                                        original: newText.substring(0, 200),
+                                                        translated: translation.substring(0, 200),
                                                         count: translationCount
                                                     });
 
