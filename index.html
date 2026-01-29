@@ -638,7 +638,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v4.1.0 — Speech V2 API</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v112 DEBUG LOGS</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -1669,8 +1669,7 @@
                         sourceLanguage: sourceLanguage,
                         targetLang: targetLang,
                         translationInterval: this.translationInterval,
-                        mode: this.currentMode,  // Send mode to server for centralized rules
-                        sampleRate: this.audioContext ? this.audioContext.sampleRate : 48000
+                        mode: this.currentMode  // Send mode to server for centralized rules
                     });
 
                     this.isRecording = true;
