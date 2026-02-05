@@ -618,6 +618,7 @@ io.on('connection', (socket) => {
     // Guards against double-fire from both 'end' and 'close' events
     function scheduleAutoRestart() {
         if (!sessionActive || isRestarting) {
+            recognizeStream = null; // Still clear stale reference
             return; // Already restarting or session ended
         }
 
@@ -796,13 +797,14 @@ io.on('connection', (socket) => {
                     }
 
                     const alternative = result.alternatives[0];
-                    if (!alternative.transcript) {
+                    const transcript = alternative.transcript || '';
+                    const isFinal = result.isFinal || false;
+
+                    // Skip empty transcripts but don't block the flow
+                    if (transcript.length === 0) {
                         logger.debug('Empty transcript in alternative', { clientId });
                         return;
                     }
-
-                    const transcript = alternative.transcript;
-                    const isFinal = result.isFinal || false;
 
                     logger.debug('📝 Recognition result', {
                         clientId,
@@ -1101,9 +1103,9 @@ io.on('connection', (socket) => {
     let clientSampleRate = 48000; // Default; updated by client on start-streaming
 
     socket.on('start-streaming', async ({ sourceLanguage, targetLang, translationInterval: interval, mode, isRestart, sampleRate }) => {
-        // Accept client-reported AudioContext sample rate
+        // Accept client-reported AudioContext sample rate (must be integer for protobuf int32)
         if (typeof sampleRate === 'number' && sampleRate >= 8000 && sampleRate <= 96000) {
-            clientSampleRate = sampleRate;
+            clientSampleRate = Math.round(sampleRate);
         }
         // Input validation
         const validLanguageCodes = /^[a-z]{2}-[A-Z]{2}$/;
