@@ -1702,6 +1702,10 @@
                         };
                     }
 
+                    // Force stereo output so TTS plays in both ears
+                    // Without this, mono processor → destination can put iOS audio session in mono mode
+                    this.audioContext.destination.channelCount = 2;
+
                     // Connect audio graph based on processor type
                     if (usingWorklet) {
                         // AudioWorklet: source → processor (gain applied inside worklet) → silent output
@@ -1714,17 +1718,26 @@
                         // Note: 0.001 is imperceptible even at max volume, but not optimized away by browser
                         const silentGain = this.audioContext.createGain();
                         silentGain.gain.value = 0.001; // Nearly silent (avoids browser optimization)
+                        silentGain.channelCount = 2;
+                        silentGain.channelCountMode = 'explicit';
+                        silentGain.channelInterpretation = 'speakers'; // Upmix mono → stereo
                         this.processor.connect(silentGain);
                         silentGain.connect(this.audioContext.destination);
 
-                        console.log('🔇 AudioWorklet connected: source → processor (gain in worklet) → silent output (0.001x)');
+                        console.log('🔇 AudioWorklet connected: source → processor → stereo silent output (0.001x)');
                     } else {
                         // ScriptProcessor: source → processor (gain applied inside processor code)
                         // Gain is applied manually in onaudioprocess handler
                         source.connect(this.processor);
-                        this.processor.connect(this.audioContext.destination);
 
-                        console.log('🔇 ScriptProcessor connected: source → processor (gain in handler) → destination');
+                        const silentStereo = this.audioContext.createGain();
+                        silentStereo.channelCount = 2;
+                        silentStereo.channelCountMode = 'explicit';
+                        silentStereo.channelInterpretation = 'speakers';
+                        this.processor.connect(silentStereo);
+                        silentStereo.connect(this.audioContext.destination);
+
+                        console.log('🔇 ScriptProcessor connected: source → processor → stereo output');
                     }
 
                     // Start streaming on server (with validated inputs and mode)
