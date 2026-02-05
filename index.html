@@ -638,7 +638,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v117 Speech V2 API</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v118</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -740,9 +740,15 @@
 
         <!-- Microphone Gain Control -->
         <div class="control-row" style="margin-top: 15px;">
-            <label for="micGainSlider" style="font-size: 0.9em; margin-bottom: 5px; display: block;">🎤 Microphone Gain: <span id="micGainValue">10.0</span>x</label>
+            <label style="font-size: 0.9em; margin-bottom: 5px; display: flex; align-items: center; gap: 8px;">
+                <span>🎤 Mic Gain: <span id="micGainValue">10.0</span>x</span>
+                <label style="font-size: 0.8em; display: flex; align-items: center; gap: 4px; cursor: pointer; margin-left: auto;">
+                    <input type="checkbox" id="autoGainToggle" checked>
+                    Auto
+                </label>
+            </label>
             <input type="range" id="micGainSlider" min="1" max="20" value="10" step="0.5" style="width: 100%;">
-            <div style="font-size: 0.75em; color: #666; margin-top: 5px;">Adjust if audio level is too low (10-25%) or too high (>100%)</div>
+            <div id="gainHint" style="font-size: 0.75em; color: #666; margin-top: 5px;">Auto-gain enabled: level adjusts automatically</div>
         </div>
 
         <div class="interim-box">
@@ -964,6 +970,8 @@
                 this.voiceSelect = document.getElementById('voiceSelect');
                 this.micGainSlider = document.getElementById('micGainSlider');
                 this.micGainValue = document.getElementById('micGainValue');
+                this.autoGainToggle = document.getElementById('autoGainToggle');
+                this.gainHint = document.getElementById('gainHint');
 
                 this.startBtn.addEventListener('click', () => this.startRecording());
                 this.stopBtn.addEventListener('click', () => this.stopRecording());
@@ -1107,23 +1115,48 @@
                     }
                 });
 
-                // Microphone gain control
+                // Microphone gain control — manual slider
                 this.micGainSlider.addEventListener('input', (e) => {
                     const gain = parseFloat(e.target.value);
                     this.micGainValue.textContent = gain.toFixed(1);
+
+                    // Disable auto-gain when user manually adjusts slider
+                    if (this.autoGainToggle.checked) {
+                        this.autoGainToggle.checked = false;
+                        this.micGainSlider.disabled = false;
+                        this.gainHint.textContent = 'Manual gain mode';
+                    }
 
                     // Update both the Web Audio gain node AND the AudioWorklet gain
                     if (this.gainNode) {
                         this.gainNode.gain.value = gain;
                     }
 
-                    // Send new gain to AudioWorklet if it's running
+                    // Send new gain to AudioWorklet (this also disables auto-gain in worklet)
                     if (this.processor && this.processor.port) {
                         this.processor.port.postMessage({ command: 'setGain', value: gain });
                     }
 
-                    console.log(`🎤 Microphone gain adjusted to ${gain.toFixed(1)}x`);
+                    console.log(`🎤 Microphone gain manually set to ${gain.toFixed(1)}x`);
                 });
+
+                // Auto-gain toggle
+                this.autoGainToggle.addEventListener('change', (e) => {
+                    const autoEnabled = e.target.checked;
+                    this.micGainSlider.disabled = autoEnabled;
+                    this.gainHint.textContent = autoEnabled
+                        ? 'Auto-gain enabled: level adjusts automatically'
+                        : 'Manual gain mode';
+
+                    if (this.processor && this.processor.port) {
+                        this.processor.port.postMessage({ command: 'setAutoGain', value: autoEnabled });
+                    }
+
+                    console.log(`🎤 Auto-gain ${autoEnabled ? 'enabled' : 'disabled'}`);
+                });
+
+                // Initialize slider state based on auto-gain default
+                this.micGainSlider.disabled = this.autoGainToggle.checked;
             }
 
             initSocket() {
@@ -1556,50 +1589,74 @@
                             this.processor = new AudioWorkletNode(this.audioContext, 'audio-processor');
                             usingWorklet = true;
 
-                            // Send gain value to AudioWorklet
-                            const gainValue = this.micGainSlider && this.micGainSlider.value ?
-                                              parseFloat(this.micGainSlider.value) : 10.0;
-                            this.processor.port.postMessage({ command: 'setGain', value: gainValue });
+                            // Send gain settings to AudioWorklet
+                            const autoGainOn = this.autoGainToggle && this.autoGainToggle.checked;
+                            if (autoGainOn) {
+                                this.processor.port.postMessage({ command: 'setAutoGain', value: true });
+                            } else {
+                                const gainValue = this.micGainSlider && this.micGainSlider.value ?
+                                                  parseFloat(this.micGainSlider.value) : 10.0;
+                                this.processor.port.postMessage({ command: 'setGain', value: gainValue });
+                            }
 
-                            console.log(`✅ Using AudioWorklet for audio processing (gain: ${gainValue}x)`);
+                            console.log(`✅ Using AudioWorklet for audio processing (autoGain: ${autoGainOn})`);
                         } catch (workletError) {
                             console.warn('⚠️ AudioWorklet failed, falling back to ScriptProcessor:', workletError);
                         }
                     }
 
                     // Fallback to ScriptProcessor for Safari < 14.1
+                    // (includes simple AGC for the fallback path)
                     if (!usingWorklet) {
                         console.log('⚠️ Using ScriptProcessor fallback (deprecated but widely supported)');
                         this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+
+                        // AGC state for ScriptProcessor fallback
+                        let spGain = this.gainNode ? this.gainNode.gain.value : 10.0;
+                        let spLevelSmooth = 0.0;
+                        const spTarget = 0.35;
+
                         this.processor.onaudioprocess = (event) => {
                             if (!this.isRecording) return;
 
                             const inputData = event.inputBuffer.getChannelData(0);
-                            const gain = this.gainNode ? this.gainNode.gain.value : 10.0;
 
-                            // Single-pass: apply gain, calculate level, and convert to Int16
+                            // AGC: measure raw peak and adjust gain
+                            if (this.autoGainToggle && this.autoGainToggle.checked) {
+                                let rawPeak = 0;
+                                for (let i = 0; i < inputData.length; i++) {
+                                    const abs = Math.abs(inputData[i]);
+                                    if (abs > rawPeak) rawPeak = abs;
+                                }
+                                spLevelSmooth = spLevelSmooth * 0.9 + rawPeak * 0.1;
+                                if (spLevelSmooth > 0.001) {
+                                    const desired = spTarget / spLevelSmooth;
+                                    const coeff = desired < spGain ? 0.15 : 0.005;
+                                    spGain += (desired - spGain) * coeff;
+                                    spGain = Math.max(1.0, Math.min(60.0, spGain));
+                                }
+                            } else {
+                                spGain = this.gainNode ? this.gainNode.gain.value : 10.0;
+                            }
+
+                            // Apply gain, calculate level, convert to Int16
                             let maxLevel = 0;
                             const int16Data = new Int16Array(inputData.length);
 
                             for (let i = 0; i < inputData.length; i++) {
-                                // Apply gain amplification
-                                const amplifiedSample = inputData[i] * gain;
+                                const amplifiedSample = inputData[i] * spGain;
                                 const absSample = Math.abs(amplifiedSample);
-
-                                // Update max level
-                                if (absSample > maxLevel) {
-                                    maxLevel = absSample;
-                                }
-
-                                // Convert to Int16 (clamp inline)
+                                if (absSample > maxLevel) maxLevel = absSample;
                                 const clamped = amplifiedSample < -1 ? -1 : (amplifiedSample > 1 ? 1 : amplifiedSample);
                                 int16Data[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
                             }
 
-                            // Update visual level meter
-                            this.updateAudioLevel(maxLevel);
+                            // Update gain display
+                            if (this.autoGainToggle && this.autoGainToggle.checked) {
+                                this.micGainValue.textContent = spGain.toFixed(1);
+                            }
 
-                            // Send audio data to server
+                            this.updateAudioLevel(maxLevel);
                             this.socket.emit('audio-data', int16Data.buffer);
                         };
                     }
@@ -1632,6 +1689,13 @@
 
                             // Update visual level meter
                             this.updateAudioLevel(level);
+
+                            // Update gain display when auto-gain is active
+                            if (event.data.currentGain !== undefined && this.autoGainToggle && this.autoGainToggle.checked) {
+                                const g = event.data.currentGain;
+                                this.micGainValue.textContent = g.toFixed(1);
+                                this.micGainSlider.value = Math.min(g, parseFloat(this.micGainSlider.max));
+                            }
 
                             // Send audio data to server
                             this.socket.emit('audio-data', audioData);

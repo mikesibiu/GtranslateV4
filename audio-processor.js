@@ -1,6 +1,7 @@
 /**
  * AudioWorkletProcessor for capturing and converting microphone audio
  * Accumulates audio chunks to send larger buffers to Google Cloud API
+ * Includes automatic gain control (AGC) to maintain optimal audio levels
  */
 
 class AudioProcessor extends AudioWorkletProcessor {
@@ -10,7 +11,16 @@ class AudioProcessor extends AudioWorkletProcessor {
         this.bufferSize = 4096; // Accumulate to 4096 samples before sending
         this.buffer = new Float32Array(this.bufferSize); // Pre-allocated typed array
         this.bufferIndex = 0;
-        this.gain = 10.0; // Default gain (will be updated from main thread)
+        this.gain = 10.0; // Current gain (manual or auto-adjusted)
+
+        // Auto-gain control state
+        this.autoGain = true;       // AGC enabled by default
+        this.targetLevel = 0.35;    // Target peak level (35% of max — ideal for STT)
+        this.minGain = 1.0;         // Don't make quieter than raw mic
+        this.maxGain = 60.0;        // Upper limit to avoid noise amplification
+        this.attackCoeff = 0.15;    // Fast attack — reduce gain quickly when too loud
+        this.releaseCoeff = 0.005;  // Slow release — increase gain gradually when quiet
+        this.levelSmooth = 0.0;     // Smoothed peak level for AGC decisions
 
         // Listen for messages from main thread
         this.port.onmessage = (event) => {
@@ -18,7 +28,13 @@ class AudioProcessor extends AudioWorkletProcessor {
                 this.isRecording = false;
             } else if (event.data.command === 'setGain') {
                 this.gain = event.data.value;
-                console.log(`AudioWorklet gain set to ${this.gain}x`);
+                this.autoGain = false; // Manual gain overrides auto
+            } else if (event.data.command === 'setAutoGain') {
+                this.autoGain = event.data.value;
+                if (this.autoGain) {
+                    // Start from current gain when switching to auto
+                    this.levelSmooth = 0.0;
+                }
             }
         };
     }
@@ -50,7 +66,37 @@ class AudioProcessor extends AudioWorkletProcessor {
     }
 
     sendBuffer() {
-        // Single-pass: apply gain, calculate level AND convert to Int16
+        // First pass (AGC only): measure raw peak level before gain
+        if (this.autoGain) {
+            let rawPeak = 0;
+            for (let i = 0; i < this.bufferSize; i++) {
+                const abs = Math.abs(this.buffer[i]);
+                if (abs > rawPeak) rawPeak = abs;
+            }
+
+            // Smooth the peak measurement to avoid reacting to single spikes
+            this.levelSmooth = this.levelSmooth * 0.9 + rawPeak * 0.1;
+
+            // Adjust gain based on smoothed level vs target
+            if (this.levelSmooth > 0.001) { // Only adjust if there's actual audio
+                const desiredGain = this.targetLevel / this.levelSmooth;
+
+                // Use asymmetric smoothing: fast attack (reduce), slow release (increase)
+                if (desiredGain < this.gain) {
+                    // Too loud — reduce gain quickly
+                    this.gain += (desiredGain - this.gain) * this.attackCoeff;
+                } else {
+                    // Too quiet — increase gain slowly
+                    this.gain += (desiredGain - this.gain) * this.releaseCoeff;
+                }
+
+                // Clamp to safe range
+                if (this.gain < this.minGain) this.gain = this.minGain;
+                if (this.gain > this.maxGain) this.gain = this.maxGain;
+            }
+        }
+
+        // Second pass: apply gain, calculate output level, convert to Int16
         let maxLevel = 0;
         const int16Data = new Int16Array(this.bufferSize);
 
@@ -69,10 +115,11 @@ class AudioProcessor extends AudioWorkletProcessor {
             int16Data[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
         }
 
-        // Send audio data and level to main thread
+        // Send audio data, level, and current gain to main thread
         this.port.postMessage({
             audioData: int16Data.buffer,
-            level: maxLevel  // 0.0 to 1.0
+            level: maxLevel,  // 0.0 to 1.0
+            currentGain: this.gain  // So UI can show current auto-gain value
         }, [int16Data.buffer]); // Transfer ownership for performance
     }
 }
