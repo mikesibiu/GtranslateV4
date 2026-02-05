@@ -3,3 +3,4 @@ google-credentials.json
 *.log
 .DS_Store
 .env
+credentials.json
