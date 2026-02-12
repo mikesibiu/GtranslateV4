@@ -638,7 +638,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v120</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v121</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -1841,24 +1841,8 @@
             }
 
             addTranslation(data) {
-                // Deduplicate: skip if same translation was recently displayed
-                const normalizedTranslated = sanitizeText(data.translated).toLowerCase().trim();
-
-                if (normalizedTranslated.length > 0) {
-                    // Check last 3 translations for exact duplicates
-                    const recentTranslations = Array.from(this.resultsContainer.children)
-                        .slice(0, 3)
-                        .map(el => {
-                            const translatedEl = el.querySelector('.translated');
-                            return translatedEl ? translatedEl.textContent.replace('💬 ', '').toLowerCase().trim() : '';
-                        })
-                        .filter(t => t.length > 0);
-
-                    if (recentTranslations.some(t => t === normalizedTranslated)) {
-                        console.log('⏭️ Skipping duplicate translation:', normalizedTranslated.substring(0, 50));
-                        return;
-                    }
-                }
+                // Server-side duplicate detection handles dedup (3 layers in translation-rules-engine)
+                // Client-side dedup removed to avoid silently dropping legitimate translations
 
                 // Display translations on screen (ALL modes including EarBuds)
                 this.translationCount++;
