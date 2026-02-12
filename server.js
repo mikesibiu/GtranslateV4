@@ -843,8 +843,26 @@ io.on('connection', (socket) => {
                                 translationInFlight = true;
 
                                 try {
+                                    // Add context from previously translated text for better translation quality
+                                    // Without context, fragments like "lor îți mulțumim" produce nonsensical translations
+                                    // With context, Google Translate understands the grammar and produces coherent output
+                                    const CONTEXT_WORDS = 4;
+                                    const prevSourceText = (translationRules.lastTranslatedText || '').trim();
+                                    const prevWords = prevSourceText.split(/\s+/).filter(w => w.length > 0);
+                                    const contextPrefix = prevWords.slice(-CONTEXT_WORDS).join(' ');
+                                    const textToTranslate = contextPrefix
+                                        ? contextPrefix + ' ' + newText
+                                        : newText;
+
+                                    logger.debug('🔤 Translating with context', {
+                                        clientId,
+                                        contextPrefix: contextPrefix.substring(0, 40),
+                                        newText: newText.substring(0, 40),
+                                        combined: textToTranslate.substring(0, 80)
+                                    });
+
                                     const translation = await translateWithRetry(
-                                        newText,
+                                        textToTranslate,
                                         targetLanguage,
                                         currentLanguage,
                                         clientId
@@ -949,8 +967,24 @@ io.on('connection', (socket) => {
                                             translationInFlight = true;
 
                                             try {
+                                                // Add context for pause timer translations too
+                                                const CONTEXT_WORDS = 4;
+                                                const prevSourceText = (translationRules.lastTranslatedText || '').trim();
+                                                const prevWords = prevSourceText.split(/\s+/).filter(w => w.length > 0);
+                                                const contextPrefix = prevWords.slice(-CONTEXT_WORDS).join(' ');
+                                                const textToTranslate = contextPrefix
+                                                    ? contextPrefix + ' ' + newText
+                                                    : newText;
+
+                                                logger.debug('🔤 Translating with context (pause)', {
+                                                    clientId,
+                                                    contextPrefix: contextPrefix.substring(0, 40),
+                                                    newText: newText.substring(0, 40),
+                                                    combined: textToTranslate.substring(0, 80)
+                                                });
+
                                                 const translation = await translateWithRetry(
-                                                    newText,
+                                                    textToTranslate,
                                                     targetLanguage,
                                                     currentLanguage,
                                                     clientId
