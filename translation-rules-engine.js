@@ -178,8 +178,10 @@ class TranslationRulesEngine {
         const normalizedLast = trimmedLast.toLowerCase();
 
         this.logger.debug('🔍 getNewText comparing:', {
-            current: trimmedFull.substring(0, 50),
-            last: trimmedLast.substring(0, 50)
+            current: trimmedFull.substring(0, 80),
+            last: trimmedLast.substring(0, 80),
+            currentLen: trimmedFull.length,
+            lastLen: trimmedLast.length
         });
 
         // Check if we've already translated this exact text (case-insensitive)
@@ -199,7 +201,11 @@ class TranslationRulesEngine {
         // Example: last="Depression", current="Depression and Anxiety" → extract "and Anxiety"
         if (normalizedFull.startsWith(normalizedLast)) {
             const extracted = trimmedFull.substring(trimmedLast.length).trim();
-            this.logger.debug('📝 Extracting continuation:', extracted.substring(0, 30));
+            this.logger.debug('📝 Extracting continuation:', {
+                text: extracted.substring(0, 60),
+                length: extracted.length,
+                words: extracted.split(/\s+/).length
+            });
             return extracted;
         }
 
