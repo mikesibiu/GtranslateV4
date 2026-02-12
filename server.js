@@ -527,6 +527,7 @@ io.on('connection', (socket) => {
     let inactivityTimer = null;
     const INACTIVITY_TIMEOUT_MS = INACTIVITY_TIMEOUT; // Use config value
     let isRestarting = false; // Prevent race conditions during auto-restart
+    let translationInFlight = false; // Prevent concurrent translations (race condition fix)
     let restartTimeout = null; // Track the scheduled restart timeout
     let restartAttempts = 0; // Track restart attempts
     const MAX_RESTART_ATTEMPTS = 10; // Maximum auto-restart attempts
@@ -569,6 +570,7 @@ io.on('connection', (socket) => {
     // Helper function to clean up stream properly
     function cleanupStream() {
         isRestarting = false; // Cancel any pending auto-restart
+        translationInFlight = false; // Reset so new sessions aren't blocked
 
         // Cancel any pending restart timeout
         if (restartTimeout) {
@@ -824,6 +826,10 @@ io.on('connection', (socket) => {
                         // ===========================================
 
                         if (decision.shouldTranslate) {
+                            // Skip if another translation is already in flight (prevents race conditions)
+                            if (translationInFlight) {
+                                logger.debug('⏳ Translation in flight, deferring', { clientId });
+                            } else {
                             // Clear any pending pause timer - we're translating now
                             if (restartStreamTimer) {
                                 clearTimeout(restartStreamTimer);
@@ -834,6 +840,7 @@ io.on('connection', (socket) => {
 
                             if (newText.length > 0) {
                                 accumulatedText = translationRules.accumulatedText;
+                                translationInFlight = true;
 
                                 try {
                                     const translation = await translateWithRetry(
@@ -911,8 +918,11 @@ io.on('connection', (socket) => {
                                     socket.emit('translation-error', {
                                         message: error.message
                                     });
+                                } finally {
+                                    translationInFlight = false;
                                 }
                             }
+                            } // end of translationInFlight guard
                         } else {
                             // Translation rejected - maybe start pause detection timer
                             // Only set pause timer for interim results when max interval not reached
@@ -931,11 +941,12 @@ io.on('connection', (socket) => {
                                         clientId: clientId
                                     });
 
-                                    if (pauseDecision.shouldTranslate && sessionActive) {
+                                    if (pauseDecision.shouldTranslate && sessionActive && !translationInFlight) {
                                         const newText = pauseDecision.newText;
 
                                         if (newText.length > 0) {
                                             accumulatedText = translationRules.accumulatedText;
+                                            translationInFlight = true;
 
                                             try {
                                                 const translation = await translateWithRetry(
@@ -991,6 +1002,8 @@ io.on('connection', (socket) => {
 
                                             } catch (error) {
                                                 logger.error('PAUSE translation error', { clientId, error: error.message });
+                                            } finally {
+                                                translationInFlight = false;
                                             }
                                         }
                                     }

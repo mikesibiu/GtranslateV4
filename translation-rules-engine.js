@@ -49,7 +49,7 @@ class TranslationRulesEngine {
         const configs = {
             talks: {
                 name: 'Talks',
-                translationInterval: 10000,  // 10 seconds
+                translationInterval: 12000,  // 12 seconds
                 pauseDetectionMs: 3000,      // 3 second pause
                 requireSentenceEnding: false, // Translate even without sentence endings
                 minWords: 3,
@@ -59,7 +59,7 @@ class TranslationRulesEngine {
             },
             qna: {
                 name: 'Q&A',
-                translationInterval: 4000,   // 4 seconds (faster for questions)
+                translationInterval: 6000,   // 6 seconds (faster for questions)
                 pauseDetectionMs: 3000,      // 3 second pause
                 requireSentenceEnding: false,
                 minWords: 3,
@@ -70,7 +70,7 @@ class TranslationRulesEngine {
             },
             earbuds: {
                 name: 'EarBuds',
-                translationInterval: 7000,   // 7 seconds for quicker finals
+                translationInterval: 9000,   // 9 seconds for quicker finals
                 pauseDetectionMs: 2000,      // 2 second pause
                 requireSentenceEnding: false,
                 minWords: 3,
@@ -203,13 +203,13 @@ class TranslationRulesEngine {
             return extracted;
         }
 
-        // Check if texts have significant overlap (>45% similarity)
-        // Lowered from 70% → 60% → 45% to catch more duplicates
-        // 45% threshold catches cases like "The book of Obadiah, is..." vs "The book of Obadiah is..." (50% overlap)
+        // Check if texts have significant overlap (>65% similarity)
+        // Raised from 45% → 65% to avoid rejecting legitimate continuations
+        // that share common words with the previous translation
         const overlap = this.calculateOverlap(trimmedLast, trimmedFull);
         this.logger.debug(`📊 Overlap: ${(overlap * 100).toFixed(1)}%`);
-        if (overlap > 0.45) {
-            this.logger.info(`⛔ DUPLICATE DETECTED: ${(overlap * 100).toFixed(1)}% overlap (threshold: 45%)`);
+        if (overlap > 0.65) {
+            this.logger.info(`⛔ DUPLICATE DETECTED: ${(overlap * 100).toFixed(1)}% overlap (threshold: 65%)`);
             return ''; // Too similar, likely duplicate
         }
 
@@ -277,10 +277,11 @@ class TranslationRulesEngine {
                 }
             }
 
-            // Word overlap check (80% threshold for translated output - higher than source 45%)
+            // Word overlap check (90% threshold for translated output)
+            // Raised from 80% → 90% to avoid rejecting legitimate continuations
             const wordOverlap = this.calculateOverlap(entryNormalized, normalized);
-            if (wordOverlap > 0.8) {
-                this.logger.info(`🚫 POST-TRANSLATION DUPLICATE: ${(wordOverlap * 100).toFixed(1)}% word overlap (threshold: 80%)`, {
+            if (wordOverlap > 0.9) {
+                this.logger.info(`🚫 POST-TRANSLATION DUPLICATE: ${(wordOverlap * 100).toFixed(1)}% word overlap (threshold: 90%)`, {
                     translation: normalized.substring(0, 50)
                 });
                 return true;
