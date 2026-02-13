@@ -49,24 +49,13 @@ class TranslationRulesEngine {
         const configs = {
             talks: {
                 name: 'Talks',
-                translationInterval: 12000,  // 12 seconds
+                translationInterval: 6000,   // 6 seconds (fast with re-translation full context)
                 pauseDetectionMs: 3000,      // 3 second pause
                 requireSentenceEnding: false, // Translate even without sentence endings
                 minWords: 3,
                 enableTTS: false,            // Manual TTS control
                 displayVisualCards: true,    // Show translation cards
                 enableSummary: false
-            },
-            qna: {
-                name: 'Q&A',
-                translationInterval: 6000,   // 6 seconds (faster for questions)
-                pauseDetectionMs: 3000,      // 3 second pause
-                requireSentenceEnding: false,
-                minWords: 3,
-                enableTTS: false,            // Manual TTS control
-                displayVisualCards: true,    // Show translation cards
-                enableSummary: true,         // Enable summaries
-                summaryInterval: 30000       // 30 second summaries
             },
             earbuds: {
                 name: 'EarBuds',
