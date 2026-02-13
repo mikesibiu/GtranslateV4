@@ -537,6 +537,10 @@ io.on('connection', (socket) => {
     let currentMode = 'talks'; // Persist selected mode across restarts
     let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
 
+    // Re-translation state: translate full text, diff against what was already spoken
+    let committedTranslation = ''; // What TTS has already spoken (permanent until stream restart)
+    let lastFullTranslation = ''; // Previous full translation for reference
+
     // Helper function to update last activity time
     function updateActivity() {
         lastActivityTime = Date.now();
@@ -571,6 +575,8 @@ io.on('connection', (socket) => {
     function cleanupStream() {
         isRestarting = false; // Cancel any pending auto-restart
         translationInFlight = false; // Reset so new sessions aren't blocked
+        committedTranslation = ''; // Reset re-translation state
+        lastFullTranslation = '';
 
         // Cancel any pending restart timeout
         if (restartTimeout) {
@@ -659,6 +665,77 @@ io.on('connection', (socket) => {
                 isRestarting = false;
             }
         }, 0); // No delay - restart immediately
+    }
+
+    /**
+     * Extract new translated content by diffing against what was already spoken.
+     * Uses word-level Longest Common Prefix (LCP) matching.
+     *
+     * @param {string} newFullTranslation - The full translation of current STT transcript
+     * @param {string} committed - What TTS has already spoken
+     * @returns {string} Only the new words to speak
+     */
+    function extractNewTranslatedContent(newFullTranslation, committed) {
+        const newTrimmed = newFullTranslation.trim();
+        const committedTrimmed = committed.trim();
+
+        // No committed text yet - everything is new
+        if (!committedTrimmed) {
+            return newTrimmed;
+        }
+
+        // Exact match - nothing new
+        if (newTrimmed === committedTrimmed) {
+            return '';
+        }
+
+        // Check if new translation starts with committed text (most common case)
+        if (newTrimmed.startsWith(committedTrimmed)) {
+            const newContent = newTrimmed.substring(committedTrimmed.length).trim();
+            logger.debug('📊 LCP match (string prefix)', {
+                clientId,
+                committedLen: committedTrimmed.length,
+                newContentLen: newContent.length,
+                newContent: newContent.substring(0, 60)
+            });
+            return newContent;
+        }
+
+        // Word-level LCP: find how many leading words match
+        const newWords = newTrimmed.split(/\s+/);
+        const committedWords = committedTrimmed.split(/\s+/);
+
+        let matchCount = 0;
+        const minLen = Math.min(newWords.length, committedWords.length);
+        for (let i = 0; i < minLen; i++) {
+            if (newWords[i].toLowerCase() === committedWords[i].toLowerCase()) {
+                matchCount++;
+            } else {
+                break;
+            }
+        }
+
+        if (matchCount > 0 && matchCount >= committedWords.length * 0.5) {
+            // Good word-level prefix match - emit words after the match
+            const newContent = newWords.slice(matchCount).join(' ');
+            logger.debug('📊 LCP match (word-level)', {
+                clientId,
+                matchedWords: matchCount,
+                totalCommitted: committedWords.length,
+                newContent: newContent.substring(0, 60)
+            });
+            return newContent;
+        }
+
+        // Translation shifted significantly (e.g., after stream restart or new utterance)
+        // Treat as entirely new content
+        logger.info('📊 No LCP match - treating as new utterance', {
+            clientId,
+            matchedWords: matchCount,
+            committedPreview: committedTrimmed.substring(0, 40),
+            newPreview: newTrimmed.substring(0, 40)
+        });
+        return newTrimmed;
     }
 
     // Extract stream creation logic into separate function (fixes recursive event emission)
@@ -839,92 +916,108 @@ io.on('connection', (socket) => {
                             const newText = decision.newText;
 
                             if (newText.length > 0) {
-                                accumulatedText = translationRules.accumulatedText;
                                 translationInFlight = true;
 
                                 try {
-                                    // Add context from previously translated text for better translation quality
-                                    // Without context, fragments like "lor îți mulțumim" produce nonsensical translations
-                                    // With context, Google Translate understands the grammar and produces coherent output
-                                    const CONTEXT_WORDS = 4;
-                                    const prevSourceText = (translationRules.lastTranslatedText || '').trim();
-                                    const prevWords = prevSourceText.split(/\s+/).filter(w => w.length > 0);
-                                    const contextPrefix = prevWords.slice(-CONTEXT_WORDS).join(' ');
-                                    const textToTranslate = contextPrefix
-                                        ? contextPrefix + ' ' + newText
-                                        : newText;
+                                    // RE-TRANSLATION: Translate the FULL STT transcript for context
+                                    // Then diff against committedTranslation to emit only new words
+                                    // Detect new utterance: if getNewText returned full text, reset committed
+                                    const isNewUtterance = newText === transcript.trim();
+                                    if (isNewUtterance && committedTranslation) {
+                                        logger.info('🆕 New utterance detected - resetting committedTranslation', { clientId });
+                                        committedTranslation = '';
+                                        lastFullTranslation = '';
+                                    }
 
-                                    logger.debug('🔤 Translating with context', {
+                                    logger.debug('🔤 Re-translation: translating full transcript', {
                                         clientId,
-                                        contextPrefix: contextPrefix.substring(0, 40),
-                                        newText: newText.substring(0, 40),
-                                        combined: textToTranslate.substring(0, 80)
+                                        fullText: transcript.substring(0, 80),
+                                        committed: committedTranslation.substring(0, 40)
                                     });
 
-                                    const translation = await translateWithRetry(
-                                        textToTranslate,
+                                    const fullTranslation = await translateWithRetry(
+                                        transcript,
                                         targetLanguage,
                                         currentLanguage,
                                         clientId
                                     );
 
-                                    // CRITICAL FIX: Check for post-translation duplicates
-                                    // Different source texts can produce identical translations
-                                    const isDuplicate = translationRules.isTranslationDuplicate(translation);
+                                    // Extract only the new content via word-level diffing
+                                    const newContent = extractNewTranslatedContent(fullTranslation, committedTranslation);
 
-                                    if (isDuplicate) {
-                                        logger.info('🚫 POST-TRANSLATION DUPLICATE detected - skipping emit but updating state', {
-                                            clientId,
-                                            original: newText.substring(0, 200),
-                                            translated: translation.substring(0, 200)
-                                        });
+                                    logger.debug('📊 New content extracted', {
+                                        clientId,
+                                        fullTranslation: fullTranslation.substring(0, 80),
+                                        newContent: newContent.substring(0, 60),
+                                        committedLen: committedTranslation.length
+                                    });
+
+                                    // Skip if no new content after diffing
+                                    if (!newContent || newContent.trim().length === 0) {
+                                        logger.info('⏭️ No new content after diffing - skipping', { clientId });
+                                        lastTranslatedText = transcript;
+                                        lastTranslationTime = Date.now();
+                                        translationInFlight = false;
+                                        // Don't return from outer scope, just skip emit
+                                    } else {
+                                        // Check for post-translation duplicates on NEW CONTENT only
+                                        const isDuplicate = translationRules.isTranslationDuplicate(newContent);
+
+                                        if (isDuplicate) {
+                                            logger.info('🚫 POST-TRANSLATION DUPLICATE detected - skipping emit', {
+                                                clientId,
+                                                newContent: newContent.substring(0, 200)
+                                            });
+                                        }
+
+                                        // Record the new content for duplicate detection
+                                        translationRules.recordTranslatedOutput(newContent);
+
+                                        // Update tracking variables
+                                        lastTranslatedText = transcript;
+                                        lastTranslationTime = Date.now();
+
+                                        // Only emit to client if NOT a duplicate
+                                        if (!isDuplicate) {
+                                            // Update committed state
+                                            committedTranslation = fullTranslation;
+                                            lastFullTranslation = fullTranslation;
+
+                                            // Record only new content in accumulated text
+                                            accumulatedText += (accumulatedText ? ' ' : '') + newContent;
+
+                                            translationCount++;
+
+                                            logger.info('✅ Translation completed', {
+                                                clientId,
+                                                reason: decision.reason,
+                                                confidence: decision.confidence,
+                                                newContent: newContent.substring(0, 200),
+                                                fullTranslation: fullTranslation.substring(0, 200),
+                                                count: translationCount,
+                                                isComplete: decision.isComplete
+                                            });
+
+                                            // Record translation in rules engine
+                                            translationRules.recordTranslation(transcript, newContent);
+
+                                            socket.emit('translation-result', {
+                                                original: newText,
+                                                translated: newContent,
+                                                accumulated: accumulatedText,
+                                                count: translationCount,
+                                                isInterim: !decision.isComplete,
+                                                reason: decision.reason
+                                            });
+                                        }
                                     }
 
-                                    // ALWAYS record translation output, even if duplicate
-                                    // This maintains state consistency for future duplicate detection
-                                    translationRules.recordTranslatedOutput(translation);
-
-                                    // ALWAYS update tracking variables, even if duplicate
-                                    // These are critical for getNewText() to work correctly
-                                    lastTranslatedText = transcript;
-                                    lastTranslationTime = Date.now();
-
-                                    // Only emit to client if NOT a duplicate
-                                    if (!isDuplicate) {
-                                        translationCount++;
-
-                                        logger.info('✅ Translation completed', {
-                                            clientId,
-                                            reason: decision.reason,
-                                            confidence: decision.confidence,
-                                            original: newText.substring(0, 200),
-                                            translated: translation.substring(0, 200),
-                                            count: translationCount,
-                                            isComplete: decision.isComplete
-                                        });
-
-                                        // Record translation in rules engine
-                                        translationRules.recordTranslation(transcript, translation);
-
-                                        socket.emit('translation-result', {
-                                            original: newText,
-                                            translated: translation,
-                                            accumulated: accumulatedText,
-                                            count: translationCount,
-                                            isInterim: !decision.isComplete,  // Use rules engine's determination
-                                            reason: decision.reason  // Include reasoning for debugging
-                                        });
-                                    }
-
-                                    // Clear interim text after final result (but keep lastTranslatedText for duplicate detection!)
+                                    // Clear interim text after final result
                                     if (decision.isComplete) {
                                         lastInterimText = '';
-                                        // NOTE: DO NOT call translationRules.resetForNewUtterance() here!
-                                        // We need lastTranslatedText to persist for duplicate detection
                                     }
 
                                     // Reset restart counter on successful translation
-                                    // This prevents hitting max restarts during long continuous speech
                                     restartAttempts = 0;
 
                                 } catch (error) {
@@ -963,75 +1056,82 @@ io.on('connection', (socket) => {
                                         const newText = pauseDecision.newText;
 
                                         if (newText.length > 0) {
-                                            accumulatedText = translationRules.accumulatedText;
                                             translationInFlight = true;
 
                                             try {
-                                                // Add context for pause timer translations too
-                                                const CONTEXT_WORDS = 4;
-                                                const prevSourceText = (translationRules.lastTranslatedText || '').trim();
-                                                const prevWords = prevSourceText.split(/\s+/).filter(w => w.length > 0);
-                                                const contextPrefix = prevWords.slice(-CONTEXT_WORDS).join(' ');
-                                                const textToTranslate = contextPrefix
-                                                    ? contextPrefix + ' ' + newText
-                                                    : newText;
+                                                // RE-TRANSLATION: Translate full interim text, diff against committed
+                                                const fullTextToTranslate = lastInterimText;
 
-                                                logger.debug('🔤 Translating with context (pause)', {
+                                                // Detect new utterance
+                                                const isNewUtterance = newText === fullTextToTranslate.trim();
+                                                if (isNewUtterance && committedTranslation) {
+                                                    logger.info('🆕 New utterance detected (pause) - resetting committedTranslation', { clientId });
+                                                    committedTranslation = '';
+                                                    lastFullTranslation = '';
+                                                }
+
+                                                logger.debug('🔤 Re-translation (pause): translating full text', {
                                                     clientId,
-                                                    contextPrefix: contextPrefix.substring(0, 40),
-                                                    newText: newText.substring(0, 40),
-                                                    combined: textToTranslate.substring(0, 80)
+                                                    fullText: fullTextToTranslate.substring(0, 80),
+                                                    committed: committedTranslation.substring(0, 40)
                                                 });
 
-                                                const translation = await translateWithRetry(
-                                                    textToTranslate,
+                                                const fullTranslation = await translateWithRetry(
+                                                    fullTextToTranslate,
                                                     targetLanguage,
                                                     currentLanguage,
                                                     clientId
                                                 );
 
-                                                // CRITICAL FIX: Check for post-translation duplicates in pause timer too
-                                                const isPauseDuplicate = translationRules.isTranslationDuplicate(translation);
+                                                // Extract only new content via diffing
+                                                const newContent = extractNewTranslatedContent(fullTranslation, committedTranslation);
 
-                                                if (isPauseDuplicate) {
-                                                    logger.info('🚫 POST-TRANSLATION DUPLICATE (pause) - skipping emit but updating state', {
-                                                        clientId,
-                                                        original: newText.substring(0, 200),
-                                                        translated: translation.substring(0, 200)
-                                                    });
-                                                }
+                                                if (!newContent || newContent.trim().length === 0) {
+                                                    logger.info('⏭️ No new content after diffing (pause) - skipping', { clientId });
+                                                    lastTranslatedText = lastInterimText;
+                                                    lastTranslationTime = Date.now();
+                                                } else {
+                                                    // Check for post-translation duplicates on new content
+                                                    const isPauseDuplicate = translationRules.isTranslationDuplicate(newContent);
 
-                                                // ALWAYS record translation output, even if duplicate
-                                                translationRules.recordTranslatedOutput(translation);
+                                                    if (isPauseDuplicate) {
+                                                        logger.info('🚫 POST-TRANSLATION DUPLICATE (pause) - skipping emit', {
+                                                            clientId,
+                                                            newContent: newContent.substring(0, 200)
+                                                        });
+                                                    }
 
-                                                // ALWAYS update tracking variables, even if duplicate
-                                                lastTranslatedText = lastInterimText;
-                                                lastTranslationTime = Date.now();
+                                                    translationRules.recordTranslatedOutput(newContent);
 
-                                                // Only emit to client if NOT a duplicate
-                                                if (!isPauseDuplicate) {
-                                                    translationCount++;
+                                                    lastTranslatedText = lastInterimText;
+                                                    lastTranslationTime = Date.now();
 
-                                                    logger.info('✅ PAUSE translation completed', {
-                                                        clientId,
-                                                        original: newText.substring(0, 200),
-                                                        translated: translation.substring(0, 200),
-                                                        count: translationCount
-                                                    });
+                                                    if (!isPauseDuplicate) {
+                                                        committedTranslation = fullTranslation;
+                                                        lastFullTranslation = fullTranslation;
 
-                                                    translationRules.recordTranslation(lastInterimText, translation);
+                                                        accumulatedText += (accumulatedText ? ' ' : '') + newContent;
+                                                        translationCount++;
 
-                                                    socket.emit('translation-result', {
-                                                        original: newText,
-                                                        translated: translation,
-                                                        accumulated: accumulatedText,
-                                                        count: translationCount,
-                                                        isInterim: !pauseDecision.isComplete,
-                                                        reason: pauseDecision.reason
-                                                    });
+                                                        logger.info('✅ PAUSE translation completed', {
+                                                            clientId,
+                                                            newContent: newContent.substring(0, 200),
+                                                            count: translationCount
+                                                        });
 
-                                                    // Reset restart counter on successful translation
-                                                    restartAttempts = 0;
+                                                        translationRules.recordTranslation(lastInterimText, newContent);
+
+                                                        socket.emit('translation-result', {
+                                                            original: newText,
+                                                            translated: newContent,
+                                                            accumulated: accumulatedText,
+                                                            count: translationCount,
+                                                            isInterim: !pauseDecision.isComplete,
+                                                            reason: pauseDecision.reason
+                                                        });
+
+                                                        restartAttempts = 0;
+                                                    }
                                                 }
 
                                             } catch (error) {

@@ -70,7 +70,7 @@ class TranslationRulesEngine {
             },
             earbuds: {
                 name: 'EarBuds',
-                translationInterval: 9000,   // 9 seconds for quicker finals
+                translationInterval: 7000,   // 7 seconds (safe with re-translation full context)
                 pauseDetectionMs: 2000,      // 2 second pause
                 requireSentenceEnding: false,
                 minWords: 3,
