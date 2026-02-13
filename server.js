@@ -1220,7 +1220,7 @@ io.on('connection', (socket) => {
             }
         }
 
-        const validModes = ['talks', 'qna', 'earbuds'];
+        const validModes = ['talks', 'earbuds'];
         const selectedMode = mode && validModes.includes(mode) ? mode : 'talks';
         currentMode = selectedMode;
 

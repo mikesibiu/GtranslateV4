@@ -638,7 +638,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v124</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v125</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -697,9 +697,8 @@
             <div class="mode-toggle-container">
                 <span class="mode-toggle-label">Translation Mode:</span>
                 <div class="mode-toggle">
-                    <button class="mode-option active" data-mode="talks" data-interval="10000">Talks (10s)</button>
-                    <button class="mode-option" data-mode="qa" data-interval="4000" data-summary-interval="30000">Q&A (4s/30s)</button>
-                    <button class="mode-option" data-mode="earbuds" data-interval="7000" data-enable-tts="true">🎧 EarBuds (7s)</button>
+                    <button class="mode-option active" data-mode="talks" data-interval="6000">Talks (6s)</button>
+                    <button class="mode-option" data-mode="earbuds" data-interval="6000" data-enable-tts="true">🎧 EarBuds (6s)</button>
                 </div>
             </div>
 
@@ -823,10 +822,7 @@
                 this.wordsTranslated = 0;
                 this.audioChunkBuffer = [];
                 this.audioBufferSize = 4096;
-                this.translationInterval = 10000; // Default: 10 seconds (Talks mode), 7s for EarBuds
-                this.summaryInterval = null; // For Q&A mode summary interval
-                this.summaryTimer = null; // Timer for creating summaries
-                this.interimTranslations = []; // Track interim translations for Q&A mode
+                this.translationInterval = 6000; // Default: 6 seconds
                 this.interimElements = new Set(); // Track interim DOM elements for fast removal
                 this.audioWorkletLoaded = false; // Prevent loading module multiple times
                 this.lastTranslation = ''; // Store last translated text for EarBuds/TTS display
@@ -844,7 +840,7 @@
                 this.MAX_SESSION_TRANSLATIONS = 1000; // Prevent memory exhaustion
 
                 // Mode tracking
-                this.currentMode = 'talks'; // Default mode: talks, qa, or earbuds
+                this.currentMode = 'talks'; // Default mode: talks or earbuds
 
                 // Text-to-Speech
                 this.ttsEnabled = false;
@@ -1340,10 +1336,6 @@
                         // Update translation interval
                         this.translationInterval = parseInt(option.dataset.interval);
 
-                        // Update summary interval (for Q&A mode)
-                        this.summaryInterval = option.dataset.summaryInterval ?
-                            parseInt(option.dataset.summaryInterval) : null;
-
                         // Handle TTS auto-enable for EarBuds mode
                         const enableTTS = option.dataset.enableTts === 'true';
                         this.ttsEnabled = enableTTS;
@@ -1363,7 +1355,7 @@
                             this.isSpeaking = false;
                         }
 
-                        console.log(`Mode changed: ${this.currentMode}, Interval: ${this.translationInterval}ms, Summary: ${this.summaryInterval}ms, TTS: ${enableTTS}`);
+                        console.log(`Mode changed: ${this.currentMode}, Interval: ${this.translationInterval}ms, TTS: ${enableTTS}`);
                     });
                 });
             }
@@ -1754,13 +1746,6 @@
                     this.translationCount = 0;
                     this.wordsTranslated = 0;
                     this.resultsContainer.innerHTML = '';
-                    this.interimTranslations = []; // Reset interim translations
-
-                    // Start summary timer for Q&A mode
-                    if (this.summaryInterval) {
-                        this.startSummaryTimer();
-                    }
-
                     this.startBtn.disabled = true;
                     this.stopBtn.disabled = false;
                     this.audioSource.disabled = true;
@@ -1825,7 +1810,6 @@
                 this.targetLanguage.disabled = false;
 
                 this.stopSessionTimer();
-                this.stopSummaryTimer();
                 this.updateStatus('Ready to start', 'ready');
                 this.interimText.textContent = 'Waiting for speech...';
                 this.lastTranslation = '';
@@ -1874,14 +1858,6 @@
                     // Speak final translations only (EarBuds auto-enables TTS)
                     this.lastEarbudsInterimSpoken = '';
                     this.speakTranslation(data.translated, this.targetLanguage.value);
-                }
-
-                // Q&A Mode: Track interim translations for summary
-                if (this.summaryInterval && data.isInterim) {
-                    this.interimTranslations.push({
-                        original: data.original,
-                        translated: data.translated
-                    });
                 }
 
                 // If this is a final translation (not interim), clear all previous interim translations
@@ -1948,54 +1924,6 @@
                     clearInterval(this.sessionTimer);
                     this.sessionTimer = null;
                 }
-            }
-
-            startSummaryTimer() {
-                console.log(`📊 Starting summary timer: ${this.summaryInterval}ms`);
-                this.summaryTimer = setInterval(() => {
-                    this.createSummary();
-                }, this.summaryInterval);
-            }
-
-            stopSummaryTimer() {
-                if (this.summaryTimer) {
-                    clearInterval(this.summaryTimer);
-                    this.summaryTimer = null;
-                }
-            }
-
-            createSummary() {
-                if (this.interimTranslations.length === 0) {
-                    console.log('📊 No interim translations to summarize');
-                    return;
-                }
-
-                console.log(`📊 Creating summary from ${this.interimTranslations.length} interim translations`);
-
-                // Combine all interim translations
-                const combinedOriginal = this.interimTranslations.map(t => t.original).join(' ');
-                const combinedTranslated = this.interimTranslations.map(t => t.translated).join(' ');
-
-                // Remove all interim (yellow) translations from display
-                this.clearInterimTranslations();
-
-                // Create final summary translation (white)
-                const item = document.createElement('div');
-                item.className = 'translation-item'; // Final translation (not interim)
-
-                item.innerHTML = `
-                    <div class="original">📝 ${escapeHtml(sanitizeText(combinedOriginal))}</div>
-                    <div class="translated">💬 ${escapeHtml(sanitizeText(combinedTranslated))}</div>
-                `;
-
-                const fragment = document.createDocumentFragment();
-                fragment.appendChild(item);
-                this.resultsContainer.insertBefore(fragment, this.resultsContainer.firstChild);
-
-                // Clear interim translations array
-                this.interimTranslations = [];
-
-                console.log('✅ Summary created and interim translations cleared');
             }
 
             updateStatus(message, type) {
