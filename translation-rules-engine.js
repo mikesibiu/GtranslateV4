@@ -385,6 +385,7 @@ class TranslationRulesEngine {
      */
     approveTranslation(newText, reason, confidence, clientId, fullText) {
         this.metrics.translationsApproved++;
+        const prevTranslationTime = this.lastTranslationTime;
         this.lastTranslationTime = Date.now();
 
         // CRITICAL: Update lastTranslatedText IMMEDIATELY to prevent race conditions
@@ -400,7 +401,7 @@ class TranslationRulesEngine {
             mode: this.mode,
             textPreview: newText.substring(0, 50),
             wordCount: newText.split(/\s+/).length,
-            elapsedMs: Date.now() - this.lastTranslationTime,
+            elapsedMs: prevTranslationTime ? this.lastTranslationTime - prevTranslationTime : 0,
             trackedText: this.lastTranslatedText.substring(0, 50)
         });
 
@@ -436,6 +437,8 @@ class TranslationRulesEngine {
 
     /**
      * Update state after successful translation
+     * NOTE: this.translationCount is for internal rules-engine metrics only;
+     * server.js maintains its own client-facing translationCount for emitting to the client.
      */
     recordTranslation(originalText, translatedText) {
         // NOTE: DO NOT update lastTranslatedText here!
@@ -444,14 +447,6 @@ class TranslationRulesEngine {
 
         this.accumulatedText += (this.accumulatedText ? ' ' : '') + translatedText;
         this.translationCount++;
-    }
-
-    /**
-     * Reset state for new utterance (after final result)
-     */
-    resetForNewUtterance() {
-        this.lastTranslatedText = '';
-        this.lastTextChangeTime = Date.now();
     }
 
     /**
