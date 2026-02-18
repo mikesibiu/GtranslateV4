@@ -1030,6 +1030,21 @@ io.on('connection', (socket) => {
                         // CENTRALIZED TRANSLATION DECISION
                         // ===========================================
 
+                        // B1 guard: skip short isFinal results (Google sends these during
+                        // natural pauses — single words / two-word bursts with no sentence ending).
+                        // The rules engine also checks quality, but this explicit pre-filter
+                        // operates on the full transcript (not just new words) for clarity.
+                        if (isFinal) {
+                            const wordCount = transcript.trim().split(/\s+/).filter(w => w.length > 0).length;
+                            const hasSentenceEnd = /[.!?。！？]\s*$/.test(transcript.trim());
+                            if (wordCount < 3 && !hasSentenceEnd) {
+                                logger.debug('⏭️ Short isFinal skipped (< 3 words, no sentence ending)', {
+                                    clientId, wordCount, transcript: transcript.substring(0, 30)
+                                });
+                                return;
+                            }
+                        }
+
                         // Safety check: If rules engine not initialized, skip translation logic
                         if (!translationRules) {
                             logger.error('❌ Translation rules engine not initialized!', { clientId });

@@ -643,7 +643,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v128</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v129</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -1110,6 +1110,7 @@
                     console.log('✅ Connected to server');
                     this.updateStatus('Ready to start', 'ready');
                     this.startLatencyMonitoring();
+                    this.useServerTTS = true; // Reset on every (re)connect so transient TTS errors don't persist
                 });
 
                 // Latency monitoring with ping/pong
