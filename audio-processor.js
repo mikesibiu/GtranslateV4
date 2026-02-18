@@ -14,7 +14,7 @@ class AudioProcessor extends AudioWorkletProcessor {
         this.gain = 10.0; // Current gain (manual or auto-adjusted)
 
         // Auto-gain control state
-        this.autoGain = true;       // AGC enabled by default
+        this.autoGain = false;      // AGC disabled by default (Google STT handles audio levels)
         this.targetLevel = 0.35;    // Target peak level (35% of max — ideal for STT)
         this.minGain = 1.0;         // Don't make quieter than raw mic
         this.maxGain = 60.0;        // Upper limit to avoid noise amplification

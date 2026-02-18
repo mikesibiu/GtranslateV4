@@ -643,7 +643,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v126</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v127</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -747,12 +747,12 @@
             <label style="font-size: 0.9em; margin-bottom: 5px; display: flex; align-items: center; gap: 8px;">
                 <span>🎤 Mic Gain: <span id="micGainValue">10.0</span>x</span>
                 <label style="font-size: 0.8em; display: flex; align-items: center; gap: 4px; cursor: pointer; margin-left: auto;">
-                    <input type="checkbox" id="autoGainToggle" checked>
+                    <input type="checkbox" id="autoGainToggle">
                     Auto
                 </label>
             </label>
             <input type="range" id="micGainSlider" min="1" max="20" value="10" step="0.5" style="width: 100%;">
-            <div id="gainHint" style="font-size: 0.75em; color: #666; margin-top: 5px;">Auto-gain enabled: level adjusts automatically</div>
+            <div id="gainHint" style="font-size: 0.75em; color: #666; margin-top: 5px;">Auto-gain disabled (Google STT handles audio levels)</div>
         </div>
 
         <div class="interim-box">
@@ -1000,46 +1000,21 @@
                 // Voice selection control
                 this.voiceSelect.addEventListener('change', (e) => {
                     const selectedValue = e.target.value;
-                    console.log(`🎤 DEBUG: Voice dropdown change event triggered`);
-                    console.log(`🎤 DEBUG: Selected value: "${selectedValue}"`);
-                    console.log(`🎤 DEBUG: Current target language: ${this.targetLanguage?.value || 'undefined'}`);
 
                     // Log all available voices
                     const allVoices = this.speechSynthesis.getVoices();
-                    console.log(`🎤 DEBUG: Total available voices: ${allVoices.length}`);
-                    console.log(`🎤 DEBUG: ALL VOICES: `, allVoices.map(v => `${v.name} [${v.lang}] ${v.localService ? 'Local' : 'Cloud'}`));
 
                     if (selectedValue === 'auto') {
                         // Auto mode - let system choose best voice
-                        console.log(`🎤 DEBUG: Setting to AUTO voice selection`);
                         this.voicePreference = 'auto';
                         this.selectedVoice = null;
                     } else {
                         // Specific voice selected - store the voice object
-                        console.log(`🎤 DEBUG: Looking for specific voice: "${selectedValue}"`);
-
                         const voice = allVoices.find(v => v.name === selectedValue);
                         if (voice) {
-                            console.log(`🎤 DEBUG: Voice FOUND - Full Details:`, {
-                                name: voice.name,
-                                language: voice.lang,
-                                localService: voice.localService
-                            });
-
                             this.voicePreference = selectedValue; // Store voice name
                             this.selectedVoice = voice; // Store voice object
-
-                            // Verify voice object storage
-                            console.log(`🎤 DEBUG: this.voicePreference:`, this.voicePreference);
-                            console.log(`🎤 DEBUG: this.selectedVoice object:`, this.selectedVoice ? {
-                                name: this.selectedVoice.name,
-                                lang: this.selectedVoice.lang,
-                                localService: this.selectedVoice.localService
-                            } : 'null');
                         } else {
-                            console.error(`❌ DEBUG: Voice "${selectedValue}" NOT FOUND!`);
-                            console.error(`🎤 DEBUG: Available voice names:`, allVoices.map(v => v.name));
-
                             this.voicePreference = 'auto';
                             this.selectedVoice = null;
 
@@ -1048,71 +1023,31 @@
                         }
                     }
 
-                    // Save voice preference to localStorage with debug info
+                    // Save voice preference to localStorage
                     try {
                         localStorage.setItem('gtranslate_voice_preference', this.voicePreference);
-                        console.log(`💾 DEBUG: Voice preference saved to localStorage: ${this.voicePreference}`);
-
-                        // Verify localStorage
-                        const verifyPreference = localStorage.getItem('gtranslate_voice_preference');
-                        console.log(`💾 DEBUG: Verified localStorage value: ${verifyPreference}`);
+                        console.log(`🎤 Voice selection saved: ${this.voicePreference}`);
                     } catch (error) {
-                        console.error(`❌ DEBUG: Failed to save voice preference to localStorage:`, error);
+                        console.error(`❌ Failed to save voice preference to localStorage:`, error);
                     }
                 });
 
                 // Target language change - update voice dropdown
                 this.targetLanguage.addEventListener('change', () => {
-                    console.log(`🌐 DEBUG: Target language change event triggered`);
-                    console.log(`🌐 DEBUG: New target language: ${this.targetLanguage.value}`);
-                    console.log(`🌐 DEBUG: Current state before reset:`, {
-                        currentVoicePreference: this.voicePreference,
-                        currentSelectedVoice: this.selectedVoice ? this.selectedVoice.name : 'null'
-                    });
-
-                    // Comprehensive debug logging before language change
-                    const allVoices = this.speechSynthesis.getVoices();
-                    console.log(`🌐 DEBUG: Total available voices before language change: ${allVoices.length}`);
-                    console.log(`🌐 DEBUG: Voice details before change:`, allVoices.map(v => ({
-                        name: v.name,
-                        lang: v.lang,
-                        localService: v.localService
-                    })));
-
-                    // Log voice reset strategy
-                    console.log(`⚠️ DEBUG: Resetting voice selection due to language change`);
-
-                    // Re-populate voice dropdown for new language with debug info
+                    // Re-populate voice dropdown for new language
                     this.populateVoiceDropdown();
 
-                    // Enhanced reset of voice selection
+                    // Reset voice selection to auto when language changes
                     if (this.voiceSelect) {
-                        // Detailed logging of reset process
-                        console.log(`🎤 DEBUG: Voice reset details`, {
-                            oldVoicePreference: this.voicePreference,
-                            oldSelectedVoice: this.selectedVoice ? this.selectedVoice.name : 'null'
-                        });
-
                         this.voiceSelect.value = 'auto';
                         this.voicePreference = 'auto';
                         this.selectedVoice = null;
 
                         try {
                             localStorage.setItem('gtranslate_voice_preference', 'auto');
-                            console.log(`🌐 DEBUG: Voice preference reset and saved to localStorage`);
-
-                            // Verify localStorage update
-                            const verifyPreference = localStorage.getItem('gtranslate_voice_preference');
-                            console.log(`🌐 DEBUG: Verified localStorage voice preference: ${verifyPreference}`);
                         } catch (error) {
-                            console.error(`❌ DEBUG: Failed to update localStorage:`, error);
+                            console.error(`❌ Failed to update localStorage:`, error);
                         }
-
-                        console.log(`🎤 DEBUG: Final state after reset:`, {
-                            voicePreference: this.voicePreference,
-                            selectedVoice: this.selectedVoice,
-                            voiceSelectValue: this.voiceSelect.value
-                        });
                     }
                 });
 
@@ -2351,34 +2286,6 @@
 
                 // Find best voice based on user preference
                 let preferredVoice;
-
-                // DEBUG: Comprehensive voice selection state logging
-                console.log(`🔍 DEBUG: Full Voice Selection Diagnostics`, {
-                    // Selected Voice Specifics
-                    selectedVoicePresent: !!this.selectedVoice,
-                    selectedVoiceName: this.selectedVoice ? this.selectedVoice.name : 'null',
-                    selectedVoiceLang: this.selectedVoice ? this.selectedVoice.lang : 'null',
-                    selectedVoiceLocal: this.selectedVoice ? this.selectedVoice.localService : 'null',
-
-                    // Voice Preference & Selection Mode
-                    voicePreference: this.voicePreference,
-                    preferenceType: this.selectedVoice ? 'user-selected' :
-                                    (this.voicePreference === 'auto' ? 'auto-select' : 'undefined'),
-
-                    // Language & Voices Context
-                    targetLanguage: targetLanguage,
-                    speechLang: speechLang,
-                    langVoicesCount: langVoices.length,
-                    allVoicesCount: allVoices.length,
-
-                    // Detailed Voice List for Target Language
-                    langVoiceDetails: langVoices.map(v => ({
-                        name: v.name,
-                        lang: v.lang,
-                        localService: v.localService,
-                        naturalVoice: v.name.includes('Neural') || v.name.includes('Wavenet')
-                    }))
-                });
 
                 if (this.selectedVoice) {
                     // User selected a specific voice from dropdown - use it directly
