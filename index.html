@@ -643,7 +643,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v127</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v128</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -859,6 +859,8 @@
                 this.voiceCache = new Map(); // Cache voices by language for fast lookup
                 this.recentlySpoken = []; // Track recently spoken text with timestamps (for duplicate detection)
                 this.lastDedupCleanup = 0; // Last time we cleaned up recentlySpoken array
+                this.useServerTTS = true;            // Prefer Google Cloud TTS over Web Speech API
+                this.ttsAudioContext = null;         // Web Audio API context for server TTS playback
 
                 // Load saved voice preference from localStorage
                 const savedVoicePreference = localStorage.getItem('gtranslate_voice_preference');
@@ -1257,6 +1259,65 @@
                 this.socket.on('translation-error', (error) => {
                     console.error('Translation error:', error);
                 });
+
+                this.initServerTTSEvents();
+            }
+
+            initServerTTSEvents() {
+                this.socket.on('tts-result', async (data) => {
+                    if (!data.audio) return;
+                    try {
+                        // Convert Node Buffer (received as object) to ArrayBuffer
+                        const uint8 = new Uint8Array(Object.values(data.audio));
+                        await this.playServerTTSAudio(uint8.buffer);
+                    } catch (e) {
+                        console.error('TTS result handling error:', e);
+                        this.isSpeaking = false;
+                        this.drainTTSQueue();
+                    }
+                });
+
+                this.socket.on('tts-error', (error) => {
+                    console.warn('⚠️ Server TTS error, falling back to Web Speech API:', error.message);
+                    this.useServerTTS = false;
+                    this.isSpeaking = false;
+                    this.processNextInQueue(); // Use Web Speech API fallback
+                });
+            }
+
+            async playServerTTSAudio(arrayBuffer) {
+                if (!this.ttsAudioContext) {
+                    this.ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (this.ttsAudioContext.state === 'suspended') {
+                    await this.ttsAudioContext.resume();
+                }
+                const audioBuffer = await this.ttsAudioContext.decodeAudioData(arrayBuffer);
+                const source = this.ttsAudioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(this.ttsAudioContext.destination);
+                this.isSpeaking = true;
+                source.onended = () => {
+                    this.isSpeaking = false;
+                    this.drainTTSQueue();
+                };
+                source.start(0);
+            }
+
+            drainTTSQueue() {
+                if (this.ttsQueue.length === 0 || this.isSpeaking) return;
+                if (this.useServerTTS && this.socket && this.socket.connected) {
+                    const item = this.ttsQueue.shift();
+                    this.isSpeaking = true;
+                    this.socket.emit('tts-synthesize', {
+                        text: item.text,
+                        targetLang: item.targetLanguage || this.targetLanguage.value,
+                        rate: this.speechRate || 0.9
+                    });
+                    // Audio returns via 'tts-result' → playServerTTSAudio() → onended → drainTTSQueue()
+                } else {
+                    this.processNextInQueue(); // Web Speech API fallback
+                }
             }
 
             initModeToggle() {
@@ -2117,7 +2178,7 @@
 
                 // Start processing queue if not already speaking
                 if (!this.isSpeaking) {
-                    this.processNextInQueue();
+                    this.drainTTSQueue();
                 }
             }
 

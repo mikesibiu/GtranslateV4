@@ -9,6 +9,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const speech = require('@google-cloud/speech');
 const { TranslationServiceClient } = require('@google-cloud/translate').v3;
+const { TextToSpeechClient } = require('@google-cloud/text-to-speech');
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
@@ -30,6 +31,17 @@ const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || '5
 const INACTIVITY_TIMEOUT = parseInt(process.env.INACTIVITY_TIMEOUT || String(30 * 60 * 1000));
 const MAX_AUDIO_CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
 const STREAM_DURATION_LIMIT_MS = 290000; // Proactive restart at 290s (Google limit is ~305s)
+
+const TTS_VOICE_MAP = {
+    'ro': { languageCode: 'ro-RO', name: 'ro-RO-Neural2-A', ssmlGender: 'FEMALE' },
+    'en': { languageCode: 'en-US', name: 'en-US-Neural2-J', ssmlGender: 'MALE' },
+    'fr': { languageCode: 'fr-FR', name: 'fr-FR-Neural2-A', ssmlGender: 'FEMALE' },
+    'de': { languageCode: 'de-DE', name: 'de-DE-Neural2-A', ssmlGender: 'FEMALE' },
+    'es': { languageCode: 'es-ES', name: 'es-ES-Neural2-A', ssmlGender: 'FEMALE' },
+    'it': { languageCode: 'it-IT', name: 'it-IT-Neural2-A', ssmlGender: 'FEMALE' },
+    'hu': { languageCode: 'hu-HU', name: 'hu-HU-Neural2-A', ssmlGender: 'FEMALE' },
+    '_default': { languageCode: 'en-US', name: 'en-US-Neural2-J', ssmlGender: 'MALE' }
+};
 
 // ===== LOGGING SETUP =====
 const LOG_DIR = path.join(__dirname, 'logs');
@@ -150,6 +162,10 @@ const translateClient = googleCredentials
     ? new TranslationServiceClient({ credentials: googleCredentials })
     : new TranslationServiceClient();
 
+const ttsClient = googleCredentials
+    ? new TextToSpeechClient({ credentials: googleCredentials })
+    : new TextToSpeechClient();
+
 // Get project ID and location for v3 API
 const projectId = googleCredentials?.project_id || credentialsProjectId || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
 const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
@@ -176,6 +192,7 @@ logger.info('✅ Google Cloud Translation v3 client initialized', {
     glossaryEnabled,
     glossaryPath: glossaryEnabled ? glossaryPath : 'disabled'
 });
+logger.info('✅ Google Cloud Text-to-Speech client initialized');
 
 // Log startup configuration
 logger.info('Server Configuration', {
@@ -289,8 +306,8 @@ app.post('/api/billing/track', express.json(), async (req, res) => {
             return res.status(400).json({ error: 'Missing required fields: type, amount, language' });
         }
 
-        if (!['stt', 'translation', 'glossary'].includes(type)) {
-            return res.status(400).json({ error: 'Invalid type. Must be: stt, translation, or glossary' });
+        if (!['stt', 'translation', 'glossary', 'tts'].includes(type)) {
+            return res.status(400).json({ error: 'Invalid type. Must be: stt, translation, glossary, or tts' });
         }
 
         if (typeof amount !== 'number' || amount < 0) {
@@ -1378,6 +1395,29 @@ io.on('connection', (socket) => {
             translationCount,
             accumulatedText
         });
+    });
+
+    // TTS Synthesis
+    socket.on('tts-synthesize', async ({ text, targetLang, rate = 1.0 }) => {
+        if (!text || typeof text !== 'string' || text.trim().length === 0) return;
+        if (text.length > 5000) {
+            socket.emit('tts-error', { message: 'Text too long for TTS' });
+            return;
+        }
+        const langCode = (targetLang || 'en').split('-')[0].toLowerCase();
+        const voice = TTS_VOICE_MAP[langCode] || TTS_VOICE_MAP['_default'];
+        try {
+            const [response] = await ttsClient.synthesizeSpeech({
+                input: { text: text.trim() },
+                voice: { languageCode: voice.languageCode, name: voice.name, ssmlGender: voice.ssmlGender },
+                audioConfig: { audioEncoding: 'MP3', speakingRate: Math.max(0.5, Math.min(2.0, rate)) }
+            });
+            socket.emit('tts-result', { audio: response.audioContent, charCount: text.length });
+            logger.debug('🔊 TTS synthesized', { clientId, lang: voice.languageCode, voice: voice.name, chars: text.length });
+        } catch (error) {
+            logger.error('TTS synthesis error', { clientId, error: error.message });
+            socket.emit('tts-error', { message: error.message });
+        }
     });
 
     // Disconnect

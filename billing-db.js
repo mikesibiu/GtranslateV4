@@ -56,7 +56,7 @@ async function createSchema(logger) {
             timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             session_date DATE NOT NULL,
             source_language VARCHAR(10) NOT NULL,
-            usage_type VARCHAR(20) NOT NULL CHECK (usage_type IN ('stt', 'translation', 'glossary')),
+            usage_type VARCHAR(20) NOT NULL CHECK (usage_type IN ('stt', 'translation', 'glossary', 'tts')),
             amount NUMERIC(12, 4) NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
