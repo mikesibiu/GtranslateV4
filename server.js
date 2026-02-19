@@ -675,6 +675,7 @@ io.on('connection', (socket) => {
         }
 
         isRestarting = true;
+        translationInFlight = false; // release in-flight guard on stream changeover
 
         // Cancel any pending restart timeout
         if (restartTimeout) {

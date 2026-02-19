@@ -643,7 +643,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v137</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v138</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -1272,6 +1272,7 @@
 
             initServerTTSEvents() {
                 this.socket.on('tts-result', async (data) => {
+                    clearTimeout(this.ttsSynthesizeTimeout);
                     if (!data.audio) return;
                     try {
                         // Convert Node Buffer (received as object) to ArrayBuffer
@@ -1285,6 +1286,7 @@
                 });
 
                 this.socket.on('tts-error', (error) => {
+                    clearTimeout(this.ttsSynthesizeTimeout);
                     console.warn('⚠️ Server TTS error, falling back to Web Speech API:', error.message);
                     this.useServerTTS = false;
                     this.isSpeaking = false;
@@ -1293,22 +1295,27 @@
             }
 
             async playServerTTSAudio(arrayBuffer) {
-                if (!this.ttsAudioContext) {
-                    this.ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                try {
+                    if (!this.ttsAudioContext) {
+                        this.ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    }
+                    if (this.ttsAudioContext.state === 'suspended') {
+                        await this.ttsAudioContext.resume();
+                    }
+                    const audioBuffer = await this.ttsAudioContext.decodeAudioData(arrayBuffer);
+                    const source = this.ttsAudioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(this.ttsAudioContext.destination);
+                    source.onended = () => {
+                        this.isSpeaking = false;
+                        this.drainTTSQueue();
+                    };
+                    this.isSpeaking = true; // set just before start — after all async throws
+                    source.start(0);
+                } catch (e) {
+                    this.isSpeaking = false; // ensure lock is released on any failure
+                    throw e;   // rethrow so tts-result outer catch handles it
                 }
-                if (this.ttsAudioContext.state === 'suspended') {
-                    await this.ttsAudioContext.resume();
-                }
-                const audioBuffer = await this.ttsAudioContext.decodeAudioData(arrayBuffer);
-                const source = this.ttsAudioContext.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(this.ttsAudioContext.destination);
-                this.isSpeaking = true;
-                source.onended = () => {
-                    this.isSpeaking = false;
-                    this.drainTTSQueue();
-                };
-                source.start(0);
             }
 
             drainTTSQueue() {
@@ -1316,6 +1323,13 @@
                 if (this.useServerTTS && this.socket && this.socket.connected) {
                     const item = this.ttsQueue.shift();
                     this.isSpeaking = true;
+                    // Safety timeout: if server never responds, release the lock after 15s
+                    clearTimeout(this.ttsSynthesizeTimeout);
+                    this.ttsSynthesizeTimeout = setTimeout(() => {
+                        console.warn('⚠️ TTS synthesize timeout — resetting state');
+                        this.isSpeaking = false;
+                        this.drainTTSQueue();
+                    }, 15000);
                     this.socket.emit('tts-synthesize', {
                         text: item.text,
                         targetLang: item.targetLanguage || this.targetLanguage.value,
@@ -1546,7 +1560,8 @@
                     console.log('   Track enabled:', this.mediaStream.getAudioTracks()[0]?.enabled);
                     console.log('   Track settings:', this.mediaStream.getAudioTracks()[0]?.getSettings());
 
-                    // Create audio context
+                    // Create audio context — reset worklet flag so module is re-added to the fresh context
+                    this.audioWorkletLoaded = false;
                     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
                     console.log('🎧 Audio context created');
@@ -1804,6 +1819,11 @@
                     this.processor = null;
                 }
 
+                if (this.ttsAudioContext) {
+                    this.ttsAudioContext.close();
+                    this.ttsAudioContext = null;
+                }
+
                 if (this.audioContext) {
                     this.audioContext.close();
                     this.audioContext = null;
@@ -1948,6 +1968,7 @@
             }
 
             startLatencyMonitoring() {
+                this.stopLatencyMonitoring(); // clear any previous interval before creating a new one
                 // Ping server every 5 seconds to measure latency
                 this.latencyMonitorInterval = setInterval(() => {
                     this.pingStartTime = Date.now();
@@ -2105,7 +2126,8 @@
 
             speakTranslation(text, targetLanguage, options = {}) {
                 const { recordHistory = true } = options;
-                if (!this.ttsEnabled || !this.speechSynthesis) {
+                // Allow server TTS even when Web Speech API is unavailable
+                if (!this.ttsEnabled || (!this.useServerTTS && !this.speechSynthesis)) {
                     return;
                 }
 
@@ -2424,7 +2446,7 @@
                 // Fail gracefully if absolutely no voices available
                 if (!preferredVoice) {
                     console.error('❌ CRITICAL: No voices available at all! Cannot play TTS.');
-                    this.processNextInQueue(); // Skip this item and continue
+                    this.isSpeaking = false; // release lock so queue can retry later
                     return;
                 }
 
