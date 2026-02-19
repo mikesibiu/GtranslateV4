@@ -22,6 +22,12 @@ class AudioProcessor extends AudioWorkletProcessor {
         this.releaseCoeff = 0.005;  // Slow release — increase gain gradually when quiet
         this.levelSmooth = 0.0;     // Smoothed peak level for AGC decisions
 
+        // Voice Activity Detection (VAD) state
+        // Gates audio transmission to server during silence to save STT API cost
+        this.vadThreshold = 0.005;      // Raw RMS threshold (~-46 dBFS); speech is typically >0.01
+        this.vadHoldoverFrames = 8;     // Keep streaming for ~680ms after speech stops (8 × 85ms/frame)
+        this.vadFramesSinceActive = 0;  // Consecutive silence frames since last speech
+
         // Listen for messages from main thread
         this.port.onmessage = (event) => {
             if (event.data.command === 'stop') {
@@ -66,6 +72,26 @@ class AudioProcessor extends AudioWorkletProcessor {
     }
 
     sendBuffer() {
+        // VAD: compute raw RMS (before any gain) to detect silence
+        let rawSumSq = 0;
+        for (let i = 0; i < this.bufferSize; i++) {
+            rawSumSq += this.buffer[i] * this.buffer[i];
+        }
+        const rawRms = Math.sqrt(rawSumSq / this.bufferSize);
+
+        if (rawRms >= this.vadThreshold) {
+            this.vadFramesSinceActive = 0; // Speech detected — reset holdover counter
+        } else {
+            this.vadFramesSinceActive++;
+        }
+
+        // True silence: below threshold AND past holdover window
+        if (this.vadFramesSinceActive > this.vadHoldoverFrames) {
+            // Skip heavy gain processing; just report level=0 to keep UI responsive
+            this.port.postMessage({ level: 0, currentGain: this.gain, isSilent: true });
+            return;
+        }
+
         // First pass (AGC only): measure raw peak level before gain
         if (this.autoGain) {
             let rawPeak = 0;
@@ -119,7 +145,8 @@ class AudioProcessor extends AudioWorkletProcessor {
         this.port.postMessage({
             audioData: int16Data.buffer,
             level: maxLevel,  // 0.0 to 1.0
-            currentGain: this.gain  // So UI can show current auto-gain value
+            currentGain: this.gain,  // So UI can show current auto-gain value
+            isSilent: false  // Active speech or in VAD holdover — transmit to server
         }, [int16Data.buffer]); // Transfer ownership for performance
     }
 }

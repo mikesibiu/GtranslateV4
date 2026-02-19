@@ -643,7 +643,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v129</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v130</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -861,6 +861,7 @@
                 this.lastDedupCleanup = 0; // Last time we cleaned up recentlySpoken array
                 this.useServerTTS = true;            // Prefer Google Cloud TTS over Web Speech API
                 this.ttsAudioContext = null;         // Web Audio API context for server TTS playback
+                this.lastCommittedTranslation = '';  // Last full translation snapshot — sent to server on reconnect to prevent duplicate cards
 
                 // Load saved voice preference from localStorage
                 const savedVoicePreference = localStorage.getItem('gtranslate_voice_preference');
@@ -1214,6 +1215,11 @@
                     if (data.translated) {
                         this.lastTranslation = sanitizeText(data.translated);
                         this.lastTranslationTime = Date.now();
+                    }
+
+                    // Track server-side committedTranslation for reconnect state restore (I8)
+                    if (data.committedTranslation !== undefined) {
+                        this.lastCommittedTranslation = data.committedTranslation;
                     }
 
                     this.addTranslation(data);
@@ -1664,9 +1670,9 @@
                             const audioData = event.data.audioData;
                             const level = event.data.level;
 
-                            // Debug first few messages
+                            // Debug first few messages (only when audio present)
                             messageCount++;
-                            if (messageCount <= 5) {
+                            if (messageCount <= 5 && audioData) {
                                 const buffer = new Int16Array(audioData);
                                 const samples = Array.from(buffer.slice(0, 10));
                                 const maxSample = Math.max(...samples.map(s => Math.abs(s)));
@@ -1691,8 +1697,10 @@
                                 this.micGainSlider.value = Math.min(g, parseFloat(this.micGainSlider.max));
                             }
 
-                            // Send audio data to server
-                            this.socket.emit('audio-data', audioData);
+                            // VAD gate: skip sending audio during silence to save STT cost
+                            if (!event.data.isSilent && audioData) {
+                                this.socket.emit('audio-data', audioData);
+                            }
                         };
                     }
 
@@ -1741,7 +1749,8 @@
                         targetLang: targetLang,
                         translationInterval: this.translationInterval,
                         mode: this.currentMode,  // Send mode to server for centralized rules
-                        sampleRate: this.audioContext ? this.audioContext.sampleRate : 48000
+                        sampleRate: this.audioContext ? this.audioContext.sampleRate : 48000,
+                        lastCommittedTranslation: this.lastCommittedTranslation  // Restore dedup state on reconnect
                     });
 
                     this.isRecording = true;

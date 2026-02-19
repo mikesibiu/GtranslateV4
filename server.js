@@ -15,6 +15,7 @@ const path = require('path');
 const fs = require('fs');
 const billingDb = require('./billing-db');
 const TranslationRulesEngine = require('./translation-rules-engine');
+const Sentry = require('@sentry/node');
 
 // ===== CONFIGURATION =====
 // Load environment variables if .env file exists
@@ -31,6 +32,23 @@ const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || '5
 const INACTIVITY_TIMEOUT = parseInt(process.env.INACTIVITY_TIMEOUT || String(30 * 60 * 1000));
 const MAX_AUDIO_CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
 const STREAM_DURATION_LIMIT_MS = 290000; // Proactive restart at 290s (Google limit is ~305s)
+
+// ===== SENTRY ERROR TRACKING =====
+// Set SENTRY_DSN env var in Heroku to enable. No-op when unset.
+if (process.env.SENTRY_DSN) {
+    Sentry.init({ dsn: process.env.SENTRY_DSN, environment: NODE_ENV, tracesSampleRate: 0.1 });
+}
+
+/**
+ * Capture an exception to Sentry (no-op if Sentry not configured)
+ */
+function captureError(error, context = {}) {
+    if (!process.env.SENTRY_DSN) return;
+    Sentry.withScope(scope => {
+        Object.entries(context).forEach(([k, v]) => scope.setExtra(k, String(v)));
+        Sentry.captureException(error);
+    });
+}
 
 const TTS_VOICE_MAP = {
     'ro': { languageCode: 'ro-RO', name: 'ro-RO-Neural2-A', ssmlGender: 'FEMALE' },
@@ -863,7 +881,8 @@ io.on('connection', (socket) => {
                         accumulated: accumulatedText,
                         count: translationCount,
                         isInterim: !decision.isComplete,
-                        reason: decision.reason
+                        reason: decision.reason,
+                        committedTranslation  // Client echoes this back on reconnect to restore state
                     });
 
                     restartAttempts = 0;
@@ -881,6 +900,7 @@ io.on('connection', (socket) => {
                 reason: decision.reason,
                 error: error.message
             });
+            captureError(error, { clientId, reason: decision.reason });
             socket.emit('translation-error', {
                 message: error.message
             });
@@ -1162,12 +1182,13 @@ io.on('connection', (socket) => {
                 clientId,
                 error: error.message
             });
+            captureError(error, { clientId });
             socket.emit('start-error', { message: error.message });
         }
     }
 
     // Socket handler for start-streaming event (validates and calls createRecognitionStream)
-    socket.on('start-streaming', async ({ sourceLanguage, targetLang, translationInterval: interval, mode, isRestart }) => {
+    socket.on('start-streaming', async ({ sourceLanguage, targetLang, translationInterval: interval, mode, isRestart, lastCommittedTranslation }) => {
         // Input validation
         const validLanguageCodes = /^[a-z]{2}-[A-Z]{2}$/;
         const validTargetLanguages = /^[a-z]{2}(-[A-Z]{2})?$/;
@@ -1200,6 +1221,15 @@ io.on('connection', (socket) => {
         // Initialize translation rules engine for this session
         translationRules = new TranslationRulesEngine(selectedMode, logger);
         const modeConfig = translationRules.getConfig();
+
+        // Restore committed translation state from client to prevent duplicate cards on reconnect
+        if (lastCommittedTranslation && typeof lastCommittedTranslation === 'string') {
+            committedTranslation = lastCommittedTranslation.substring(0, 5000); // Safety cap
+            lastTranslatedText = committedTranslation; // Align rules engine dedup state
+            logger.info('📋 Restored committedTranslation from client on reconnect', {
+                clientId, chars: committedTranslation.length
+            });
+        }
 
         logger.info('🎯 Translation rules engine initialized', {
             clientId,
@@ -1431,6 +1461,7 @@ io.on('connection', (socket) => {
             logger.debug('🔊 TTS synthesized', { clientId, lang: voice.languageCode, voice: voice.name, chars: text.length });
         } catch (error) {
             logger.error('TTS synthesis error', { clientId, error: error.message });
+            captureError(error, { clientId, targetLang, textLength: text.length });
             socket.emit('tts-error', { message: error.message });
         }
     });
