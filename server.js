@@ -299,6 +299,11 @@ app.get('/audio-processor.js', (req, res) => {
 
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
+// TEMPORARY: Sentry verification route — remove after confirming errors appear in Sentry dashboard
+app.get('/debug-sentry', function mainHandler(req, res) {
+    throw new Error('Sentry test error — delete this route after verification');
+});
+
 app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
