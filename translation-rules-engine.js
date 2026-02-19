@@ -49,7 +49,7 @@ class TranslationRulesEngine {
         const configs = {
             talks: {
                 name: 'Talks',
-                translationInterval: 10000,  // 10 seconds
+                translationInterval: 8000,   // 8 seconds
                 pauseDetectionMs: 3000,      // 3 second pause
                 requireSentenceEnding: false, // Translate even without sentence endings
                 minWords: 3,
@@ -57,20 +57,9 @@ class TranslationRulesEngine {
                 displayVisualCards: true,    // Show translation cards
                 enableSummary: false
             },
-            qna: {
-                name: 'Q&A',
-                translationInterval: 4000,   // 4 seconds
-                pauseDetectionMs: 2000,      // 2 second pause
-                requireSentenceEnding: false,
-                minWords: 3,
-                enableTTS: false,
-                displayVisualCards: true,
-                enableSummary: true,
-                summaryInterval: 30000       // 30s summaries
-            },
             earbuds: {
                 name: 'EarBuds',
-                translationInterval: 7000,   // 7 seconds
+                translationInterval: 8000,   // 8 seconds
                 pauseDetectionMs: 2000,      // 2 second pause
                 requireSentenceEnding: false,
                 minWords: 3,
