@@ -566,7 +566,9 @@ io.on('connection', (socket) => {
         'audio',
         'EarBuds',
         'gheață',
-        'gheată'
+        'gheată',
+        'Noua Zeelandă',
+        'New Zealand'
     ];
 
     // Helper function to update last activity time
@@ -734,18 +736,36 @@ io.on('connection', (socket) => {
         const sourceNumbers = sourceText.match(numberRegex) || [];
         if (sourceNumbers.length === 0) return translatedText;
 
+        let result = translatedText;
         const translatedNumbers = translatedText.match(numberRegex) || [];
-        if (translatedNumbers.length !== sourceNumbers.length) {
-            return translatedText;
+
+        // Exact one-to-one replacement when counts match
+        if (translatedNumbers.length === sourceNumbers.length) {
+            sourceNumbers.forEach((srcNum, idx) => {
+                const targetNum = translatedNumbers[idx];
+                if (targetNum) {
+                    result = result.replace(targetNum, srcNum);
+                }
+            });
+            return result;
         }
 
-        let result = translatedText;
-        sourceNumbers.forEach((srcNum, idx) => {
-            const targetNum = translatedNumbers[idx];
-            if (targetNum) {
-                result = result.replace(targetNum, srcNum);
+        // Heuristic: if translated has the same digits split across adjacent tokens, merge them
+        sourceNumbers.forEach((srcNum) => {
+            const digits = srcNum.replace(/[.,]/g, '');
+            // Build regex to find runs of numbers separated by space/comma/dot
+            const splitPattern = new RegExp(`(\\d+[\\s.,]+){0,2}\\d+`, 'g');
+            const matches = [...result.matchAll(splitPattern)];
+            for (const m of matches) {
+                const candidate = m[0];
+                const candidateDigits = candidate.replace(/[\\s.,]/g, '');
+                if (candidateDigits === digits) {
+                    result = result.replace(candidate, srcNum);
+                    break;
+                }
             }
         });
+
         return result;
     }
 
