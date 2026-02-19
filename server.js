@@ -568,7 +568,11 @@ io.on('connection', (socket) => {
         'gheață',
         'gheată',
         'Noua Zeelandă',
-        'New Zealand'
+        'New Zealand',
+        'New York',
+        'New World',
+        'nume nou',
+        'nume noi'
     ];
 
     // Helper function to update last activity time
@@ -718,7 +722,9 @@ io.on('connection', (socket) => {
     function applyTermMappings(text) {
         const mappings = [
             { pattern: /\bvestitori\b/gi, replacement: 'publishers' },
-            { pattern: /\bMartorii lui Iehova\b/gi, replacement: "Jehovah's Witnesses" }
+            { pattern: /\bMartorii lui Iehova\b/gi, replacement: "Jehovah's Witnesses" },
+            { pattern: /\bnume nou\b/gi, replacement: 'new name' },
+            { pattern: /\bnume noi\b/gi, replacement: 'new names' }
         ];
 
         let result = text;
