@@ -786,17 +786,17 @@ io.on('connection', (socket) => {
             return newContent;
         }
 
-        // Translation shifted significantly (e.g., translation API rephrased existing content).
-        // Return '' to skip this emission — the caller will update committedTranslation to the
-        // current full translation, giving the next call a fresh baseline without re-speaking
-        // already-heard content.
-        logger.info('📊 No LCP match - resetting baseline, skipping to prevent repeat', {
+        // Translation shifted significantly (e.g., translation API restructured output).
+        // Emit the full new translation so no content is lost; the caller will also update
+        // committedTranslation so the next diff has a fresh baseline.
+        // Client-side recentlySpoken dedup will block exact repeats within its time window.
+        logger.info('📊 No LCP match - emitting full translation and resetting baseline', {
             clientId,
             matchedWords: matchCount,
             committedPreview: committedTrimmed.substring(0, 40),
             newPreview: newTrimmed.substring(0, 40)
         });
-        return '';
+        return newTrimmed;
     }
 
     /**
