@@ -1446,6 +1446,7 @@ io.on('connection', (socket) => {
 
     // TTS Synthesis
     socket.on('tts-synthesize', async ({ text, targetLang, rate = 1.0 }) => {
+        logger.info('🔊 TTS request received', { clientId, targetLang, chars: text?.length });
         if (!text || typeof text !== 'string' || text.trim().length === 0) return;
         if (text.length > 5000) {
             socket.emit('tts-error', { message: 'Text too long for TTS' });
@@ -1460,7 +1461,7 @@ io.on('connection', (socket) => {
                 audioConfig: { audioEncoding: 'MP3', speakingRate: Math.max(0.5, Math.min(2.0, rate)) }
             });
             socket.emit('tts-result', { audio: response.audioContent, charCount: text.length });
-            logger.debug('🔊 TTS synthesized', { clientId, lang: voice.languageCode, voice: voice.name, chars: text.length });
+            logger.info('🔊 TTS synthesized OK', { clientId, lang: voice.languageCode, voice: voice.name, chars: text.length });
         } catch (error) {
             logger.error('TTS synthesis error', { clientId, error: error.message });
             captureError(error, { clientId, targetLang, textLength: text.length });
