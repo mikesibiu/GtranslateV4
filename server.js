@@ -4,6 +4,9 @@
  * Stream proactively restarts at 290s (Google Cloud limit is ~305s)
  */
 
+// Sentry must be imported before everything else (v8 requirement)
+require('./instrument.js');
+
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -33,14 +36,8 @@ const INACTIVITY_TIMEOUT = parseInt(process.env.INACTIVITY_TIMEOUT || String(30 
 const MAX_AUDIO_CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
 const STREAM_DURATION_LIMIT_MS = 290000; // Proactive restart at 290s (Google limit is ~305s)
 
-// ===== SENTRY ERROR TRACKING =====
-// Set SENTRY_DSN env var in Heroku to enable. No-op when unset.
-if (process.env.SENTRY_DSN) {
-    Sentry.init({ dsn: process.env.SENTRY_DSN, environment: NODE_ENV, tracesSampleRate: 0.1 });
-}
-
 /**
- * Capture an exception to Sentry (no-op if Sentry not configured)
+ * Capture an exception to Sentry (no-op if SENTRY_DSN not configured)
  */
 function captureError(error, context = {}) {
     if (!process.env.SENTRY_DSN) return;
@@ -390,6 +387,11 @@ app.get('/api/billing/daily', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+// Sentry Express error handler — must be after all routes, before other error middleware
+if (process.env.SENTRY_DSN) {
+    Sentry.setupExpressErrorHandler(app);
+}
 
 // ===== HELPER FUNCTIONS =====
 
