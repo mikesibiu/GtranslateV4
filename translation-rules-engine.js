@@ -49,7 +49,7 @@ class TranslationRulesEngine {
         const configs = {
             talks: {
                 name: 'Talks',
-                translationInterval: 6000,   // 6 seconds (fast with re-translation full context)
+                translationInterval: 10000,  // 10 seconds
                 pauseDetectionMs: 3000,      // 3 second pause
                 requireSentenceEnding: false, // Translate even without sentence endings
                 minWords: 3,
@@ -57,9 +57,20 @@ class TranslationRulesEngine {
                 displayVisualCards: true,    // Show translation cards
                 enableSummary: false
             },
+            qna: {
+                name: 'Q&A',
+                translationInterval: 4000,   // 4 seconds
+                pauseDetectionMs: 2000,      // 2 second pause
+                requireSentenceEnding: false,
+                minWords: 3,
+                enableTTS: false,
+                displayVisualCards: true,
+                enableSummary: true,
+                summaryInterval: 30000       // 30s summaries
+            },
             earbuds: {
                 name: 'EarBuds',
-                translationInterval: 6000,   // 6 seconds (safe with re-translation full context)
+                translationInterval: 7000,   // 7 seconds
                 pauseDetectionMs: 2000,      // 2 second pause
                 requireSentenceEnding: false,
                 minWords: 3,
@@ -264,7 +275,7 @@ class TranslationRulesEngine {
             if (entryNormalized.includes(normalized) || normalized.includes(entryNormalized)) {
                 const overlap = Math.min(entryNormalized.length, normalized.length) /
                                Math.max(entryNormalized.length, normalized.length);
-                if (overlap > 0.9) {
+                if (overlap >= 0.8) {
                     this.logger.info(`🚫 POST-TRANSLATION DUPLICATE: ${(overlap * 100).toFixed(1)}% substring overlap`, {
                         translation: normalized.substring(0, 50)
                     });
@@ -272,11 +283,10 @@ class TranslationRulesEngine {
                 }
             }
 
-            // Word overlap check (90% threshold for translated output)
-            // Raised from 80% → 90% to avoid rejecting legitimate continuations
+            // Word overlap check (80% threshold for translated output)
             const wordOverlap = this.calculateOverlap(entryNormalized, normalized);
-            if (wordOverlap > 0.9) {
-                this.logger.info(`🚫 POST-TRANSLATION DUPLICATE: ${(wordOverlap * 100).toFixed(1)}% word overlap (threshold: 90%)`, {
+            if (wordOverlap >= 0.8) {
+                this.logger.info(`🚫 POST-TRANSLATION DUPLICATE: ${(wordOverlap * 100).toFixed(1)}% word overlap (threshold: 80%)`, {
                     translation: normalized.substring(0, 50)
                 });
                 return true;
@@ -363,6 +373,16 @@ class TranslationRulesEngine {
             isFillerOnly: false,
             reason: 'quality_ok'
         };
+    }
+
+    /**
+     * Reset state for a new utterance (used by tests and server resets)
+     */
+    resetForNewUtterance() {
+        this.lastTranslatedText = '';
+        this.accumulatedText = '';
+        this.translationCount = 0;
+        this.recentTranslations = [];
     }
 
     /**
