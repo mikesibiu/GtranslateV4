@@ -8,8 +8,8 @@ Real-time speech translation web application using Google Cloud Speech-to-Text a
 - 🎤 **Multiple Audio Sources** - Microphone or system audio (tab/screen)
 - 🌍 **Multi-language Support** - 10+ languages for speech recognition and translation
 - ⚡ **Two Translation Modes**
-  - **Talks Mode** - 8-second translation intervals for presentations
-  - **EarBuds Mode** - 8-second intervals optimized for listening with TTS
+  - **Talks Mode** - 8-second translation intervals (4s pause fallback)
+  - **EarBuds Mode** - 8-second intervals (4s pause fallback) optimized for listening with TTS
 - 📊 **Real-time Audio Monitoring** - Visual level meter and adjustable gain control
 - 📥 **Session Export** - Download translations as JSON
 - 🔒 **Production-Ready Security** - CSP headers, CORS protection, rate limiting
