@@ -200,6 +200,23 @@ if (!projectId) {
 }
 
 logger.info('✅ Google Cloud Speech-to-Text client initialized');
+
+// STT V2 permission probe — runs once at startup, no audio cost
+// Tests whether the new Cloud Speech Client IAM role grants V2 access
+(async () => {
+    try {
+        const { SpeechClient: SpeechClientV2 } = require('@google-cloud/speech').v2;
+        const v2Client = googleCredentials
+            ? new SpeechClientV2({ credentials: googleCredentials })
+            : new SpeechClientV2();
+        await v2Client.listRecognizers({ parent: `projects/${projectId}/locations/global` });
+        logger.info('✅ Google Cloud Speech-to-Text V2 API: authorized (Chirp model available)');
+    } catch (err) {
+        logger.warn('⚠️ Google Cloud Speech-to-Text V2 API: not authorized', {
+            code: err.code, message: err.message
+        });
+    }
+})();
 logger.info('✅ Google Cloud Translation v3 client initialized', {
     projectId,
     location,
