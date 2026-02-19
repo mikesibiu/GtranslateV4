@@ -948,7 +948,7 @@ io.on('connection', (socket) => {
                         audioChannelCount: 1
                     },
                     languageCodes: [currentLanguage],
-                    model: 'chirp',
+                    model: 'chirp_2',
                     features: {
                         enableAutomaticPunctuation: true,
                         maxAlternatives: 1
