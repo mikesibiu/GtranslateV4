@@ -50,7 +50,7 @@ class TranslationRulesEngine {
             talks: {
                 name: 'Talks',
                 translationInterval: 8000,   // 8 seconds
-                pauseDetectionMs: 3000,      // 3 second pause
+                pauseDetectionMs: 4000,      // 4 second pause
                 requireSentenceEnding: false, // Translate even without sentence endings
                 minWords: 3,
                 enableTTS: false,            // Manual TTS control
@@ -60,7 +60,7 @@ class TranslationRulesEngine {
             earbuds: {
                 name: 'EarBuds',
                 translationInterval: 8000,   // 8 seconds
-                pauseDetectionMs: 2000,      // 2 second pause
+                pauseDetectionMs: 4000,      // 4 second pause
                 requireSentenceEnding: false,
                 minWords: 3,
                 enableTTS: true,             // Always enable TTS
