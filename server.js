@@ -758,14 +758,16 @@ io.on('connection', (socket) => {
             return newContent;
         }
 
-        // Word-level LCP: find how many leading words match
+        // Word-level LCP: strip trailing punctuation before comparing so that
+        // "lume." and "lume" (or "world," and "world") are treated as equal.
+        const stripPunct = w => w.toLowerCase().replace(/^["""''«»]+/, '').replace(/[.,!?;:"""''«»…\-]+$/g, '');
         const newWords = newTrimmed.split(/\s+/);
         const committedWords = committedTrimmed.split(/\s+/);
 
         let matchCount = 0;
         const minLen = Math.min(newWords.length, committedWords.length);
         for (let i = 0; i < minLen; i++) {
-            if (newWords[i].toLowerCase() === committedWords[i].toLowerCase()) {
+            if (stripPunct(newWords[i]) === stripPunct(committedWords[i])) {
                 matchCount++;
             } else {
                 break;
@@ -784,15 +786,17 @@ io.on('connection', (socket) => {
             return newContent;
         }
 
-        // Translation shifted significantly (e.g., after stream restart or new utterance)
-        // Treat as entirely new content
-        logger.info('📊 No LCP match - treating as new utterance', {
+        // Translation shifted significantly (e.g., translation API rephrased existing content).
+        // Return '' to skip this emission — the caller will update committedTranslation to the
+        // current full translation, giving the next call a fresh baseline without re-speaking
+        // already-heard content.
+        logger.info('📊 No LCP match - resetting baseline, skipping to prevent repeat', {
             clientId,
             matchedWords: matchCount,
             committedPreview: committedTrimmed.substring(0, 40),
             newPreview: newTrimmed.substring(0, 40)
         });
-        return newTrimmed;
+        return '';
     }
 
     /**
@@ -839,6 +843,11 @@ io.on('connection', (socket) => {
             });
 
             if (!newContent || newContent.trim().length === 0) {
+                // Update committed baseline so the next call has an up-to-date reference.
+                // Without this, a failed LCP match would leave a stale committed and keep
+                // returning '' forever instead of recovering on the next translation.
+                committedTranslation = fullTranslation;
+                lastFullTranslation = fullTranslation;
                 logger.info('⏭️ No new content after diffing - skipping', { clientId });
                 lastTranslatedText = fullText;
                 lastTranslationTime = Date.now();
