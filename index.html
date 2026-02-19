@@ -643,7 +643,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v139</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v140</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -1275,9 +1275,27 @@
                     clearTimeout(this.ttsSynthesizeTimeout);
                     if (!data.audio) return;
                     try {
-                        // Convert Node Buffer (received as object) to ArrayBuffer
-                        const uint8 = new Uint8Array(Object.values(data.audio));
-                        await this.playServerTTSAudio(uint8.buffer);
+                        // Socket.IO v4 sends Node.js Buffers as binary attachments (ArrayBuffer on client).
+                        // Handle all cases: ArrayBuffer (binary path), TypedArray, or plain object (JSON fallback).
+                        let arrayBuffer;
+                        if (data.audio instanceof ArrayBuffer) {
+                            arrayBuffer = data.audio;
+                            console.log('🔊 TTS audio received as ArrayBuffer, size:', arrayBuffer.byteLength);
+                        } else if (ArrayBuffer.isView(data.audio)) {
+                            // TypedArray — slice to avoid offset-backed buffer (Safari rejects offset buffers)
+                            arrayBuffer = data.audio.buffer.slice(data.audio.byteOffset, data.audio.byteOffset + data.audio.byteLength);
+                            console.log('🔊 TTS audio received as TypedArray, size:', arrayBuffer.byteLength);
+                        } else {
+                            // JSON fallback: plain object with numeric keys
+                            const values = Object.values(data.audio);
+                            console.log('🔊 TTS audio received as object (JSON path), length:', values.length);
+                            const uint8 = new Uint8Array(values);
+                            arrayBuffer = uint8.buffer.slice(0, uint8.byteLength);
+                        }
+                        if (arrayBuffer.byteLength === 0) {
+                            throw new Error('TTS audio buffer is empty');
+                        }
+                        await this.playServerTTSAudio(arrayBuffer);
                     } catch (e) {
                         console.error('TTS result handling error:', e);
                         this.isSpeaking = false;
@@ -1719,9 +1737,10 @@
                         };
                     }
 
-                    // Force stereo output so TTS plays in both ears
-                    // Without this, mono processor → destination can put iOS audio session in mono mode
-                    this.audioContext.destination.channelCount = 2;
+                    // Force stereo output so TTS plays in both ears (only if hardware supports it)
+                    if (this.audioContext.destination.maxChannelCount >= 2) {
+                        this.audioContext.destination.channelCount = 2;
+                    }
 
                     // Connect audio graph based on processor type
                     if (usingWorklet) {
@@ -1860,13 +1879,14 @@
                 this.lastTranslation = '';
                 this.lastTranslationTime = 0;
 
-                // Stop any playing speech and clear queue
+                // Stop any playing speech and clear queue (unconditional — covers server TTS too)
+                clearTimeout(this.ttsSynthesizeTimeout);
+                this.ttsQueue = [];
+                this.isSpeaking = false;
                 if (this.speechSynthesis) {
                     this.speechSynthesis.cancel();
-                    this.ttsQueue = []; // Clear pending translations
-                    this.isSpeaking = false;
-                    console.log('🔇 TTS stopped and queue cleared');
                 }
+                console.log('🔇 TTS stopped and queue cleared');
             }
 
             addTranslation(data) {
