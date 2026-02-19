@@ -643,7 +643,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v134</span></h1>
+            <h1>🌐 GTranslate V5 <span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">CENTRALIZED RULES</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v135</span></h1>
             <p>Real-time Speech Translation powered by Google Cloud</p>
             <div class="badge">No Timeout • Unlimited Duration</div>
             <div style="margin-top: 10px;">
@@ -1752,6 +1752,11 @@
                         sampleRate: this.audioContext ? this.audioContext.sampleRate : 48000,
                         lastCommittedTranslation: this.lastCommittedTranslation  // Restore dedup state on reconnect
                     });
+
+                    // Reset TTS state so a stale isSpeaking=true never silences a new session
+                    this.isSpeaking = false;
+                    this.ttsQueue = [];
+                    this.useServerTTS = true;
 
                     this.isRecording = true;
                     this.translationCount = 0;
