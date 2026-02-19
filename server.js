@@ -169,9 +169,10 @@ if (googleCredentials) {
 }
 
 // ===== INITIALIZE GOOGLE CLOUD CLIENTS =====
+const { SpeechClient: SpeechClientV2 } = require('@google-cloud/speech').v2;
 const speechClient = googleCredentials
-    ? new speech.SpeechClient({ credentials: googleCredentials })
-    : new speech.SpeechClient();
+    ? new SpeechClientV2({ credentials: googleCredentials })
+    : new SpeechClientV2();
 
 const translateClient = googleCredentials
     ? new TranslationServiceClient({ credentials: googleCredentials })
@@ -199,24 +200,7 @@ if (!projectId) {
     process.exit(1);
 }
 
-logger.info('✅ Google Cloud Speech-to-Text client initialized');
-
-// STT V2 permission probe — runs once at startup, no audio cost
-// Tests whether the new Cloud Speech Client IAM role grants V2 access
-(async () => {
-    try {
-        const { SpeechClient: SpeechClientV2 } = require('@google-cloud/speech').v2;
-        const v2Client = googleCredentials
-            ? new SpeechClientV2({ credentials: googleCredentials })
-            : new SpeechClientV2();
-        await v2Client.listRecognizers({ parent: `projects/${projectId}/locations/global` });
-        logger.info('✅ Google Cloud Speech-to-Text V2 API: authorized (Chirp model available)');
-    } catch (err) {
-        logger.warn('⚠️ Google Cloud Speech-to-Text V2 API: not authorized', {
-            code: err.code, message: err.message
-        });
-    }
-})();
+logger.info('✅ Google Cloud Speech-to-Text V2 (Chirp) client initialized');
 logger.info('✅ Google Cloud Translation v3 client initialized', {
     projectId,
     location,
@@ -954,25 +938,29 @@ io.on('connection', (socket) => {
                 finalIntervalMs: intervalMs
             });
 
-            const request = {
+            // V2 / Chirp config — sent as the first write on the bidirectional stream
+            const recognizerPath = `projects/${projectId}/locations/us-central1/recognizers/_`;
+            const v2StreamingConfig = {
                 config: {
-                    encoding: 'LINEAR16',
-                    sampleRateHertz: 48000,
-                    languageCode: currentLanguage,
-                    enableAutomaticPunctuation: true,
-                    model: 'latest_long',
-                    useEnhanced: true,
-                    maxAlternatives: 1,
-                    enableWordTimeOffsets: false,
-                    enableWordConfidence: false,
-                    enableSpeakerDiarization: false
+                    explicitDecodingConfig: {
+                        encoding: 'LINEAR16',
+                        sampleRateHertz: 48000,
+                        audioChannelCount: 1
+                    },
+                    languageCodes: [currentLanguage],
+                    model: 'chirp',
+                    features: {
+                        enableAutomaticPunctuation: true,
+                        maxAlternatives: 1
+                    }
                 },
-                interimResults: true,
-                singleUtterance: false
+                streamingFeatures: {
+                    interimResults: true
+                }
             };
 
             recognizeStream = speechClient
-                .streamingRecognize(request)
+                .streamingRecognize()
                 .on('error', (error) => {
                     const errorCode = error.code ? String(error.code) : '';
                     logger.error('Speech recognition error', {
@@ -1156,6 +1144,18 @@ io.on('connection', (socket) => {
                     }
                 });
 
+            // V2: send config as the first message on the bidirectional stream (before any audio)
+            recognizeStream.write({
+                recognizer: recognizerPath,
+                streamingConfig: v2StreamingConfig
+            });
+            logger.info('🎤 V2 streaming config sent', {
+                clientId,
+                recognizer: recognizerPath,
+                languageCodes: v2StreamingConfig.config.languageCodes,
+                model: v2StreamingConfig.config.model
+            });
+
             // Set proactive restart timer (290s before Google's ~305s limit)
             if (streamDurationTimer) {
                 clearTimeout(streamDurationTimer);
@@ -1178,7 +1178,7 @@ io.on('connection', (socket) => {
                     if (recognizeStream && recognizeStream.writable) {
                         try {
                             const buffer = Buffer.from(audioData);
-                            recognizeStream.write(buffer);
+                            recognizeStream.write({ audio: buffer });
                         } catch (e) {
                             logger.warn('⚠️ Error flushing buffered audio chunk', {
                                 clientId,
@@ -1394,7 +1394,7 @@ io.on('connection', (socket) => {
                     });
                 }
 
-                const writeSuccess = recognizeStream.write(buffer);
+                const writeSuccess = recognizeStream.write({ audio: buffer });
                 if (audioChunkCount === 1) {
                     logger.info('📤 First chunk written to Google Cloud', {
                         clientId,
