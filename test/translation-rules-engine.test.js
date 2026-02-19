@@ -22,19 +22,9 @@ describe('TranslationRulesEngine', () => {
             const config = engine.getConfig();
 
             expect(config.name).to.equal('Talks');
-            expect(config.translationInterval).to.equal(10000);
+            expect(config.translationInterval).to.equal(8000);
             expect(config.pauseDetectionMs).to.equal(3000);
             expect(config.displayVisualCards).to.be.true;
-        });
-
-        it('should load Q&A mode configuration', () => {
-            const engine = new TranslationRulesEngine('qna', mockLogger);
-            const config = engine.getConfig();
-
-            expect(config.name).to.equal('Q&A');
-            expect(config.translationInterval).to.equal(4000);
-            expect(config.enableSummary).to.be.true;
-            expect(config.summaryInterval).to.equal(30000);
         });
 
         it('should load EarBuds mode configuration', () => {
@@ -42,7 +32,7 @@ describe('TranslationRulesEngine', () => {
             const config = engine.getConfig();
 
             expect(config.name).to.equal('EarBuds');
-            expect(config.translationInterval).to.equal(7000);
+            expect(config.translationInterval).to.equal(8000);
             expect(config.enableTTS).to.be.true;
             expect(config.displayVisualCards).to.be.false;
         });
@@ -179,7 +169,7 @@ describe('TranslationRulesEngine', () => {
             engine.lastTranslationTime = Date.now() - 11000; // 11 seconds ago
         });
 
-        it('should approve translation when max interval reached (Talks: 10s)', () => {
+        it('should approve translation when max interval reached (Talks: 8s)', () => {
             const decision = engine.shouldTranslate({
                 text: 'this is good enough text for translation',
                 isFinal: false,
@@ -193,25 +183,9 @@ describe('TranslationRulesEngine', () => {
             expect(decision.confidence).to.equal(0.9);
         });
 
-        it('should use different interval for Q&A mode (4s)', () => {
-            const qnaEngine = new TranslationRulesEngine('qna', mockLogger);
-            qnaEngine.lastTranslationTime = Date.now() - 5000; // 5 seconds ago
-
-            const decision = qnaEngine.shouldTranslate({
-                text: 'this is good enough text',
-                isFinal: false,
-                timeSinceLastChange: 500,
-                trigger: 'interim',
-                clientId: 'test-123'
-            });
-
-            expect(decision.shouldTranslate).to.be.true;
-            expect(decision.reason).to.equal('max_interval');
-        });
-
-        it('should use different interval for EarBuds mode (7s)', () => {
+        it('should use different interval for EarBuds mode (8s)', () => {
             const earbudsEngine = new TranslationRulesEngine('earbuds', mockLogger);
-            earbudsEngine.lastTranslationTime = Date.now() - 8000; // 8 seconds ago
+            earbudsEngine.lastTranslationTime = Date.now() - 9000; // >8 seconds ago
 
             const decision = earbudsEngine.shouldTranslate({
                 text: 'this is good enough text',
@@ -557,7 +531,7 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            // Should translate due to max interval (10s) reached
+            // Should translate due to max interval (8s) reached
             expect(decision.shouldTranslate).to.be.true;
             expect(decision.reason).to.equal('max_interval');
         });
@@ -578,23 +552,6 @@ describe('TranslationRulesEngine', () => {
             expect(decision.reason).to.equal('too_few_words');
         });
 
-        it('should handle Q&A mode faster intervals', () => {
-            const engine = new TranslationRulesEngine('qna', mockLogger);
-            engine.lastTranslationTime = Date.now() - 5000; // 5 seconds
-
-            const decision = engine.shouldTranslate({
-                text: 'what is the main theme of this talk',
-                isFinal: false,
-                timeSinceLastChange: 100,
-                trigger: 'interim',
-                clientId: 'test-123'
-            });
-
-            // Q&A mode: 4s interval, so 5s should trigger
-            expect(decision.shouldTranslate).to.be.true;
-            expect(decision.reason).to.equal('max_interval');
-        });
-
         it('should handle EarBuds mode longer intervals', () => {
             const engine = new TranslationRulesEngine('earbuds', mockLogger);
             engine.lastTranslationTime = Date.now() - 5000; // 5 seconds
@@ -607,7 +564,7 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            // EarBuds mode: 7s interval, so 5s should NOT trigger yet
+            // EarBuds mode: 8s interval, so 5s should NOT trigger yet
             expect(decision.shouldTranslate).to.be.false;
             expect(decision.reason).to.equal('waiting_for_trigger');
         });
