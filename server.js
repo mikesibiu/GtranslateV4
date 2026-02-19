@@ -549,10 +549,25 @@ io.on('connection', (socket) => {
     let translationRules = null; // Centralized translation rules engine
     let currentMode = 'talks'; // Persist selected mode across restarts
     let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
+    let lastEmittedChunk = ''; // Track last emitted translated chunk for context trimming
 
     // Emission state: track spoken translations for dedup + context window
     let committedTranslation = ''; // What TTS has already spoken (permanent until stream restart)
     let lastFullTranslation = ''; // Previous emitted translation chunk for reference
+
+    // Domain-specific STT phrase hints to reduce mis-hearings (e.g., “vestitori”)
+    const STT_PHRASE_HINTS = [
+        'vestitori',
+        'Martorii lui Iehova',
+        'congres',
+        'asistența totală',
+        'glosar',
+        'traducere',
+        'audio',
+        'EarBuds',
+        'gheață',
+        'gheată'
+    ];
 
     // Helper function to update last activity time
     function updateActivity() {
@@ -591,6 +606,7 @@ io.on('connection', (socket) => {
         committedTranslation = ''; // Reset re-translation state
         lastFullTranslation = '';
         lastTranslatedText = '';
+        lastEmittedChunk = '';
 
         // Cancel proactive stream duration timer
         if (streamDurationTimer) {
@@ -687,6 +703,52 @@ io.on('connection', (socket) => {
         }, 0); // No delay - restart immediately
     }
 
+    // Fallback single-word translations for common Romanian terms that may pass through unchanged
+    const FALLBACK_TRANSLATIONS = {
+        gheata: 'ice',
+        gheată: 'boot',
+        gheață: 'ice'
+    };
+
+    /**
+     * Replace known domain terms in translated output.
+     */
+    function applyTermMappings(text) {
+        const mappings = [
+            { pattern: /\bvestitori\b/gi, replacement: 'publishers' },
+            { pattern: /\bMartorii lui Iehova\b/gi, replacement: "Jehovah's Witnesses" }
+        ];
+
+        let result = text;
+        for (const { pattern, replacement } of mappings) {
+            result = result.replace(pattern, replacement);
+        }
+        return result;
+    }
+
+    /**
+     * Preserve numbers from source text to avoid numeric drift in translation.
+     */
+    function preserveSourceNumbers(sourceText, translatedText) {
+        const numberRegex = /\d+(?:[.,]\d+)?/g;
+        const sourceNumbers = sourceText.match(numberRegex) || [];
+        if (sourceNumbers.length === 0) return translatedText;
+
+        const translatedNumbers = translatedText.match(numberRegex) || [];
+        if (translatedNumbers.length !== sourceNumbers.length) {
+            return translatedText;
+        }
+
+        let result = translatedText;
+        sourceNumbers.forEach((srcNum, idx) => {
+            const targetNum = translatedNumbers[idx];
+            if (targetNum) {
+                result = result.replace(targetNum, srcNum);
+            }
+        });
+        return result;
+    }
+
     /**
      * Shared translation logic: translate ONLY the new text chunk (source-aligned) and emit it.
      * Avoids diffing translated output (source of repeats/drops in v128–v143).
@@ -738,12 +800,34 @@ io.on('connection', (socket) => {
 
             let emitted = translatedChunk.trim();
 
-            // If context was prepended, drop the leading translated words heuristically
+            // If context was prepended, drop the leading translated portion using best-effort prefix match,
+            // otherwise fall back to word-count trimming.
             if (contextWordCount > 0) {
-                const emittedWords = emitted.split(/\s+/);
-                if (emittedWords.length > contextWordCount) {
-                    emitted = emittedWords.slice(contextWordCount).join(' ').trim();
+                const lowerEmitted = emitted.toLowerCase();
+                const lowerLastChunk = (lastEmittedChunk || '').toLowerCase();
+                const lowerCommitted = (committedTranslation || '').toLowerCase();
+
+                if (lowerLastChunk && lowerEmitted.startsWith(lowerLastChunk)) {
+                    emitted = emitted.slice(lastEmittedChunk.length).trim();
+                } else if (lowerCommitted && lowerEmitted.startsWith(lowerCommitted)) {
+                    emitted = emitted.slice(committedTranslation.length).trim();
+                } else {
+                    const emittedWords = emitted.split(/\s+/);
+                    if (emittedWords.length > contextWordCount) {
+                        emitted = emittedWords.slice(contextWordCount).join(' ').trim();
+                    }
                 }
+            }
+
+            // Apply domain term mappings and preserve numeric fidelity
+            emitted = applyTermMappings(emitted);
+            emitted = preserveSourceNumbers(newText, emitted);
+
+            // If translation is identical to source for a known tricky word, apply fallback
+            const normalizedSource = newText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            const normalizedEmitted = emitted.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            if (normalizedSource === normalizedEmitted && FALLBACK_TRANSLATIONS[normalizedSource]) {
+                emitted = FALLBACK_TRANSLATIONS[normalizedSource];
             }
 
             if (!emitted) {
@@ -768,6 +852,7 @@ io.on('connection', (socket) => {
                 if (!isDuplicate) {
                     committedTranslation = `${committedTranslation ? committedTranslation + ' ' : ''}${emitted}`;
                     lastFullTranslation = emitted;
+                    lastEmittedChunk = emitted;
 
                     accumulatedText += (accumulatedText ? ' ' : '') + emitted;
                     translationCount++;
@@ -853,7 +938,13 @@ io.on('connection', (socket) => {
                     maxAlternatives: 1,
                     enableWordTimeOffsets: false,
                     enableWordConfidence: false,
-                    enableSpeakerDiarization: false
+                    enableSpeakerDiarization: false,
+                    speechContexts: [
+                        {
+                            phrases: STT_PHRASE_HINTS,
+                            boost: 20
+                        }
+                    ]
                 },
                 interimResults: true,
                 singleUtterance: false
