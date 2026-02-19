@@ -852,6 +852,12 @@ io.on('connection', (socket) => {
                 lastTranslatedText = fullText;
                 lastTranslationTime = Date.now();
             } else {
+                // Always advance committed baseline — even for duplicates.
+                // If we don't, the next diff sees a stale committed and re-extracts
+                // the same content that was just suppressed, causing audio repeats.
+                committedTranslation = fullTranslation;
+                lastFullTranslation = fullTranslation;
+
                 // Check for post-translation duplicates on new content only
                 const isDuplicate = translationRules.isTranslationDuplicate(newContent);
 
@@ -869,8 +875,6 @@ io.on('connection', (socket) => {
                 lastTranslationTime = Date.now();
 
                 if (!isDuplicate) {
-                    committedTranslation = fullTranslation;
-                    lastFullTranslation = fullTranslation;
 
                     accumulatedText += (accumulatedText ? ' ' : '') + newContent;
                     translationCount++;
@@ -1009,6 +1013,7 @@ io.on('connection', (socket) => {
                     logger.debug('📡 Stream unpipe event', { clientId });
                 })
                 .on('data', async (data) => {
+                  try {
                     logger.info('📥 GOOGLE CLOUD DATA EVENT!', {
                         clientId,
                         hasResults: !!data.results,
@@ -1147,6 +1152,10 @@ io.on('connection', (socket) => {
                             });
                         }
                     }
+                  } catch (err) {
+                    logger.error('❌ Unhandled error in STT data handler', { clientId, error: err.message });
+                    captureError(err, { clientId });
+                  }
                 });
 
             // Set proactive restart timer (290s before Google's ~305s limit)
