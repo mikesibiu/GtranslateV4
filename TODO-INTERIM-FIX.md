@@ -113,3 +113,7 @@ if (isFinal && transcript.trim().length > 0) {
 - [ ] Verify interim shows target language for listener
 - [ ] Verify translation cards appear every 15s max
 - [ ] Verify NO single-word translations
+
+## Future Improvements
+
+- Evaluate forcing browser/audio-worklet AGC off and rely solely on server-side/VAD gain control to avoid level swings noted in production (user report).
