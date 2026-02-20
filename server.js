@@ -824,6 +824,19 @@ io.on('connection', (socket) => {
                 clientId
             );
 
+            // Hybrid: also translate fullText to gain broader context; may use tail if chunk is too short
+            let translatedFull = translatedChunk;
+            try {
+                translatedFull = await translateWithRetry(
+                    fullText,
+                    targetLanguage,
+                    currentLanguage,
+                    clientId
+                );
+            } catch (fullErr) {
+                logger.warn('⚠️ Full-text translation failed, using chunk only', { clientId, error: fullErr.message });
+            }
+
             let emitted = translatedChunk.trim();
 
             // If context was prepended, drop the leading translated portion using best-effort prefix match,
@@ -848,6 +861,24 @@ io.on('connection', (socket) => {
             // Apply domain term mappings and preserve numeric fidelity
             emitted = applyTermMappings(emitted);
             emitted = preserveSourceNumbers(newText, emitted);
+
+            // If emitted is very short, try to use tail of full translation for better context
+            const MIN_CHUNK_WORDS = 4;
+            if (emitted.split(/\s+/).length < MIN_CHUNK_WORDS && translatedFull) {
+                const lowerFull = translatedFull.toLowerCase();
+                const lowerLastFull = (lastFullTranslation || '').toLowerCase();
+                let tail = translatedFull;
+                if (lowerLastFull && lowerFull.startsWith(lowerLastFull)) {
+                    tail = translatedFull.slice(lastFullTranslation.length).trim();
+                }
+                if (tail.split(/\s+/).length >= emitted.split(/\s+/).length) {
+                    emitted = tail;
+                    logger.debug('📌 Using full-translation tail for better context', {
+                        clientId,
+                        tailPreview: tail.substring(0, 80)
+                    });
+                }
+            }
 
             // If translation is identical to source for a known tricky word, apply fallback
             const normalizedSource = newText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -875,9 +906,9 @@ io.on('connection', (socket) => {
                 lastTranslatedText = `${lastTranslatedText} ${newText}`.trim();
                 lastTranslationTime = Date.now();
 
-                if (!isDuplicate) {
-                    committedTranslation = `${committedTranslation ? committedTranslation + ' ' : ''}${emitted}`;
-                    lastFullTranslation = emitted;
+                    if (!isDuplicate) {
+                        committedTranslation = `${committedTranslation ? committedTranslation + ' ' : ''}${emitted}`;
+                    lastFullTranslation = translatedFull || emitted;
                     lastEmittedChunk = emitted;
 
                     accumulatedText += (accumulatedText ? ' ' : '') + emitted;
