@@ -572,7 +572,10 @@ io.on('connection', (socket) => {
         'New York',
         'New World',
         'nume nou',
-        'nume noi'
+        'nume noi',
+        // Months (Romanian + English) to stabilize date recognition
+        'ianuarie','februarie','martie','aprilie','mai','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie',
+        'january','february','march','april','may','june','july','august','september','october','november','december'
     ];
 
     // Helper function to update last activity time
@@ -772,6 +775,39 @@ io.on('connection', (socket) => {
             }
         });
 
+        return result;
+    }
+
+    /**
+     * Preserve date components (day month year) if month drops out in translation.
+     */
+    function preserveDates(sourceText, translatedText) {
+        const monthNames = [
+            'ianuarie','februarie','martie','aprilie','mai','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie',
+            'january','february','march','april','may','june','july','august','september','october','november','december'
+        ];
+        const monthRegex = new RegExp(`\\b(${monthNames.join('|')})\\b`, 'i');
+        const dateRegex = /(\d{1,2})\s+([A-Za-zăâîșțéó]+)\s+(\d{4})/gi;
+
+        let result = translatedText;
+        let m;
+        while ((m = dateRegex.exec(sourceText)) !== null) {
+            const [full, day, month, year] = m;
+            const hasMonthInTranslation = monthRegex.test(result);
+            const hasDay = result.includes(day);
+            const hasYear = result.includes(year);
+
+            if (hasDay && hasYear && !hasMonthInTranslation) {
+                // Try to replace "day ... year" with full date
+                const dayYearPattern = new RegExp(`${day}[\\s.,]*${year}`);
+                if (dayYearPattern.test(result)) {
+                    result = result.replace(dayYearPattern, `${day} ${month} ${year}`);
+                } else {
+                    // If not found, append month between day and year occurrences
+                    result = result.replace(year, `${month} ${year}`);
+                }
+            }
+        }
         return result;
     }
 
