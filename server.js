@@ -566,6 +566,13 @@ io.on('connection', (socket) => {
         'vestitori',
         'Martorii lui Iehova',
         'congres',
+        'congrese',
+        'congres special',
+        'congrese speciale',
+        'congres regional',
+        'congrese regionale',
+        'congres de circuit',
+        'congrese de circuit',
         'asistența totală',
         'glosar',
         'traducere',
@@ -765,6 +772,13 @@ io.on('connection', (socket) => {
         if (/congregați/i.test(sourceText)) {
             result = result.replace(/\bchurch\b/gi, 'congregation');
             result = result.replace(/\bchurches\b/gi, 'congregations');
+        }
+
+        // Source-aware fix: STT garbles "congrese speciale" → "congrete fiare" (beasts).
+        // When the source contains "congres" family words, "beast/beasts" in the output
+        // is always a garble artifact — replace with "convention/conventions".
+        if (/congres/i.test(sourceText)) {
+            result = result.replace(/\bbeasts?\b/gi, (match) => match.toLowerCase() === 'beast' ? 'convention' : 'conventions');
         }
 
         return result;
