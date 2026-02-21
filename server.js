@@ -579,6 +579,20 @@ io.on('connection', (socket) => {
         'New World',
         'nume nou',
         'nume noi',
+        // Joy/rejoice vocabulary — prevents “bucuriei” → English “rejoice” code-switch
+        'bucurie',
+        'bucuriei',
+        'bucurați-vă',
+        'bucurați',
+        'cartea bucuriei',
+        // Congregation — prevents STT code-switch and helps Translation API pick “congregation” not “church”
+        'congregație',
+        'congregației',
+        'congregațiile',
+        'congregații',
+        // Location/context terms
+        'domiciliu',   // prevents mishearing as “domesti” (house arrest / home territory)
+        'Domești',     // Romanian village name (JW preaching territory reports)
         // Months (Romanian + English) to stabilize date recognition
         'ianuarie','februarie','martie','aprilie','mai','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie',
         'january','february','march','april','may','june','july','august','september','october','november','december'
@@ -729,8 +743,10 @@ io.on('connection', (socket) => {
 
     /**
      * Replace known domain terms in translated output.
+     * @param {string} text - Translated (English) output to fix
+     * @param {string} sourceText - Original Romanian source text (used for context-aware fixes)
      */
-    function applyTermMappings(text) {
+    function applyTermMappings(text, sourceText = '') {
         const mappings = [
             { pattern: /\bvestitori\b/gi, replacement: 'publishers' },
             { pattern: /\bMartorii lui Iehova\b/gi, replacement: "Jehovah's Witnesses" },
@@ -742,6 +758,15 @@ io.on('connection', (socket) => {
         for (const { pattern, replacement } of mappings) {
             result = result.replace(pattern, replacement);
         }
+
+        // Source-aware fix: "congregație" → "congregation" (not "church").
+        // Google Translate sometimes returns "church" for "congregație" in religious contexts.
+        // JW terminology strictly uses "congregation", never "church".
+        if (/congregați/i.test(sourceText)) {
+            result = result.replace(/\bchurch\b/gi, 'congregation');
+            result = result.replace(/\bchurches\b/gi, 'congregations');
+        }
+
         return result;
     }
 
@@ -890,7 +915,7 @@ io.on('connection', (socket) => {
             }
 
             // Apply domain term mappings and preserve numeric/date fidelity
-            emitted = applyTermMappings(emitted);
+            emitted = applyTermMappings(emitted, newText);
             emitted = preserveSourceNumbers(newText, emitted);
             emitted = preserveDates(newText, emitted); // BUG-26: was defined but never called
 
@@ -920,7 +945,7 @@ io.on('connection', (socket) => {
                 }
                 if (tail.split(/\s+/).length >= emitted.split(/\s+/).length) {
                     // Re-apply post-processing to the full-translation tail (BUG-6 fix)
-                    tail = applyTermMappings(tail);
+                    tail = applyTermMappings(tail, newText);
                     tail = preserveSourceNumbers(newText, tail);
                     tail = preserveDates(newText, tail);
                     emitted = tail;
