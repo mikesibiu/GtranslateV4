@@ -842,9 +842,10 @@ io.on('connection', (socket) => {
                 committedTranslation = '';
             }
 
-            logger.debug('🔤 Translating', {
+            logger.info('🔤 Translating', {
                 clientId,
-                input: newText.substring(0, 120),
+                input: newText.substring(0, 200),
+                wordCount: newText.trim().split(/\s+/).length,
                 trigger: decision.reason
             });
 
@@ -1071,6 +1072,15 @@ io.on('connection', (socket) => {
                         return;
                     }
 
+                    // Log isFinal always; interim only when it changes text (reduces noise)
+                    if (isFinal) {
+                        logger.info('📝 STT final', {
+                            clientId,
+                            transcript: transcript.substring(0, 300),
+                            words: transcript.trim().split(/\s+/).length
+                        });
+                    }
+
                     logger.debug('📝 Recognition result', {
                         clientId,
                         transcript: transcript.substring(0, 200),
@@ -1130,7 +1140,10 @@ io.on('connection', (socket) => {
                         if (decision.shouldTranslate) {
                             // Skip if another translation is already in flight (prevents race conditions)
                             if (translationInFlight) {
-                                logger.debug('⏳ Translation in flight, deferring', { clientId });
+                                logger.info('⏳ Translation in flight, deferring', {
+                                    clientId,
+                                    transcriptPreview: transcript.substring(0, 60)
+                                });
                             } else {
                             // Clear any pending pause timer - we're translating now
                             if (restartStreamTimer) {
@@ -1166,12 +1179,15 @@ io.on('connection', (socket) => {
                                 }, pauseMs);
                             }
 
-                            logger.debug('⏭️ Translation skipped', {
-                                clientId,
-                                reason: decision.reason,
-                                textPreview: transcript.substring(0, 30),
-                                isFinal
-                            });
+                            // Log isFinal skips always; interim skips only when waiting (noisy otherwise)
+                            if (isFinal || decision.reason !== 'waiting_for_trigger') {
+                                logger.info('⏭️ Translation skipped', {
+                                    clientId,
+                                    reason: decision.reason,
+                                    textPreview: transcript.substring(0, 80),
+                                    isFinal
+                                });
+                            }
                         }
                     }
                 });
