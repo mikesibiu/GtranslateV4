@@ -19,7 +19,7 @@ class TranslationRulesEngine {
 
         // Post-translation duplicate detection (CRITICAL FIX)
         this.recentTranslations = []; // Array of {text, timestamp}
-        this.TRANSLATION_DEDUP_WINDOW = 30000; // 30 seconds
+        this.TRANSLATION_DEDUP_WINDOW = 15000; // BUG-20: was 30s — too long for 8s interval; legitimate repeated phrases were blocked
 
         // Decision metrics
         this.metrics = {
@@ -181,7 +181,13 @@ class TranslationRulesEngine {
 
         // Check if last translation contains the current text (subset/duplicate)
         // Example: last="Depression and Anxiety", current="depression" → skip
-        if (normalizedLast.includes(normalizedFull)) {
+        // BUG-8 guard: only suppress if current is genuinely shorter (word count ≤ last).
+        // Without this, after a 290s restart the accumulated lastTranslatedText contains
+        // the full prior session — a new short phrase like "the brothers" would be found
+        // inside it and silently suppressed even though it's a new utterance.
+        const currentWordCount = normalizedFull.split(/\s+/).filter(Boolean).length;
+        const lastWordCount = normalizedLast.split(/\s+/).filter(Boolean).length;
+        if (normalizedLast.includes(normalizedFull) && currentWordCount <= lastWordCount) {
             this.logger.info('⛔ DUPLICATE DETECTED: Current is subset of last');
             return ''; // Current text is subset of what we already translated
         }
@@ -243,7 +249,7 @@ class TranslationRulesEngine {
         const normalized = translation.toLowerCase().trim();
         const now = Date.now();
 
-        // Clean old entries (older than 30s)
+        // Clean old entries (older than 15s — TRANSLATION_DEDUP_WINDOW)
         this.recentTranslations = this.recentTranslations.filter(
             entry => now - entry.timestamp < this.TRANSLATION_DEDUP_WINDOW
         );
@@ -298,7 +304,7 @@ class TranslationRulesEngine {
             timestamp: now
         });
 
-        // Keep only last 30 seconds
+        // Keep only last 15 seconds (TRANSLATION_DEDUP_WINDOW)
         this.recentTranslations = this.recentTranslations.filter(
             entry => now - entry.timestamp < this.TRANSLATION_DEDUP_WINDOW
         );

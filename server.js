@@ -616,6 +616,7 @@ io.on('connection', (socket) => {
         lastFullTranslation = '';
         lastTranslatedText = '';
         lastEmittedChunk = '';
+        lastInterimText = ''; // BUG-13: prevent stale pause-timer retranslation after restart
 
         // Cancel proactive stream duration timer
         if (streamDurationTimer) {
@@ -696,6 +697,7 @@ io.on('connection', (socket) => {
 
         // Clean up old stream before scheduling restart
         recognizeStream = null;
+        translationInFlight = false; // BUG-21: prevent deadlock if translation was mid-flight at restart
 
         restartTimeout = setTimeout(() => {
             restartTimeout = null;
@@ -767,7 +769,7 @@ io.on('connection', (socket) => {
             const matches = [...result.matchAll(splitPattern)];
             for (const m of matches) {
                 const candidate = m[0];
-                const candidateDigits = candidate.replace(/[\\s.,]/g, '');
+                const candidateDigits = candidate.replace(/[\s.,]/g, ''); // BUG-24: was [\\s.,] which matched literal backslash, not whitespace
                 if (candidateDigits === digits) {
                     result = result.replace(candidate, srcNum);
                     break;
@@ -860,19 +862,6 @@ io.on('connection', (socket) => {
                 clientId
             );
 
-            // Hybrid: also translate fullText to gain broader context; may use tail if chunk is too short
-            let translatedFull = translatedChunk;
-            try {
-                translatedFull = await translateWithRetry(
-                    fullText,
-                    targetLanguage,
-                    currentLanguage,
-                    clientId
-                );
-            } catch (fullErr) {
-                logger.warn('⚠️ Full-text translation failed, using chunk only', { clientId, error: fullErr.message });
-            }
-
             let emitted = translatedChunk.trim();
 
             // If context was prepended, drop the leading translated portion using best-effort prefix match,
@@ -894,12 +883,28 @@ io.on('connection', (socket) => {
                 }
             }
 
-            // Apply domain term mappings and preserve numeric fidelity
+            // Apply domain term mappings and preserve numeric/date fidelity
             emitted = applyTermMappings(emitted);
             emitted = preserveSourceNumbers(newText, emitted);
+            emitted = preserveDates(newText, emitted); // BUG-26: was defined but never called
 
-            // If emitted is very short, try to use tail of full translation for better context
+            // BUG-3 FIX: Only call the full-text translation when the chunk result is too short.
+            // Previously this fired unconditionally (2x API cost + 200-400ms latency on every utterance).
             const MIN_CHUNK_WORDS = 4;
+            let translatedFull = null;
+            if (emitted.split(/\s+/).length < MIN_CHUNK_WORDS) {
+                try {
+                    translatedFull = await translateWithRetry(
+                        fullText,
+                        targetLanguage,
+                        currentLanguage,
+                        clientId
+                    );
+                } catch (fullErr) {
+                    logger.warn('⚠️ Full-text translation failed, using chunk only', { clientId, error: fullErr.message });
+                }
+            }
+
             if (emitted.split(/\s+/).length < MIN_CHUNK_WORDS && translatedFull) {
                 const lowerFull = translatedFull.toLowerCase();
                 const lowerLastFull = (lastFullTranslation || '').toLowerCase();
@@ -908,6 +913,10 @@ io.on('connection', (socket) => {
                     tail = translatedFull.slice(lastFullTranslation.length).trim();
                 }
                 if (tail.split(/\s+/).length >= emitted.split(/\s+/).length) {
+                    // Re-apply post-processing to the full-translation tail (BUG-6 fix)
+                    tail = applyTermMappings(tail);
+                    tail = preserveSourceNumbers(newText, tail);
+                    tail = preserveDates(newText, tail);
                     emitted = tail;
                     logger.debug('📌 Using full-translation tail for better context', {
                         clientId,

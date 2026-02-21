@@ -23,7 +23,7 @@ describe('TranslationRulesEngine', () => {
 
             expect(config.name).to.equal('Talks');
             expect(config.translationInterval).to.equal(8000);
-            expect(config.pauseDetectionMs).to.equal(3000);
+            expect(config.pauseDetectionMs).to.equal(4000);
             expect(config.displayVisualCards).to.be.true;
         });
 
@@ -272,7 +272,7 @@ describe('TranslationRulesEngine', () => {
             const decision = engine.shouldTranslate({
                 text: 'this is quality text after pause',
                 isFinal: false,
-                timeSinceLastChange: 3500, // > 3000ms pause
+                timeSinceLastChange: 4500, // > 4000ms pause threshold
                 trigger: 'pause',
                 clientId: 'test-123'
             });
