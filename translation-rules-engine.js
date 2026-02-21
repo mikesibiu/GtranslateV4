@@ -301,11 +301,12 @@ class TranslationRulesEngine {
                 return true;
             }
 
-            // Substring check (one contains the other with ≥90% length ratio)
+            // Substring check (one contains the other with ≥80% length ratio)
+            // 80% means B can be at most 25% longer than A — clearly a subset
             if (entryNormalized.includes(normalized) || normalized.includes(entryNormalized)) {
                 const overlap = Math.min(entryNormalized.length, normalized.length) /
                                Math.max(entryNormalized.length, normalized.length);
-                if (overlap >= 0.9) {
+                if (overlap >= 0.8) {
                     this.logger.info(`🚫 POST-TRANSLATION DUPLICATE: ${(overlap * 100).toFixed(1)}% substring overlap`, {
                         translation: normalized.substring(0, 50)
                     });
