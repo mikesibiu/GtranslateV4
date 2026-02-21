@@ -778,12 +778,19 @@ io.on('connection', (socket) => {
         const sourceNumbers = sourceText.match(numberRegex) || [];
         if (sourceNumbers.length === 0) return translatedText;
 
+        // Romanian uses '.' as a thousands separator (e.g. "68.128" = 68,128 in English).
+        // Exactly 3 digits after a dot signals thousands formatting, NOT a decimal.
+        // Skip these: Google Translate already converts them to English comma-format (68,128).
+        // Replacing 68,128 → 68.128 would make English readers see a decimal — the recurring bug.
+        const isRomanianThousands = (n) => /^\d+\.\d{3}$/.test(n);
+
         let result = translatedText;
         const translatedNumbers = translatedText.match(numberRegex) || [];
 
         // Exact one-to-one replacement when counts match
         if (translatedNumbers.length === sourceNumbers.length) {
             sourceNumbers.forEach((srcNum, idx) => {
+                if (isRomanianThousands(srcNum)) return; // leave the English comma-format intact
                 const targetNum = translatedNumbers[idx];
                 if (targetNum) {
                     result = result.replace(targetNum, srcNum);
@@ -794,13 +801,14 @@ io.on('connection', (socket) => {
 
         // Heuristic: if translated has the same digits split across adjacent tokens, merge them
         sourceNumbers.forEach((srcNum) => {
+            if (isRomanianThousands(srcNum)) return; // leave the English comma-format intact
             const digits = srcNum.replace(/[.,]/g, '');
             // Build regex to find runs of numbers separated by space/comma/dot
             const splitPattern = new RegExp(`(\\d+[\\s.,]+){0,2}\\d+`, 'g');
             const matches = [...result.matchAll(splitPattern)];
             for (const m of matches) {
                 const candidate = m[0];
-                const candidateDigits = candidate.replace(/[\s.,]/g, ''); // BUG-24: was [\\s.,] which matched literal backslash, not whitespace
+                const candidateDigits = candidate.replace(/[\s.,]/g, '');
                 if (candidateDigits === digits) {
                     result = result.replace(candidate, srcNum);
                     break;
