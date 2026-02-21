@@ -2,12 +2,6 @@
  * Translation Rules Engine
  * Centralized decision-making for when to translate
  * Ensures consistent behavior across all translation triggers and modes
- *
- * v144 improvements:
- * - Word-level prefix matching in getNewText() — tolerates punctuation differences
- *   between Google STT interim and final results (e.g. "hello world" vs "Hello, world.")
- * - pauseDetectionMs reduced 4000→2500 for faster natural-pause response
- * - isTranslationDuplicate word-overlap threshold raised 80%→87% to reduce false positives
  */
 
 class TranslationRulesEngine {
@@ -55,22 +49,22 @@ class TranslationRulesEngine {
         const configs = {
             talks: {
                 name: 'Talks',
-                translationInterval: 8000,   // 8 seconds max between translations
-                pauseDetectionMs: 2500,      // 2.5 second pause (was 4s — faster natural-pause response)
-                requireSentenceEnding: false,
+                translationInterval: 8000,   // 8 seconds
+                pauseDetectionMs: 4000,      // 4 second pause
+                requireSentenceEnding: false, // Translate even without sentence endings
                 minWords: 3,
-                enableTTS: false,
-                displayVisualCards: true,
+                enableTTS: false,            // Manual TTS control
+                displayVisualCards: true,    // Show translation cards
                 enableSummary: false
             },
             earbuds: {
                 name: 'EarBuds',
-                translationInterval: 8000,   // 8 seconds max
-                pauseDetectionMs: 2500,      // 2.5 second pause
+                translationInterval: 8000,   // 8 seconds
+                pauseDetectionMs: 4000,      // 4 second pause
                 requireSentenceEnding: false,
                 minWords: 3,
-                enableTTS: true,
-                displayVisualCards: false,
+                enableTTS: true,             // Always enable TTS
+                displayVisualCards: false,   // Hide translation cards (audio-only)
                 enableSummary: false
             }
         };
@@ -118,11 +112,12 @@ class TranslationRulesEngine {
             return this.approveTranslation(newText, 'sentence_ending', 1.0, context.clientId, context.text);
         }
 
-        // Priority 2: Maximum interval reached (force translation for fast speakers)
+        // Priority 2: Maximum interval reached (force translation)
         if (elapsedSinceLastTranslation >= this.modeConfig.translationInterval) {
             if (qualityCheck.meetsMinimum) {
                 return this.approveTranslation(newText, 'max_interval', 0.9, context.clientId, context.text);
             } else {
+                // Max interval reached but text doesn't meet quality - still skip
                 return this.rejectTranslation('max_interval_poor_quality', newText);
             }
         }
@@ -132,6 +127,8 @@ class TranslationRulesEngine {
             if (qualityCheck.meetsMinimum && !qualityCheck.isFillerOnly) {
                 return this.approveTranslation(newText, 'final_result', 0.8, context.clientId, context.text);
             } else {
+                // Final result but poor quality - DO NOT update lastTranslatedText
+                // Only approveTranslation() should update it to prevent duplicate tracking bugs
                 this.logger.info('⏭️ Skipping low-quality final result', {
                     clientId: context.clientId,
                     text: newText.substring(0, 30),
@@ -142,6 +139,7 @@ class TranslationRulesEngine {
         }
 
         // Priority 4: Pause detection (handled by timer in server, not here)
+        // This check is only reached for interim results - wait for pause timer
         if (context.timeSinceLastChange >= this.modeConfig.pauseDetectionMs) {
             if (qualityCheck.meetsMinimum) {
                 return this.approveTranslation(newText, 'pause_detected', 0.7, context.clientId, context.text);
@@ -153,32 +151,7 @@ class TranslationRulesEngine {
     }
 
     /**
-     * Normalize a single word for comparison:
-     * lowercase, strip leading/trailing punctuation so that
-     * "world" === "world," === "world." === "World"
-     */
-    _normWord(w) {
-        return w
-            .toLowerCase()
-            .replace(/^["""''«»(\[\]{]+/, '')      // leading quotes/brackets (escaped [ )
-            .replace(/[.,!?;:"""''«»)\]{}…-]+$/g, ''); // trailing punctuation
-    }
-
-    /**
-     * Extract new text that hasn't been translated yet.
-     *
-     * v144: Uses word-level prefix matching instead of character-level startsWith.
-     * This is robust against punctuation differences between interim and final results
-     * (e.g. interim "hello world" → final "Hello, world." — same words, different punctuation).
-     *
-     * Algorithm:
-     *   1. Split both texts into words.
-     *   2. Find the longest prefix of lastTranslatedText that matches the start of fullText
-     *      (word-by-word, punctuation-stripped).
-     *   3. If ≥ 85% of lastTranslatedText words match → continuation, return remaining words.
-     *   4. If current text is a subset of last (speaker said less) → duplicate, return ''.
-     *   5. If >65% word overlap → likely duplicate, return ''.
-     *   6. Otherwise → new utterance, return full text.
+     * Extract new text that hasn't been translated yet
      */
     getNewText(fullText) {
         if (!this.lastTranslatedText) {
@@ -189,76 +162,63 @@ class TranslationRulesEngine {
         const trimmedFull = fullText.trim();
         const trimmedLast = this.lastTranslatedText.trim();
 
-        if (trimmedFull.length === 0) return '';
+        // Normalize for case-insensitive comparison (preserves original for extraction)
+        const normalizedFull = trimmedFull.toLowerCase();
+        const normalizedLast = trimmedLast.toLowerCase();
 
         this.logger.debug('🔍 getNewText comparing:', {
             current: trimmedFull.substring(0, 80),
-            last: trimmedLast.substring(0, 80)
+            last: trimmedLast.substring(0, 80),
+            currentLen: trimmedFull.length,
+            lastLen: trimmedLast.length
         });
 
-        const fullWords = trimmedFull.split(/\s+/).filter(Boolean);
-        const lastWords = trimmedLast.split(/\s+/).filter(Boolean);
-
-        if (lastWords.length === 0) return trimmedFull;
-
-        // --- Case 1: Count shared word-level prefix ---
-        let matchCount = 0;
-        const minLen = Math.min(fullWords.length, lastWords.length);
-        for (let i = 0; i < minLen; i++) {
-            if (this._normWord(fullWords[i]) === this._normWord(lastWords[i])) {
-                matchCount++;
-            } else {
-                break;
-            }
+        // Check if we've already translated this exact text (case-insensitive)
+        if (normalizedFull === normalizedLast) {
+            this.logger.info('⛔ DUPLICATE DETECTED: Exact match (case-insensitive)');
+            return ''; // Already translated, no new text
         }
 
-        // Continuation: ≥85% of committed words match as a prefix.
-        // QA fix: use Math.ceil(... * 0.85) so the threshold is actually exercised
-        // (the previous `matchCount === lastWords.length` made it 100%-only).
-        if (matchCount >= Math.ceil(lastWords.length * 0.85)) {
-            const remaining = fullWords.slice(matchCount).join(' ');
-            this.logger.debug('📝 Word-level prefix match (continuation)', {
-                matchedWords: matchCount,
-                totalCommitted: lastWords.length,
-                matchPct: Math.round((matchCount / lastWords.length) * 100),
-                remaining: remaining.substring(0, 60)
+        // Check if last translation contains the current text (subset/duplicate)
+        // Example: last="Depression and Anxiety", current="depression" → skip
+        if (normalizedLast.includes(normalizedFull)) {
+            this.logger.info('⛔ DUPLICATE DETECTED: Current is subset of last');
+            return ''; // Current text is subset of what we already translated
+        }
+
+        // Check if current text starts with last translation (continuation)
+        // Example: last="Depression", current="Depression and Anxiety" → extract "and Anxiety"
+        if (normalizedFull.startsWith(normalizedLast)) {
+            const extracted = trimmedFull.substring(trimmedLast.length).trim();
+            this.logger.debug('📝 Extracting continuation:', {
+                text: extracted.substring(0, 60),
+                length: extracted.length,
+                words: extracted.split(/\s+/).length
             });
-            return remaining;
+            return extracted;
         }
 
-        // Shared overlap check — compute once, reuse in Cases 2 and 3.
+        // Check if texts have significant overlap (>65% similarity)
+        // Raised from 45% → 65% to avoid rejecting legitimate continuations
+        // that share common words with the previous translation
         const overlap = this.calculateOverlap(trimmedLast, trimmedFull);
-
-        // --- Case 2: Current is subset of last (speaker corrected / re-stated shorter phrase) ---
-        if (fullWords.length <= lastWords.length && overlap > 0.65) {
-            this.logger.info('⛔ DUPLICATE DETECTED: Current is subset/overlap of last');
-            return '';
-        }
-
-        // --- Case 3: General overlap dedup (>65% shared words = too similar) ---
         this.logger.debug(`📊 Overlap: ${(overlap * 100).toFixed(1)}%`);
         if (overlap > 0.65) {
             this.logger.info(`⛔ DUPLICATE DETECTED: ${(overlap * 100).toFixed(1)}% overlap (threshold: 65%)`);
-            return '';
+            return ''; // Too similar, likely duplicate
         }
 
-        // --- Case 4: New utterance ---
-        this.logger.debug('✅ New utterance detected, no duplication');
+        // Text doesn't match previous - return full text (new utterance)
+        this.logger.debug('✅ New text detected, no duplication');
         return trimmedFull;
     }
 
     /**
-     * Calculate word overlap between two texts (0.0 to 1.0).
-     * Uses _normWord so punctuation differences don't inflate uniqueness scores
-     * (e.g. "world," and "world" are treated as the same word).
+     * Calculate word overlap between two texts (0.0 to 1.0)
      */
     calculateOverlap(text1, text2) {
-        const words1 = new Set(
-            text1.split(/\s+/).filter(Boolean).map(w => this._normWord(w))
-        );
-        const words2 = new Set(
-            text2.split(/\s+/).filter(Boolean).map(w => this._normWord(w))
-        );
+        const words1 = new Set(text1.toLowerCase().split(/\s+/));
+        const words2 = new Set(text2.toLowerCase().split(/\s+/));
 
         let commonWords = 0;
         for (const word of words1) {
@@ -273,10 +233,8 @@ class TranslationRulesEngine {
 
     /**
      * CRITICAL FIX: Check if translation output is a duplicate
-     * This catches cases where different source texts translate to identical output.
-     *
-     * v144: Raised word-overlap threshold 80% → 87% to reduce false positives
-     * (legitimate new content that shares many words with previous was being blocked).
+     * This catches cases where different source texts translate to identical output
+     * Example: "The book of Obadiah, is..." vs "The book of Obadiah is..." both → "Cartea lui Obadia..."
      *
      * @param {string} translation - The translated text to check
      * @returns {boolean} True if this translation was recently shown
@@ -290,6 +248,7 @@ class TranslationRulesEngine {
             entry => now - entry.timestamp < this.TRANSLATION_DEDUP_WINDOW
         );
 
+        // Check for exact match or high similarity
         for (const entry of this.recentTranslations) {
             const entryNormalized = entry.text.toLowerCase().trim();
 
@@ -301,8 +260,7 @@ class TranslationRulesEngine {
                 return true;
             }
 
-            // Substring check (one contains the other with ≥80% length ratio)
-            // 80% means B can be at most 25% longer than A — clearly a subset
+            // Substring check (one contains the other with >90% overlap)
             if (entryNormalized.includes(normalized) || normalized.includes(entryNormalized)) {
                 const overlap = Math.min(entryNormalized.length, normalized.length) /
                                Math.max(entryNormalized.length, normalized.length);
@@ -314,10 +272,10 @@ class TranslationRulesEngine {
                 }
             }
 
-            // Word overlap check — raised to 87% (was 80%) to reduce false positives
+            // Word overlap check (80% threshold for translated output)
             const wordOverlap = this.calculateOverlap(entryNormalized, normalized);
-            if (wordOverlap >= 0.87) {
-                this.logger.info(`🚫 POST-TRANSLATION DUPLICATE: ${(wordOverlap * 100).toFixed(1)}% word overlap (threshold: 87%)`, {
+            if (wordOverlap >= 0.8) {
+                this.logger.info(`🚫 POST-TRANSLATION DUPLICATE: ${(wordOverlap * 100).toFixed(1)}% word overlap (threshold: 80%)`, {
                     translation: normalized.substring(0, 50)
                 });
                 return true;
@@ -329,6 +287,8 @@ class TranslationRulesEngine {
 
     /**
      * Record a translation output for duplicate detection
+     *
+     * @param {string} translation - The translated text to record
      */
     recordTranslatedOutput(translation) {
         const now = Date.now();
@@ -356,28 +316,52 @@ class TranslationRulesEngine {
         const trimmedText = text.trim();
 
         if (trimmedText.length === 0) {
-            return { meetsMinimum: false, isFillerOnly: false, reason: 'empty_text' };
+            return {
+                meetsMinimum: false,
+                isFillerOnly: false,
+                reason: 'empty_text'
+            };
         }
 
+        // Word count check (most specific - check first)
         const words = trimmedText.split(/\s+/).filter(w => w.length > 0);
         if (words.length < this.MIN_WORDS_FOR_TRANSLATION) {
-            return { meetsMinimum: false, isFillerOnly: false, reason: 'too_few_words' };
+            return {
+                meetsMinimum: false,
+                isFillerOnly: false,
+                reason: 'too_few_words'
+            };
         }
 
+        // Filler word detection (check content quality)
         const nonFillerWords = words.filter(word => {
             const lowerWord = word.toLowerCase().replace(/[.,!?;:]/g, '');
             return !this.FILLER_WORDS.has(lowerWord);
         });
 
         if (nonFillerWords.length === 0) {
-            return { meetsMinimum: false, isFillerOnly: true, reason: 'filler_words_only' };
+            return {
+                meetsMinimum: false,
+                isFillerOnly: true,
+                reason: 'filler_words_only'
+            };
         }
 
+        // Character count check (sanity check - least specific)
         if (trimmedText.length < this.MIN_CHARS_FOR_TRANSLATION) {
-            return { meetsMinimum: false, isFillerOnly: false, reason: 'too_short' };
+            return {
+                meetsMinimum: false,
+                isFillerOnly: false,
+                reason: 'too_short'
+            };
         }
 
-        return { meetsMinimum: true, isFillerOnly: false, reason: 'quality_ok' };
+        // All checks passed
+        return {
+            meetsMinimum: true,
+            isFillerOnly: false,
+            reason: 'quality_ok'
+        };
     }
 
     /**
@@ -395,8 +379,13 @@ class TranslationRulesEngine {
      */
     detectSentenceEnding(text) {
         const trimmedText = text.trim();
+
+        // Check for sentence-ending punctuation
         const hasPunctuation = /[.!?。！？]\s*$/.test(trimmedText);
+
+        // Exclude ellipsis (not a real sentence ending)
         const hasEllipsis = /\.{2,}\s*$/.test(trimmedText);
+
         return hasPunctuation && !hasEllipsis;
     }
 
@@ -409,6 +398,7 @@ class TranslationRulesEngine {
         this.lastTranslationTime = Date.now();
 
         // CRITICAL: Update lastTranslatedText IMMEDIATELY to prevent race conditions
+        // Multiple final results from Google can arrive before first translation completes
         if (fullText) {
             this.lastTranslatedText = fullText;
         }
@@ -429,6 +419,8 @@ class TranslationRulesEngine {
             reason,
             confidence,
             newText,
+            // Mark as complete for TTS/storage if: sentence ending, final result, max interval, or pause
+            // These all represent "good enough" stopping points for the user to hear translation
             isComplete: reason === 'sentence_ending' ||
                        reason === 'final_result' ||
                        reason === 'max_interval' ||
@@ -454,10 +446,14 @@ class TranslationRulesEngine {
 
     /**
      * Update state after successful translation
+     * NOTE: this.translationCount is for internal rules-engine metrics only;
+     * server.js maintains its own client-facing translationCount for emitting to the client.
      */
     recordTranslation(originalText, translatedText) {
         // NOTE: DO NOT update lastTranslatedText here!
         // It's already set in approveTranslation() to prevent race conditions.
+        // Setting it here would overwrite newer values when translations complete out of order.
+
         this.accumulatedText += (this.accumulatedText ? ' ' : '') + translatedText;
         this.translationCount++;
     }

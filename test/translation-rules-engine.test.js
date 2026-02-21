@@ -23,7 +23,7 @@ describe('TranslationRulesEngine', () => {
 
             expect(config.name).to.equal('Talks');
             expect(config.translationInterval).to.equal(8000);
-            expect(config.pauseDetectionMs).to.equal(2500); // v144: reduced from 4000→2500 for faster pause response
+            expect(config.pauseDetectionMs).to.equal(3000);
             expect(config.displayVisualCards).to.be.true;
         });
 
@@ -272,7 +272,7 @@ describe('TranslationRulesEngine', () => {
             const decision = engine.shouldTranslate({
                 text: 'this is quality text after pause',
                 isFinal: false,
-                timeSinceLastChange: 3500, // > 2500ms pause threshold
+                timeSinceLastChange: 3500, // > 3000ms pause
                 trigger: 'pause',
                 clientId: 'test-123'
             });
@@ -599,10 +599,10 @@ describe('TranslationRulesEngine', () => {
             expect(decision2.newText).to.equal(''); // Empty because it's a duplicate
         });
 
-        it('should allow short phrase that has <65% overlap with longer prior sentence', () => {
+        it('should reject duplicates with 60-70% overlap (threshold lowered)', () => {
             const engine = new TranslationRulesEngine('talks', mockLogger);
 
-            // First translation: 8 words
+            // First translation: 6 words
             const decision1 = engine.shouldTranslate({
                 text: 'welcome to the program about mental health today',
                 isFinal: true,
@@ -613,9 +613,7 @@ describe('TranslationRulesEngine', () => {
 
             expect(decision1.shouldTranslate).to.be.true;
 
-            // Second utterance: 4 words — 50% word overlap with prior (4/8)
-            // Threshold is 65%, so 50% does NOT trigger duplicate suppression.
-            // "welcome to the program" is treated as a new utterance.
+            // Second translation: 4 words, 66.7% overlap (4/6)
             const decision2 = engine.shouldTranslate({
                 text: 'welcome to the program',
                 isFinal: true,
@@ -624,16 +622,17 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            expect(decision2.shouldTranslate).to.be.true;
-            expect(decision2.newText).to.equal('welcome to the program');
+            // Should REJECT with 66.7% overlap (threshold is now 60%)
+            expect(decision2.shouldTranslate).to.be.false;
+            expect(decision2.newText).to.equal(''); // Duplicate detected
         });
 
-        it('should reject a short phrase with >65% overlap as a duplicate', () => {
+        it('should update threshold to 45% to catch more duplicates', () => {
             const engine = new TranslationRulesEngine('talks', mockLogger);
 
-            // First translation: 3 words
+            // First translation
             const decision1 = engine.shouldTranslate({
-                text: 'brothers and sisters',
+                text: 'The book of Obadiah is one of the shortest',
                 isFinal: true,
                 timeSinceLastChange: 100,
                 trigger: 'final',
@@ -642,15 +641,16 @@ describe('TranslationRulesEngine', () => {
 
             expect(decision1.shouldTranslate).to.be.true;
 
-            // Second utterance: identical — 100% overlap → duplicate
+            // Second translation: 50% overlap
             const decision2 = engine.shouldTranslate({
-                text: 'brothers and sisters',
+                text: 'The book of Obadiah',
                 isFinal: true,
                 timeSinceLastChange: 100,
                 trigger: 'final',
                 clientId: 'test-123'
             });
 
+            // Should REJECT with 50% overlap (threshold is now 45%)
             expect(decision2.shouldTranslate).to.be.false;
             expect(decision2.newText).to.equal('');
         });
