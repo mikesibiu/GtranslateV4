@@ -1,5 +1,5 @@
 /**
- * GTranslate V4 Server — v144
+ * GTranslate V4 Server — v145
  * Real-time speech translation using Google Cloud Speech-to-Text API
  * Stream proactively restarts at 290s (Google Cloud limit is ~305s)
  *
@@ -9,6 +9,12 @@
  * - Relies on word-level prefix matching in TranslationRulesEngine for accurate newText
  * - pauseDetectionMs 4000→2500 (faster natural-pause response)
  * - Duplicate dedup threshold raised 80%→87% (fewer false positives)
+ *
+ * v145 changes:
+ * - STT phrase hints: add ninge/bine ar fi/unitate/cartea programului + JW terms
+ * - Term mappings: ninja congress→convention, programmer's book→program book
+ * - convertEuropeanNumbers(): fix "68.000" being read by TTS as "sixty-eight point zero"
+ * - Fix pre-existing regex bug in preserveSourceNumbers: [\\s.,] → [\s.,]
  */
 
 const express = require('express');
@@ -563,6 +569,21 @@ io.on('connection', (socket) => {
         'vestitori',
         'Martorii lui Iehova',
         'congres',
+        'ninge',
+        'ninge la congres',
+        'ninge la adunare',
+        'bine ar fi',
+        'bine ar fi de asemenea',
+        'unitate',
+        'unitate în organizație',
+        'unitate în cadrul organizației',
+        'cartea programului',
+        'programul adunării',
+        'programul congresului',
+        'adunare de circumscripție',
+        'adunare de circuit',
+        'Sala Regatului',
+        'supraveghetorul de circuit',
         'asistența totală',
         'glosar',
         'traducere',
@@ -727,7 +748,13 @@ io.on('connection', (socket) => {
             { pattern: /\bvestitori\b/gi, replacement: 'publishers' },
             { pattern: /\bMartorii lui Iehova\b/gi, replacement: "Jehovah's Witnesses" },
             { pattern: /\bnume nou\b/gi, replacement: 'new name' },
-            { pattern: /\bnume noi\b/gi, replacement: 'new names' }
+            { pattern: /\bnume noi\b/gi, replacement: 'new names' },
+            // STT fallback: "ninge la congres" → "ninja congress"
+            { pattern: /\bninja\s+congress\b/gi, replacement: 'convention' },
+            { pattern: /\bninja\s+convention\b/gi, replacement: 'convention' },
+            // Translation error: "cartea programului" → "programmer's book"
+            { pattern: /\bprogrammer'?s\s+book\b/gi, replacement: 'program book' },
+            { pattern: /\bprogrammers\s+book\b/gi, replacement: 'program book' },
         ];
 
         let result = text;
@@ -767,7 +794,7 @@ io.on('connection', (socket) => {
             const matches = [...result.matchAll(splitPattern)];
             for (const m of matches) {
                 const candidate = m[0];
-                const candidateDigits = candidate.replace(/[\\s.,]/g, '');
+                const candidateDigits = candidate.replace(/[\s.,]/g, '');
                 if (candidateDigits === digits) {
                     result = result.replace(candidate, srcNum);
                     break;
@@ -776,6 +803,19 @@ io.on('connection', (socket) => {
         });
 
         return result;
+    }
+
+    /**
+     * Convert European-format numbers to US format for English TTS/display.
+     * Romanian uses period as thousands separator: "68.000" = 68,000.
+     * preserveSourceNumbers copies source numbers back, which would put "68.000"
+     * into English output and cause TTS to read "sixty-eight point zero zero zero".
+     */
+    function convertEuropeanNumbers(text) {
+        // Match: 1-3 digits followed by one or more groups of (period + exactly 3 digits)
+        // e.g. "68.000" → "68,000", "1.234.567" → "1,234,567"
+        // Does NOT match "3.14" (only 2 digits after period)
+        return text.replace(/\b(\d{1,3})(\.\d{3})+\b/g, (match) => match.replace(/\./g, ','));
     }
 
     /**
@@ -863,6 +903,7 @@ io.on('connection', (socket) => {
             emitted = applyTermMappings(emitted);
             emitted = preserveSourceNumbers(newText, emitted);
             emitted = preserveDates(newText, emitted);
+            emitted = convertEuropeanNumbers(emitted); // fix "68.000" → "68,000" for TTS
 
             // Fallback for single known-tricky words that come through untranslated
             const normalizedSource = newText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
