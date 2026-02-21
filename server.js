@@ -916,7 +916,7 @@ io.on('connection', (socket) => {
                 // This avoids the word-proportion estimation errors ("pendroise", "in ca", etc.)
                 const chunkTranslation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
                 emitted = chunkTranslation.trim();
-                logger.debug('📦 Extracted via chunk-only fallback translation', { clientId, newText: newText.substring(0, 80) });
+                logger.info('📦 Chunk-only fallback translation (prefix match failed)', { clientId, newText: newText.substring(0, 80) });
             }
 
             // Apply domain term mappings and preserve numeric/date fidelity
