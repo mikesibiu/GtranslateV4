@@ -845,9 +845,19 @@ io.on('connection', (socket) => {
     }
 
     /**
-     * Shared translation logic: translate ONLY the new text chunk (source-aligned) and emit it.
-     * Avoids diffing translated output (source of repeats/drops in v128–v143).
-     * @param {string} fullText - Full text to translate (transcript or lastInterimText)
+     * Shared translation logic: always translate the FULL STT transcript for maximum context,
+     * then extract only the new portion using prefix-match then word-proportion fallback.
+     *
+     * WHY: Google Translate needs surrounding context for accurate term choices.
+     * Translating short isolated chunks causes "congregație"→"church", "bucuriei"→"rejoice" etc.
+     * Always sending the full transcript gives the API the same context a human translator has.
+     *
+     * NEW PORTION EXTRACTION:
+     *   1. Prefix match: if translatedFull starts with lastFullTranslation, strip it (most reliable).
+     *   2. Proportion fallback: estimate tail word count = round(|newText|/|fullText| * |translatedFull|).
+     *   3. New utterance: committedTranslation reset → use full translation as-is.
+     *
+     * @param {string} fullText - Full STT transcript at time of translation
      * @param {Object} decision - Decision object from shouldTranslate()
      * @param {boolean} clearInterim - If true, clear lastInterimText after a complete translation
      */
@@ -860,7 +870,7 @@ io.on('connection', (socket) => {
 
         translationInFlight = true;
         try {
-            // Detect new utterance: if getNewText returned the full text, reset committed
+            // Detect new utterance: if getNewText returned the full text, reset committed state
             const isNewUtterance = newText === fullText.trim();
             if (isNewUtterance && committedTranslation) {
                 logger.info('🆕 New utterance detected - resetting committedTranslation', { clientId });
@@ -868,93 +878,57 @@ io.on('connection', (socket) => {
                 lastFullTranslation = '';
             }
 
-            // Optional source context for fluency (disabled by default)
-            const CONTEXT_WORDS = Number(process.env.TRANSLATION_CONTEXT_WORDS || 0);
-            let translationInput = newText;
-            let contextWordCount = 0;
-            if (CONTEXT_WORDS > 0 && lastTranslatedText) {
-                const tailWords = lastTranslatedText.trim().split(/\s+/).slice(-CONTEXT_WORDS);
-                if (tailWords.length > 0) {
-                    translationInput = `${tailWords.join(' ')} ${newText}`.trim();
-                    contextWordCount = tailWords.length;
-                }
-            }
-
-            logger.debug('🔤 Translating new chunk', {
+            logger.debug('🔤 Translating full text for context', {
                 clientId,
-                translationInput: translationInput.substring(0, 120),
-                contextWordCount
+                fullText: fullText.substring(0, 120),
+                newText: newText.substring(0, 80)
             });
 
-            const translatedChunk = await translateWithRetry(
-                translationInput,
+            // Single API call: always send the full STT transcript for maximum context
+            const translatedFull = await translateWithRetry(
+                fullText,
                 targetLanguage,
                 currentLanguage,
                 clientId
             );
 
-            let emitted = translatedChunk.trim();
+            let emitted = translatedFull.trim();
 
-            // If context was prepended, drop the leading translated portion using best-effort prefix match,
-            // otherwise fall back to word-count trimming.
-            if (contextWordCount > 0) {
-                const lowerEmitted = emitted.toLowerCase();
-                const lowerLastChunk = (lastEmittedChunk || '').toLowerCase();
-                const lowerCommitted = (committedTranslation || '').toLowerCase();
+            // Extract only the NEW portion from the full translation.
+            // Priority 1: prefix match against previous full translation (most reliable —
+            //   consecutive translations of growing text typically share a deterministic prefix).
+            // Priority 2: word-count proportion estimate (graceful fallback when prefix shifts).
+            // Priority 3: new utterance — use full translation as-is.
+            const lowerFull = emitted.toLowerCase();
+            const lowerLastFull = (lastFullTranslation || '').toLowerCase();
+            const lowerCommitted = (committedTranslation || '').toLowerCase();
 
-                if (lowerLastChunk && lowerEmitted.startsWith(lowerLastChunk)) {
-                    emitted = emitted.slice(lastEmittedChunk.length).trim();
-                } else if (lowerCommitted && lowerEmitted.startsWith(lowerCommitted)) {
-                    emitted = emitted.slice(committedTranslation.length).trim();
-                } else {
-                    const emittedWords = emitted.split(/\s+/);
-                    if (emittedWords.length > contextWordCount) {
-                        emitted = emittedWords.slice(contextWordCount).join(' ').trim();
-                    }
+            if (lowerLastFull && lowerFull.startsWith(lowerLastFull)) {
+                emitted = emitted.slice(lastFullTranslation.length).trim();
+                logger.debug('📌 Extracted via lastFullTranslation prefix match', { clientId });
+            } else if (lowerCommitted && lowerFull.startsWith(lowerCommitted)) {
+                emitted = emitted.slice(committedTranslation.length).trim();
+                logger.debug('📌 Extracted via committedTranslation prefix match', { clientId });
+            } else if (!isNewUtterance) {
+                // Proportion fallback: estimate how many tail words correspond to newText
+                const totalSourceWords = fullText.trim().split(/\s+/).filter(Boolean).length;
+                const newSourceWords = newText.trim().split(/\s+/).filter(Boolean).length;
+                if (totalSourceWords > 0 && newSourceWords < totalSourceWords) {
+                    const fullTranslatedWords = emitted.split(/\s+/).filter(Boolean);
+                    const ratio = newSourceWords / totalSourceWords;
+                    const estimatedNewCount = Math.max(1, Math.round(fullTranslatedWords.length * ratio));
+                    emitted = fullTranslatedWords.slice(-estimatedNewCount).join(' ');
+                    logger.debug('📊 Extracted via word-proportion fallback', {
+                        clientId, ratio: ratio.toFixed(2), estimatedNewCount
+                    });
                 }
+                // else: newSourceWords >= totalSourceWords → use full translation
             }
 
             // Apply domain term mappings and preserve numeric/date fidelity
             emitted = applyTermMappings(emitted, newText);
             emitted = preserveSourceNumbers(newText, emitted);
-            emitted = preserveDates(newText, emitted); // BUG-26: was defined but never called
-
-            // BUG-3 FIX: Only call the full-text translation when the chunk result is too short.
-            // Previously this fired unconditionally (2x API cost + 200-400ms latency on every utterance).
-            const MIN_CHUNK_WORDS = 4;
-            let translatedFull = null;
-            if (emitted.split(/\s+/).length < MIN_CHUNK_WORDS) {
-                try {
-                    translatedFull = await translateWithRetry(
-                        fullText,
-                        targetLanguage,
-                        currentLanguage,
-                        clientId
-                    );
-                } catch (fullErr) {
-                    logger.warn('⚠️ Full-text translation failed, using chunk only', { clientId, error: fullErr.message });
-                }
-            }
-
-            if (emitted.split(/\s+/).length < MIN_CHUNK_WORDS && translatedFull) {
-                const lowerFull = translatedFull.toLowerCase();
-                const lowerLastFull = (lastFullTranslation || '').toLowerCase();
-                let tail = translatedFull;
-                if (lowerLastFull && lowerFull.startsWith(lowerLastFull)) {
-                    tail = translatedFull.slice(lastFullTranslation.length).trim();
-                }
-                if (tail.split(/\s+/).length >= emitted.split(/\s+/).length) {
-                    // Re-apply post-processing to the full-translation tail (BUG-6 fix)
-                    tail = applyTermMappings(tail, newText);
-                    tail = preserveSourceNumbers(newText, tail);
-                    tail = preserveDates(newText, tail);
-                    emitted = tail;
-                    logger.debug('📌 Using full-translation tail for better context', {
-                        clientId,
-                        tailPreview: tail.substring(0, 80)
-                    });
-                }
-            }
+            emitted = preserveDates(newText, emitted);
 
             // If translation is identical to source for a known tricky word, apply fallback
             const normalizedSource = newText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -964,7 +938,7 @@ io.on('connection', (socket) => {
             }
 
             if (!emitted) {
-                logger.info('⏭️ No content to emit after context trim', { clientId });
+                logger.info('⏭️ No content to emit after extraction', { clientId });
                 const ltRaw = `${lastTranslatedText} ${newText}`.trim();
                 lastTranslatedText = ltRaw.length > 500 ? ltRaw.slice(-500) : ltRaw;
                 lastTranslationTime = Date.now();
@@ -984,10 +958,10 @@ io.on('connection', (socket) => {
                 lastTranslatedText = ltRaw2.length > 500 ? ltRaw2.slice(-500) : ltRaw2;
                 lastTranslationTime = Date.now();
 
-                    if (!isDuplicate) {
-                        const ctRaw = `${committedTranslation ? committedTranslation + ' ' : ''}${emitted}`;
-                        committedTranslation = ctRaw.length > 500 ? ctRaw.slice(-500) : ctRaw;
-                    lastFullTranslation = translatedFull || emitted;
+                if (!isDuplicate) {
+                    const ctRaw = `${committedTranslation ? committedTranslation + ' ' : ''}${emitted}`;
+                    committedTranslation = ctRaw.length > 500 ? ctRaw.slice(-500) : ctRaw;
+                    lastFullTranslation = translatedFull; // store FULL translation for next prefix match
                     lastEmittedChunk = emitted;
 
                     const acRaw = (accumulatedText ? accumulatedText + ' ' : '') + emitted;
@@ -999,7 +973,7 @@ io.on('connection', (socket) => {
                         reason: decision.reason,
                         confidence: decision.confidence,
                         newContent: emitted.substring(0, 200),
-                        fullTranslation: translatedChunk.substring(0, 200),
+                        fullTranslation: translatedFull.substring(0, 200),
                         count: translationCount,
                         isComplete: decision.isComplete
                     });
