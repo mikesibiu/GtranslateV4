@@ -774,15 +774,24 @@ io.on('connection', (socket) => {
      * Preserve numbers from source text to avoid numeric drift in translation.
      */
     function preserveSourceNumbers(sourceText, translatedText) {
-        const numberRegex = /\d+(?:[.,]\d+)?/g;
+        // Match multi-group Romanian thousands first (e.g. "1.234.567"), then single-group
+        // thousands/decimals (e.g. "68.128" or "3.14"), then bare integers.
+        // Multi-group must come first so the regex engine captures the full token in one pass.
+        const numberRegex = /\d+(?:\.\d{3})+|\d+(?:[.,]\d+)?/g;
         const sourceNumbers = sourceText.match(numberRegex) || [];
         if (sourceNumbers.length === 0) return translatedText;
 
-        // Romanian uses '.' as a thousands separator (e.g. "68.128" = 68,128 in English).
-        // Exactly 3 digits after a dot signals thousands formatting, NOT a decimal.
-        // Skip these: Google Translate already converts them to English comma-format (68,128).
-        // Replacing 68,128 → 68.128 would make English readers see a decimal — the recurring bug.
-        const isRomanianThousands = (n) => /^\d+\.\d{3}$/.test(n);
+        // Romanian uses '.' as a thousands separator:
+        //   "68.128"    = 68,128 (English)   — one separator group
+        //   "1.234.567" = 1,234,567 (English) — two separator groups
+        // Google Translate correctly converts these to English comma-format; we must NOT
+        // replace them back with the Romanian dot-format or English readers see a decimal.
+        //
+        // Heuristic: one-or-more groups of (digits + dot) followed by exactly 3 digits
+        // unambiguously identifies a thousands-separated number in this domain (religious speech).
+        // Known acceptable false positive: genuine 3-decimal-place values like "3.141"
+        // are essentially impossible in JW meeting content, so the domain risk is negligible.
+        const isRomanianThousands = (n) => /^(\d+\.)+\d{3}$/.test(n);
 
         let result = translatedText;
         const translatedNumbers = translatedText.match(numberRegex) || [];
