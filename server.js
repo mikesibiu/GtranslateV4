@@ -897,7 +897,8 @@ io.on('connection', (socket) => {
             // Extract only the NEW portion from the full translation.
             // Priority 1: prefix match against previous full translation (most reliable —
             //   consecutive translations of growing text typically share a deterministic prefix).
-            // Priority 2: word-count proportion estimate (graceful fallback when prefix shifts).
+            // Priority 2: chunk-only fallback — retranslate newText alone when prefix shifts
+            //   (accurate at the cost of a second API call; avoids estimation errors).
             // Priority 3: new utterance — use full translation as-is.
             const lowerFull = emitted.toLowerCase();
             const lowerLastFull = (lastFullTranslation || '').toLowerCase();
@@ -910,19 +911,12 @@ io.on('connection', (socket) => {
                 emitted = emitted.slice(committedTranslation.length).trim();
                 logger.debug('📌 Extracted via committedTranslation prefix match', { clientId });
             } else if (!isNewUtterance) {
-                // Proportion fallback: estimate how many tail words correspond to newText
-                const totalSourceWords = fullText.trim().split(/\s+/).filter(Boolean).length;
-                const newSourceWords = newText.trim().split(/\s+/).filter(Boolean).length;
-                if (totalSourceWords > 0 && newSourceWords < totalSourceWords) {
-                    const fullTranslatedWords = emitted.split(/\s+/).filter(Boolean);
-                    const ratio = newSourceWords / totalSourceWords;
-                    const estimatedNewCount = Math.max(1, Math.round(fullTranslatedWords.length * ratio));
-                    emitted = fullTranslatedWords.slice(-estimatedNewCount).join(' ');
-                    logger.debug('📊 Extracted via word-proportion fallback', {
-                        clientId, ratio: ratio.toFixed(2), estimatedNewCount
-                    });
-                }
-                // else: newSourceWords >= totalSourceWords → use full translation
+                // Prefix match failed (non-deterministic translation). Fall back to translating
+                // only newText directly — accurate at the cost of a second API call.
+                // This avoids the word-proportion estimation errors ("pendroise", "in ca", etc.)
+                const chunkTranslation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
+                emitted = chunkTranslation.trim();
+                logger.debug('📦 Extracted via chunk-only fallback translation', { clientId, newText: newText.substring(0, 80) });
             }
 
             // Apply domain term mappings and preserve numeric/date fidelity
