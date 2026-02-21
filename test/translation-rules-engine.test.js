@@ -713,13 +713,13 @@ describe('TranslationRulesEngine', () => {
             expect(isDuplicate).to.be.false;
         });
 
-        it('should clean up old translations after 30 seconds', () => {
+        it('should clean up old translations after 15 seconds (TRANSLATION_DEDUP_WINDOW)', () => {
             const engine = new TranslationRulesEngine('talks', mockLogger);
 
             engine.recordTranslatedOutput('Cartea lui Obadia');
 
             // Manually set old timestamp
-            engine.recentTranslations[0].timestamp = Date.now() - 31000; // 31 seconds ago
+            engine.recentTranslations[0].timestamp = Date.now() - 16000; // 16 seconds ago (beyond 15s window)
 
             // Should not detect as duplicate (too old)
             const isDuplicate = engine.isTranslationDuplicate('Cartea lui Obadia');

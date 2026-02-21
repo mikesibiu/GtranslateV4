@@ -221,20 +221,27 @@ class TranslationRulesEngine {
 
     /**
      * Calculate word overlap between two texts (0.0 to 1.0)
+     * Uses word-frequency bags (not Sets) so repeated words are counted correctly.
+     * "the the the cat" vs "the cat" = 50%, not 100%.
      */
     calculateOverlap(text1, text2) {
-        const words1 = new Set(text1.toLowerCase().split(/\s+/));
-        const words2 = new Set(text2.toLowerCase().split(/\s+/));
-
-        let commonWords = 0;
-        for (const word of words1) {
-            if (words2.has(word)) {
-                commonWords++;
+        const toBag = str => {
+            const bag = {};
+            for (const w of str.toLowerCase().split(/\s+/).filter(Boolean)) {
+                bag[w] = (bag[w] || 0) + 1;
             }
+            return bag;
+        };
+        const bag1 = toBag(text1);
+        const bag2 = toBag(text2);
+        let common = 0;
+        for (const [word, count] of Object.entries(bag1)) {
+            common += Math.min(count, bag2[word] || 0);
         }
-
-        const totalWords = Math.max(words1.size, words2.size);
-        return totalWords > 0 ? commonWords / totalWords : 0;
+        const total1 = Object.values(bag1).reduce((a, b) => a + b, 0);
+        const total2 = Object.values(bag2).reduce((a, b) => a + b, 0);
+        const total = Math.max(total1, total2);
+        return total > 0 ? common / total : 0;
     }
 
     /**
@@ -405,8 +412,9 @@ class TranslationRulesEngine {
 
         // CRITICAL: Update lastTranslatedText IMMEDIATELY to prevent race conditions
         // Multiple final results from Google can arrive before first translation completes
+        // Cap at 500 chars (keep tail) to prevent unbounded growth over long sessions.
         if (fullText) {
-            this.lastTranslatedText = fullText;
+            this.lastTranslatedText = fullText.length > 500 ? fullText.slice(-500) : fullText;
         }
 
         this.logger.info('✅ Translation APPROVED', {
@@ -460,7 +468,9 @@ class TranslationRulesEngine {
         // It's already set in approveTranslation() to prevent race conditions.
         // Setting it here would overwrite newer values when translations complete out of order.
 
-        this.accumulatedText += (this.accumulatedText ? ' ' : '') + translatedText;
+        const joined = (this.accumulatedText ? this.accumulatedText + ' ' : '') + translatedText;
+        // Cap at 1000 chars (keep tail) to prevent unbounded growth over long sessions.
+        this.accumulatedText = joined.length > 1000 ? joined.slice(-1000) : joined;
         this.translationCount++;
     }
 

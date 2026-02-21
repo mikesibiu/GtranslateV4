@@ -297,6 +297,12 @@ app.post('/api/billing/track', express.json(), async (req, res) => {
             return res.status(400).json({ error: 'Amount must be a positive number' });
         }
 
+        // Cap per-request amount to prevent data inflation from malformed/malicious clients
+        const MAX_BILLING_AMOUNT = 50000;
+        if (amount > MAX_BILLING_AMOUNT) {
+            return res.status(400).json({ error: `Amount exceeds maximum allowed value (${MAX_BILLING_AMOUNT})` });
+        }
+
         // Track usage in database
         const success = await billingDb.trackUsage(type, amount, language);
 
@@ -934,7 +940,8 @@ io.on('connection', (socket) => {
 
             if (!emitted) {
                 logger.info('⏭️ No content to emit after context trim', { clientId });
-                lastTranslatedText = `${lastTranslatedText} ${newText}`.trim();
+                const ltRaw = `${lastTranslatedText} ${newText}`.trim();
+                lastTranslatedText = ltRaw.length > 500 ? ltRaw.slice(-500) : ltRaw;
                 lastTranslationTime = Date.now();
             } else {
                 const isDuplicate = translationRules.isTranslationDuplicate(emitted);
@@ -948,15 +955,18 @@ io.on('connection', (socket) => {
 
                 translationRules.recordTranslatedOutput(emitted);
 
-                lastTranslatedText = `${lastTranslatedText} ${newText}`.trim();
+                const ltRaw2 = `${lastTranslatedText} ${newText}`.trim();
+                lastTranslatedText = ltRaw2.length > 500 ? ltRaw2.slice(-500) : ltRaw2;
                 lastTranslationTime = Date.now();
 
                     if (!isDuplicate) {
-                        committedTranslation = `${committedTranslation ? committedTranslation + ' ' : ''}${emitted}`;
+                        const ctRaw = `${committedTranslation ? committedTranslation + ' ' : ''}${emitted}`;
+                        committedTranslation = ctRaw.length > 500 ? ctRaw.slice(-500) : ctRaw;
                     lastFullTranslation = translatedFull || emitted;
                     lastEmittedChunk = emitted;
 
-                    accumulatedText += (accumulatedText ? ' ' : '') + emitted;
+                    const acRaw = (accumulatedText ? accumulatedText + ' ' : '') + emitted;
+                    accumulatedText = acRaw.length > 1000 ? acRaw.slice(-1000) : acRaw;
                     translationCount++;
 
                     logger.info('✅ Translation completed', {
@@ -1301,6 +1311,13 @@ io.on('connection', (socket) => {
         const validModes = ['talks', 'earbuds'];
         const selectedMode = mode && validModes.includes(mode) ? mode : 'talks';
         currentMode = selectedMode;
+
+        // Guard: clean up existing gRPC stream before starting a new one.
+        // Without this, a duplicate start-streaming event leaks the old stream.
+        if (recognizeStream) {
+            logger.warn('⚠️ start-streaming while stream active - stopping existing stream', { clientId });
+            cleanupStream();
+        }
 
         // Initialize translation rules engine for this session
         translationRules = new TranslationRulesEngine(selectedMode, logger);
