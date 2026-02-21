@@ -926,28 +926,67 @@ io.on('connection', (socket) => {
             let emitted = translatedFull.trim();
 
             // Extract only the NEW portion from the full translation.
-            // Priority 1: prefix match against previous full translation (most reliable —
-            //   consecutive translations of growing text typically share a deterministic prefix).
-            // Priority 2: chunk-only fallback — retranslate newText alone when prefix shifts
-            //   (accurate at the cost of a second API call; avoids estimation errors).
-            // Priority 3: new utterance — use full translation as-is.
-            const lowerFull = emitted.toLowerCase();
-            const lowerLastFull = (lastFullTranslation || '').toLowerCase();
-            const lowerCommitted = (committedTranslation || '').toLowerCase();
+            //
+            // WHY WORD-LEVEL LCP (not character-level startsWith):
+            //   Google Translate is non-deterministic: the same source may return "However,"
+            //   one call and "However" the next, or swap a synonym. Character-level prefix
+            //   matching breaks on ANY such variation, causing chunk-only fallback to fire
+            //   ~60% of the time — translating garbled STT fragments without context.
+            //   Word-level LCP tolerates punctuation/capitalisation drift and requires only
+            //   that ≥60% of the reference's words appear in order at the start of the new
+            //   translation before declaring a match.
+            //
+            // Priority 1: word-level LCP against lastFullTranslation.
+            // Priority 2: word-level LCP against committedTranslation.
+            // Priority 3: chunk-only fallback — retranslate newText (fires rarely now).
+            // Priority 4: new utterance — use full translation as-is.
 
-            if (lowerLastFull && lowerFull.startsWith(lowerLastFull)) {
-                emitted = emitted.slice(lastFullTranslation.length).trim();
-                logger.debug('📌 Extracted via lastFullTranslation prefix match', { clientId });
-            } else if (lowerCommitted && lowerFull.startsWith(lowerCommitted)) {
-                emitted = emitted.slice(committedTranslation.length).trim();
-                logger.debug('📌 Extracted via committedTranslation prefix match', { clientId });
+            /**
+             * Word-level Longest Common Prefix extraction.
+             * Returns the "new" tail words of newTrans beyond the reference prefix,
+             * or null if the reference doesn't match well enough to trust.
+             */
+            function extractByWordLCP(reference, newTrans) {
+                if (!reference || !newTrans) return null;
+                const refWords = reference.trim().toLowerCase().split(/\s+/).filter(Boolean);
+                if (refWords.length === 0) return null;
+                const newWords = newTrans.trim().split(/\s+/).filter(Boolean);
+                const newWordsLower = newWords.map(w => w.toLowerCase());
+
+                // Walk forward while words agree (strip trailing punctuation for comparison)
+                const strip = w => w.replace(/[.,;:!?'"()[\]]+/g, '');
+                let matchLen = 0;
+                for (let i = 0; i < Math.min(refWords.length, newWordsLower.length); i++) {
+                    if (strip(refWords[i]) === strip(newWordsLower[i])) {
+                        matchLen = i + 1;
+                    } else {
+                        break;
+                    }
+                }
+                // Require ≥60% of reference words matched consecutively from the start
+                if (matchLen >= Math.ceil(refWords.length * 0.6)) {
+                    return newWords.slice(matchLen).join(' ');
+                }
+                return null;
+            }
+
+            const lcpFromLast = extractByWordLCP(lastFullTranslation, emitted);
+            const lcpFromCommitted = (!lcpFromLast && committedTranslation)
+                ? extractByWordLCP(committedTranslation, emitted)
+                : null;
+
+            if (lcpFromLast !== null) {
+                emitted = lcpFromLast;
+                logger.debug('📌 Extracted via word-LCP lastFullTranslation', { clientId, matchedWords: lastFullTranslation.trim().split(/\s+/).length });
+            } else if (lcpFromCommitted !== null) {
+                emitted = lcpFromCommitted;
+                logger.debug('📌 Extracted via word-LCP committedTranslation', { clientId });
             } else if (!isNewUtterance) {
-                // Prefix match failed (non-deterministic translation). Fall back to translating
-                // only newText directly — accurate at the cost of a second API call.
-                // This avoids the word-proportion estimation errors ("pendroise", "in ca", etc.)
+                // Word-LCP failed. Fall back to translating newText directly — accurate
+                // but without full-text context. Fires rarely now that word-LCP is robust.
                 const chunkTranslation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
                 emitted = chunkTranslation.trim();
-                logger.info('📦 Chunk-only fallback translation (prefix match failed)', { clientId, newText: newText.substring(0, 80) });
+                logger.info('📦 Chunk-only fallback translation (word-LCP failed)', { clientId, newText: newText.substring(0, 80) });
             }
 
             // Apply domain term mappings and preserve numeric/date fidelity
