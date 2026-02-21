@@ -562,11 +562,23 @@ io.on('connection', (socket) => {
     let lastFullTranslation = ''; // Previous emitted translation chunk for reference
 
     // Domain-specific STT phrase hints to reduce mis-hearings (e.g., “vestitori”)
+    // STT phrase hints — boost domain-specific vocabulary the base model struggles with.
+    //
+    // RULES FOR THIS LIST:
+    //  1. Only include words/phrases that actually fail without hints.
+    //  2. Prefer multi-word phrases over single tokens — single-token hints cause the
+    //     decoder to commit early, then decode the NEXT word with weakened beam energy,
+    //     producing garbles in the immediately following word (confirmed root cause).
+    //  3. NEVER include high-frequency Romanian function words or particles.
+    //     “mai” (meaning “more/also/still”) appears in virtually every sentence;
+    //     boosting it at any level creates a global attractor that garbles adjacent tokens.
+    //  4. Boost is set to 10 (half of Google's documented max of 20). Max boost=20
+    //     explicitly increases false positives per Google documentation.
     const STT_PHRASE_HINTS = [
         'vestitori',
         'Martorii lui Iehova',
-        'congres',
-        'congrese',
+        // Convention vocabulary — use only multi-word forms to avoid early-commit garbling
+        // (single-token 'congres'/'congrese' removed: they caused adjacent-word substitutions)
         'congres special',
         'congrese speciale',
         'congres regional',
@@ -576,7 +588,6 @@ io.on('connection', (socket) => {
         'asistența totală',
         'glosar',
         'traducere',
-        'audio',
         'EarBuds',
         'gheață',
         'gheată',
@@ -600,8 +611,9 @@ io.on('connection', (socket) => {
         // Location/context terms
         'domiciliu',   // prevents mishearing as “domesti” (house arrest / home territory)
         'Domești',     // Romanian village name (JW preaching territory reports)
-        // Months (Romanian + English) to stabilize date recognition
-        'ianuarie','februarie','martie','aprilie','mai','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie',
+        // Months — Romanian only; 'mai' OMITTED (it's the most common Romanian particle;
+        // boosting it globally destroys token-boundary stability throughout every sentence)
+        'ianuarie','februarie','martie','aprilie','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie',
         'january','february','march','april','may','june','july','august','september','october','november','december'
     ];
 
@@ -1117,7 +1129,7 @@ io.on('connection', (socket) => {
                     speechContexts: [
                         {
                             phrases: STT_PHRASE_HINTS,
-                            boost: 20
+                            boost: 10  // 10 = midpoint; 20 (max) explicitly increases false positives per Google docs
                         }
                     ]
                 },
