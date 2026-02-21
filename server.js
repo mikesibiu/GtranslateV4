@@ -1,7 +1,14 @@
 /**
- * GTranslate V4 Server
+ * GTranslate V4 Server — v144
  * Real-time speech translation using Google Cloud Speech-to-Text API
  * Stream proactively restarts at 290s (Google Cloud limit is ~305s)
+ *
+ * v144 changes:
+ * - Single API call per translation (removed hybrid dual-call)
+ * - Cleaner performTranslation: no context-prefix trimming complexity
+ * - Relies on word-level prefix matching in TranslationRulesEngine for accurate newText
+ * - pauseDetectionMs 4000→2500 (faster natural-pause response)
+ * - Duplicate dedup threshold raised 80%→87% (fewer false positives)
  */
 
 const express = require('express');
@@ -531,8 +538,7 @@ io.on('connection', (socket) => {
     let sessionActive = false;
     let restartStreamTimer = null;
     let lastInterimText = '';
-    let lastTranslationTime = null; // Track when last translation happened for 15s max interval
-    let lastTranslatedText = ''; // Track concatenated source text already translated
+    let lastTranslationTime = null; // Track when last translation happened for max interval
     let translationInterval = 6000; // Store translation interval for restarts
     let lastActivityTime = Date.now();
     let inactivityTimer = null;
@@ -549,11 +555,8 @@ io.on('connection', (socket) => {
     let translationRules = null; // Centralized translation rules engine
     let currentMode = 'talks'; // Persist selected mode across restarts
     let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
-    let lastEmittedChunk = ''; // Track last emitted translated chunk for context trimming
-
-    // Emission state: track spoken translations for dedup + context window
+    // Emission state: track spoken translations for dedup
     let committedTranslation = ''; // What TTS has already spoken (permanent until stream restart)
-    let lastFullTranslation = ''; // Previous emitted translation chunk for reference
 
     // Domain-specific STT phrase hints to reduce mis-hearings (e.g., “vestitori”)
     const STT_PHRASE_HINTS = [
@@ -613,9 +616,6 @@ io.on('connection', (socket) => {
         isRestarting = false; // Cancel any pending auto-restart
         translationInFlight = false; // Reset so new sessions aren't blocked
         committedTranslation = ''; // Reset re-translation state
-        lastFullTranslation = '';
-        lastTranslatedText = '';
-        lastEmittedChunk = '';
 
         // Cancel proactive stream duration timer
         if (streamDurationTimer) {
@@ -812,10 +812,14 @@ io.on('connection', (socket) => {
     }
 
     /**
-     * Shared translation logic: translate ONLY the new text chunk (source-aligned) and emit it.
-     * Avoids diffing translated output (source of repeats/drops in v128–v143).
-     * @param {string} fullText - Full text to translate (transcript or lastInterimText)
-     * @param {Object} decision - Decision object from shouldTranslate()
+     * Translate the new source chunk and emit the result.
+     *
+     * v144: Single API call — removed hybrid dual-call complexity.
+     * Word-level prefix matching in TranslationRulesEngine.getNewText() ensures
+     * newText is always a syntactically meaningful unit (complete sentence or clause).
+     *
+     * @param {string} fullText - Full transcript text (used only for new-utterance detection)
+     * @param {Object} decision - Decision from shouldTranslate()
      * @param {boolean} clearInterim - If true, clear lastInterimText after a complete translation
      */
     async function performTranslation(fullText, decision, clearInterim = false) {
@@ -826,97 +830,40 @@ io.on('connection', (socket) => {
         }
 
         translationInFlight = true;
+        // Track any deferred translation that arrives while we are in-flight.
+        // Cleared in finally so the pause-timer retry below can detect it.
+        let deferredTranscript = null;
+
         try {
             // Detect new utterance: if getNewText returned the full text, reset committed
             const isNewUtterance = newText === fullText.trim();
             if (isNewUtterance && committedTranslation) {
                 logger.info('🆕 New utterance detected - resetting committedTranslation', { clientId });
                 committedTranslation = '';
-                lastFullTranslation = '';
             }
 
-            // Optional source context for fluency (disabled by default)
-            const CONTEXT_WORDS = Number(process.env.TRANSLATION_CONTEXT_WORDS || 0);
-            let translationInput = newText;
-            let contextWordCount = 0;
-            if (CONTEXT_WORDS > 0 && lastTranslatedText) {
-                const tailWords = lastTranslatedText.trim().split(/\s+/).slice(-CONTEXT_WORDS);
-                if (tailWords.length > 0) {
-                    translationInput = `${tailWords.join(' ')} ${newText}`.trim();
-                    contextWordCount = tailWords.length;
-                }
-            }
-
-            logger.debug('🔤 Translating new chunk', {
+            logger.debug('🔤 Translating', {
                 clientId,
-                translationInput: translationInput.substring(0, 120),
-                contextWordCount
+                input: newText.substring(0, 120),
+                trigger: decision.reason
             });
 
-            const translatedChunk = await translateWithRetry(
-                translationInput,
+            // Single API call — translate the new source chunk directly.
+            const translated = await translateWithRetry(
+                newText,
                 targetLanguage,
                 currentLanguage,
                 clientId
             );
 
-            // Hybrid: also translate fullText to gain broader context; may use tail if chunk is too short
-            let translatedFull = translatedChunk;
-            try {
-                translatedFull = await translateWithRetry(
-                    fullText,
-                    targetLanguage,
-                    currentLanguage,
-                    clientId
-                );
-            } catch (fullErr) {
-                logger.warn('⚠️ Full-text translation failed, using chunk only', { clientId, error: fullErr.message });
-            }
+            let emitted = translated.trim();
 
-            let emitted = translatedChunk.trim();
-
-            // If context was prepended, drop the leading translated portion using best-effort prefix match,
-            // otherwise fall back to word-count trimming.
-            if (contextWordCount > 0) {
-                const lowerEmitted = emitted.toLowerCase();
-                const lowerLastChunk = (lastEmittedChunk || '').toLowerCase();
-                const lowerCommitted = (committedTranslation || '').toLowerCase();
-
-                if (lowerLastChunk && lowerEmitted.startsWith(lowerLastChunk)) {
-                    emitted = emitted.slice(lastEmittedChunk.length).trim();
-                } else if (lowerCommitted && lowerEmitted.startsWith(lowerCommitted)) {
-                    emitted = emitted.slice(committedTranslation.length).trim();
-                } else {
-                    const emittedWords = emitted.split(/\s+/);
-                    if (emittedWords.length > contextWordCount) {
-                        emitted = emittedWords.slice(contextWordCount).join(' ').trim();
-                    }
-                }
-            }
-
-            // Apply domain term mappings and preserve numeric fidelity
+            // Apply domain term mappings and preserve numeric/date fidelity
             emitted = applyTermMappings(emitted);
             emitted = preserveSourceNumbers(newText, emitted);
+            emitted = preserveDates(newText, emitted);
 
-            // If emitted is very short, try to use tail of full translation for better context
-            const MIN_CHUNK_WORDS = 4;
-            if (emitted.split(/\s+/).length < MIN_CHUNK_WORDS && translatedFull) {
-                const lowerFull = translatedFull.toLowerCase();
-                const lowerLastFull = (lastFullTranslation || '').toLowerCase();
-                let tail = translatedFull;
-                if (lowerLastFull && lowerFull.startsWith(lowerLastFull)) {
-                    tail = translatedFull.slice(lastFullTranslation.length).trim();
-                }
-                if (tail.split(/\s+/).length >= emitted.split(/\s+/).length) {
-                    emitted = tail;
-                    logger.debug('📌 Using full-translation tail for better context', {
-                        clientId,
-                        tailPreview: tail.substring(0, 80)
-                    });
-                }
-            }
-
-            // If translation is identical to source for a known tricky word, apply fallback
+            // Fallback for single known-tricky words that come through untranslated
             const normalizedSource = newText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
             const normalizedEmitted = emitted.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
             if (normalizedSource === normalizedEmitted && FALLBACK_TRANSLATIONS[normalizedSource]) {
@@ -924,8 +871,7 @@ io.on('connection', (socket) => {
             }
 
             if (!emitted) {
-                logger.info('⏭️ No content to emit after context trim', { clientId });
-                lastTranslatedText = `${lastTranslatedText} ${newText}`.trim();
+                logger.info('⏭️ Empty translation result - skipping emit', { clientId });
                 lastTranslationTime = Date.now();
             } else {
                 const isDuplicate = translationRules.isTranslationDuplicate(emitted);
@@ -938,15 +884,10 @@ io.on('connection', (socket) => {
                 }
 
                 translationRules.recordTranslatedOutput(emitted);
-
-                lastTranslatedText = `${lastTranslatedText} ${newText}`.trim();
                 lastTranslationTime = Date.now();
 
-                    if (!isDuplicate) {
-                        committedTranslation = `${committedTranslation ? committedTranslation + ' ' : ''}${emitted}`;
-                    lastFullTranslation = translatedFull || emitted;
-                    lastEmittedChunk = emitted;
-
+                if (!isDuplicate) {
+                    committedTranslation = `${committedTranslation ? committedTranslation + ' ' : ''}${emitted}`;
                     accumulatedText += (accumulatedText ? ' ' : '') + emitted;
                     translationCount++;
 
@@ -955,12 +896,9 @@ io.on('connection', (socket) => {
                         reason: decision.reason,
                         confidence: decision.confidence,
                         newContent: emitted.substring(0, 200),
-                        fullTranslation: translatedChunk.substring(0, 200),
                         count: translationCount,
                         isComplete: decision.isComplete
                     });
-
-                    translationRules.recordTranslation(fullText, emitted);
 
                     socket.emit('translation-result', {
                         original: newText,
@@ -991,6 +929,31 @@ io.on('connection', (socket) => {
             });
         } finally {
             translationInFlight = false;
+
+            // QA fix: If a transcript arrived while we were in-flight and the
+            // caller deferred it (translationInFlight guard), re-evaluate now.
+            // This prevents deferred translations from being permanently dropped
+            // when the speaker pauses right after a fast translation completes.
+            if (lastInterimText && sessionActive && translationRules) {
+                const retryDecision = translationRules.shouldTranslate({
+                    text: lastInterimText,
+                    isFinal: false,
+                    timeSinceLastChange: Date.now() - (lastTextChangeTime || Date.now()),
+                    trigger: 'retry_after_inflight',
+                    clientId
+                });
+                if (retryDecision.shouldTranslate) {
+                    logger.info('🔄 Retrying deferred translation after in-flight completed', { clientId });
+                    // Use setImmediate to avoid re-entrancy into the finally block
+                    setImmediate(() => {
+                        if (sessionActive && !translationInFlight) {
+                            performTranslation(lastInterimText, retryDecision, false).catch(err => {
+                                logger.error('Deferred retry failed', { clientId, error: err.message });
+                            });
+                        }
+                    });
+                }
+            }
         }
     }
 
@@ -1293,15 +1256,24 @@ io.on('connection', (socket) => {
         const selectedMode = mode && validModes.includes(mode) ? mode : 'talks';
         currentMode = selectedMode;
 
-        // Initialize translation rules engine for this session
-        translationRules = new TranslationRulesEngine(selectedMode, logger);
+        // Initialize translation rules engine — but preserve dedup state across auto-restarts.
+        // A new instance would wipe recentTranslations, causing just-heard sentences to
+        // repeat immediately after stream restart. Only create a fresh instance for genuine
+        // new sessions (not isRestart).
+        if (!isRestart || !translationRules) {
+            translationRules = new TranslationRulesEngine(selectedMode, logger);
+            logger.info('🎯 Translation rules engine initialized (new session)', {
+                clientId,
+                mode: selectedMode,
+                config: translationRules.getConfig()
+            });
+        } else {
+            logger.info('🔄 Reusing translation rules engine across stream restart', {
+                clientId,
+                mode: selectedMode
+            });
+        }
         const modeConfig = translationRules.getConfig();
-
-        logger.info('🎯 Translation rules engine initialized', {
-            clientId,
-            mode: selectedMode,
-            config: translationRules.getConfig()
-        });
 
         // Call the extracted function
         await createRecognitionStream(
