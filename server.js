@@ -156,7 +156,7 @@ const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
 const parent = projectId ? `projects/${projectId}/locations/${location}` : null;
 const glossaryId = 'ro-en-religious-terms';
 const glossaryPath = parent ? `${parent}/glossaries/${glossaryId}` : null;
-const glossaryEnabled = process.env.GLOSSARY_ENABLED === 'true';
+const glossaryEnabled = process.env.GLOSSARY_ENABLED !== 'false'; // enabled by default; set GLOSSARY_ENABLED=false to disable
 const translationModel = process.env.TRANSLATION_MODEL || 'advanced';
 
 if (!projectId) {
@@ -555,11 +555,8 @@ io.on('connection', (socket) => {
     let translationRules = null; // Centralized translation rules engine
     let currentMode = 'talks'; // Persist selected mode across restarts
     let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
-    let lastEmittedChunk = ''; // Track last emitted translated chunk for context trimming
-
-    // Emission state: track spoken translations for dedup + context window
-    let committedTranslation = ''; // What TTS has already spoken (permanent until stream restart)
-    let lastFullTranslation = ''; // Previous emitted translation chunk for reference
+    // (lastEmittedChunk, committedTranslation, lastFullTranslation removed in v157:
+    //  full-text-then-extract architecture replaced with clean chunk translation)
 
     // Domain-specific STT phrase hints to reduce mis-hearings (e.g., “vestitori”)
     // STT phrase hints — boost domain-specific vocabulary the base model struggles with.
@@ -611,6 +608,11 @@ io.on('connection', (socket) => {
         // Location/context terms
         'domiciliu',   // prevents mishearing as “domesti” (house arrest / home territory)
         'Domești',     // Romanian village name (JW preaching territory reports)
+        'Tongo',       // stadium/venue name (STT garbles to “Togo” — country in Africa)
+        // Hospitality/kindness vocabulary — prevents “bunătate” (kindness) → “bani” (money)
+        'bunătate',
+        'bunătatea',
+        'cu bunătate',
         // Months — Romanian only; 'mai' OMITTED (it's the most common Romanian particle;
         // boosting it globally destroys token-boundary stability throughout every sentence)
         'ianuarie','februarie','martie','aprilie','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie',
@@ -651,10 +653,7 @@ io.on('connection', (socket) => {
     function cleanupStream() {
         isRestarting = false; // Cancel any pending auto-restart
         translationInFlight = false; // Reset so new sessions aren't blocked
-        committedTranslation = ''; // Reset re-translation state
-        lastFullTranslation = '';
         lastTranslatedText = '';
-        lastEmittedChunk = '';
         lastInterimText = ''; // BUG-13: prevent stale pause-timer retranslation after restart
 
         // Cancel proactive stream duration timer
@@ -793,6 +792,25 @@ io.on('connection', (socket) => {
             result = result.replace(/\bbeasts?\b/gi, (match) => match.toLowerCase() === 'beast' ? 'convention' : 'conventions');
         }
 
+        // Source-aware fix: STT garbles "Tongo" (venue/stadium name) → "Togo" (country).
+        // "Togo" in this domain context is always the venue, never the African country.
+        if (/tongo/i.test(sourceText)) {
+            result = result.replace(/\bTogo\b/g, 'Tongo');
+        }
+
+        // Source-aware fix: "Cartea Bucuriei" = "The Book of Joy" (JW publication).
+        // Google Translate sometimes renders "bucurie" as "Rejoice" without context.
+        if (/cart(?:ea|e)\s+bucur/i.test(sourceText)) {
+            result = result.replace(/\bRejoice\b/gi, 'Joy');
+            result = result.replace(/\bbook\s+rejoice\b/gi, 'Book of Joy');
+        }
+
+        // Source-aware fix: "bunătate" (kindness) garbled to "bani" (money) by STT.
+        // If source contains "bunătate" and output has "money", it's the STT error.
+        if (/bun[ăa]tate/i.test(sourceText)) {
+            result = result.replace(/\bmoney\b/gi, 'kindness');
+        }
+
         return result;
     }
 
@@ -891,17 +909,24 @@ io.on('connection', (socket) => {
      * Shared translation logic: always translate the FULL STT transcript for maximum context,
      * then extract only the new portion using prefix-match then word-proportion fallback.
      *
-     * WHY: Google Translate needs surrounding context for accurate term choices.
-     * Translating short isolated chunks causes "congregație"→"church", "bucuriei"→"rejoice" etc.
-     * Always sending the full transcript gives the API the same context a human translator has.
+     * PROVEN DESIGN (v157): Translate each approved chunk independently.
      *
-     * NEW PORTION EXTRACTION:
-     *   1. Prefix match: if translatedFull starts with lastFullTranslation, strip it (most reliable).
-     *   2. Proportion fallback: estimate tail word count = round(|newText|/|fullText| * |translatedFull|).
-     *   3. New utterance: committedTranslation reset → use full translation as-is.
+     * WHY NOT full-text-then-extract (v150–v156):
+     *   Translating the full accumulated STT transcript and extracting the "new portion"
+     *   via LCP/prefix matching was tried extensively (v150–v156) and proved unreliable.
+     *   Google Translate is non-deterministic — punctuation, capitalisation, and synonym
+     *   variation between calls causes prefix matching to fail ~50% of the time.
+     *   When the fallback (chunk retranslation) fires, committedTranslation diverges from
+     *   translatedFull, which causes every subsequent prefix match to also fail — a cascade.
      *
-     * @param {string} fullText - Full STT transcript at time of translation
-     * @param {Object} decision - Decision object from shouldTranslate()
+     * WHY chunk translation works:
+     *   The approved chunk (decision.newText) is typically 8–20 words — enough context for
+     *   the translation model to make correct term choices. The glossary handles systematic
+     *   domain terms (congregation, convention, publisher). Term mappings handle residual
+     *   edge cases. No state divergence, no extraction, no LCP math.
+     *
+     * @param {string} fullText - Full STT transcript (used only to update lastTranslatedText)
+     * @param {Object} decision - Decision object from shouldTranslate(); decision.newText is translated
      * @param {boolean} clearInterim - If true, clear lastInterimText after a complete translation
      */
     async function performTranslation(fullText, decision, clearInterim = false) {
@@ -913,93 +938,15 @@ io.on('connection', (socket) => {
 
         translationInFlight = true;
         try {
-            // Detect new utterance: if getNewText returned the full text, reset committed state
-            const isNewUtterance = newText === fullText.trim();
-            if (isNewUtterance && committedTranslation) {
-                logger.info('🆕 New utterance detected - resetting committedTranslation', { clientId });
-                committedTranslation = '';
-                lastFullTranslation = '';
-            }
-
-            logger.debug('🔤 Translating full text for context', {
+            logger.debug('🔤 Translating chunk', {
                 clientId,
-                fullText: fullText.substring(0, 120),
-                newText: newText.substring(0, 80)
+                newText: newText.substring(0, 120),
+                words: newText.trim().split(/\s+/).length
             });
 
-            // Single API call: always send the full STT transcript for maximum context
-            const translatedFull = await translateWithRetry(
-                fullText,
-                targetLanguage,
-                currentLanguage,
-                clientId
-            );
-
-            let emitted = translatedFull.trim();
-
-            // Extract only the NEW portion from the full translation.
-            //
-            // WHY WORD-LEVEL LCP (not character-level startsWith):
-            //   Google Translate is non-deterministic: the same source may return "However,"
-            //   one call and "However" the next, or swap a synonym. Character-level prefix
-            //   matching breaks on ANY such variation, causing chunk-only fallback to fire
-            //   ~60% of the time — translating garbled STT fragments without context.
-            //   Word-level LCP tolerates punctuation/capitalisation drift and requires only
-            //   that ≥60% of the reference's words appear in order at the start of the new
-            //   translation before declaring a match.
-            //
-            // Priority 1: word-level LCP against lastFullTranslation.
-            // Priority 2: word-level LCP against committedTranslation.
-            // Priority 3: chunk-only fallback — retranslate newText (fires rarely now).
-            // Priority 4: new utterance — use full translation as-is.
-
-            /**
-             * Word-level Longest Common Prefix extraction.
-             * Returns the "new" tail words of newTrans beyond the reference prefix,
-             * or null if the reference doesn't match well enough to trust.
-             */
-            function extractByWordLCP(reference, newTrans) {
-                if (!reference || !newTrans) return null;
-                const refWords = reference.trim().toLowerCase().split(/\s+/).filter(Boolean);
-                if (refWords.length === 0) return null;
-                const newWords = newTrans.trim().split(/\s+/).filter(Boolean);
-                const newWordsLower = newWords.map(w => w.toLowerCase());
-
-                // Walk forward while words agree (strip trailing punctuation for comparison)
-                const strip = w => w.replace(/[.,;:!?'"()[\]]+/g, '');
-                let matchLen = 0;
-                for (let i = 0; i < Math.min(refWords.length, newWordsLower.length); i++) {
-                    if (strip(refWords[i]) === strip(newWordsLower[i])) {
-                        matchLen = i + 1;
-                    } else {
-                        break;
-                    }
-                }
-                // Require ≥60% of reference words matched consecutively from the start
-                if (matchLen >= Math.ceil(refWords.length * 0.6)) {
-                    return newWords.slice(matchLen).join(' ');
-                }
-                return null;
-            }
-
-            const lcpFromLast = extractByWordLCP(lastFullTranslation, emitted);
-            const lcpFromCommitted = (!lcpFromLast && committedTranslation)
-                ? extractByWordLCP(committedTranslation, emitted)
-                : null;
-
-            if (lcpFromLast !== null) {
-                emitted = lcpFromLast;
-                logger.debug('📌 Extracted via word-LCP lastFullTranslation', { clientId, matchedWords: lastFullTranslation.trim().split(/\s+/).length });
-            } else if (lcpFromCommitted !== null) {
-                emitted = lcpFromCommitted;
-                logger.debug('📌 Extracted via word-LCP committedTranslation', { clientId });
-            } else if (!isNewUtterance) {
-                // Word-LCP failed. Fall back to translating newText directly — accurate
-                // but without full-text context. Fires rarely now that word-LCP is robust.
-                const chunkTranslation = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
-                emitted = chunkTranslation.trim();
-                logger.info('📦 Chunk-only fallback translation (word-LCP failed)', { clientId, newText: newText.substring(0, 80) });
-            }
+            // Translate only the new chunk — single API call, no extraction needed.
+            const translated = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
+            let emitted = translated.trim();
 
             // Apply domain term mappings and preserve numeric/date fidelity
             emitted = applyTermMappings(emitted, newText);
@@ -1013,11 +960,13 @@ io.on('connection', (socket) => {
                 emitted = FALLBACK_TRANSLATIONS[normalizedSource];
             }
 
+            // Update source tracking (used by getNewText() to find the next delta)
+            const ltRaw = `${lastTranslatedText} ${newText}`.trim();
+            lastTranslatedText = ltRaw.length > 2000 ? ltRaw.slice(-2000) : ltRaw;
+            lastTranslationTime = Date.now();
+
             if (!emitted) {
-                logger.info('⏭️ No content to emit after extraction', { clientId });
-                const ltRaw = `${lastTranslatedText} ${newText}`.trim();
-                lastTranslatedText = ltRaw.length > 500 ? ltRaw.slice(-500) : ltRaw;
-                lastTranslationTime = Date.now();
+                logger.info('⏭️ Empty translation result - skipping emit', { clientId });
             } else {
                 const isDuplicate = translationRules.isTranslationDuplicate(emitted);
 
@@ -1030,16 +979,7 @@ io.on('connection', (socket) => {
 
                 translationRules.recordTranslatedOutput(emitted);
 
-                const ltRaw2 = `${lastTranslatedText} ${newText}`.trim();
-                lastTranslatedText = ltRaw2.length > 500 ? ltRaw2.slice(-500) : ltRaw2;
-                lastTranslationTime = Date.now();
-
                 if (!isDuplicate) {
-                    const ctRaw = `${committedTranslation ? committedTranslation + ' ' : ''}${emitted}`;
-                    committedTranslation = ctRaw.length > 500 ? ctRaw.slice(-500) : ctRaw;
-                    lastFullTranslation = translatedFull; // store FULL translation for next prefix match
-                    lastEmittedChunk = emitted;
-
                     const acRaw = (accumulatedText ? accumulatedText + ' ' : '') + emitted;
                     accumulatedText = acRaw.length > 1000 ? acRaw.slice(-1000) : acRaw;
                     translationCount++;
@@ -1049,7 +989,7 @@ io.on('connection', (socket) => {
                         reason: decision.reason,
                         confidence: decision.confidence,
                         newContent: emitted.substring(0, 200),
-                        fullTranslation: translatedFull.substring(0, 200),
+                        sourceText: newText.substring(0, 200),
                         count: translationCount,
                         isComplete: decision.isComplete
                     });

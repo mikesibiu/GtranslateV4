@@ -30,7 +30,7 @@ class TranslationRulesEngine {
         };
 
         // Quality thresholds
-        this.MIN_WORDS_FOR_TRANSLATION = 3;
+        this.MIN_WORDS_FOR_TRANSLATION = 6; // Raised from 3: short chunks lack context for accurate chunk translation
         this.MIN_CHARS_FOR_TRANSLATION = 10;
 
         // Filler words to ignore (language-agnostic common fillers)
@@ -52,7 +52,7 @@ class TranslationRulesEngine {
                 translationInterval: 8000,   // 8 seconds
                 pauseDetectionMs: 4000,      // 4 second pause
                 requireSentenceEnding: false, // Translate even without sentence endings
-                minWords: 3,
+                minWords: 6,
                 enableTTS: false,            // Manual TTS control
                 displayVisualCards: true,    // Show translation cards
                 enableSummary: false
@@ -62,7 +62,7 @@ class TranslationRulesEngine {
                 translationInterval: 8000,   // 8 seconds
                 pauseDetectionMs: 4000,      // 4 second pause
                 requireSentenceEnding: false,
-                minWords: 3,
+                minWords: 6,
                 enableTTS: true,             // Always enable TTS
                 displayVisualCards: false,   // Hide translation cards (audio-only)
                 enableSummary: false

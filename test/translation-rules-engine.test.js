@@ -58,11 +58,11 @@ describe('TranslationRulesEngine', () => {
             expect(quality.reason).to.equal('empty_text');
         });
 
-        it('should reject text that is too short', () => {
-            // Test with 3 short words (meets word count but too short overall)
+        it('should reject text that is too short (too few words)', () => {
+            // With MIN_WORDS=6, short inputs are caught by too_few_words first
             const quality = engine.checkQuality('a b c');
             expect(quality.meetsMinimum).to.be.false;
-            expect(quality.reason).to.equal('too_short');
+            expect(quality.reason).to.equal('too_few_words');
         });
 
         it('should reject text with too few words', () => {
@@ -72,14 +72,14 @@ describe('TranslationRulesEngine', () => {
         });
 
         it('should reject filler words only', () => {
-            const quality = engine.checkQuality('uh um ah');
+            const quality = engine.checkQuality('uh um ah uh um ah');
             expect(quality.meetsMinimum).to.be.false;
             expect(quality.isFillerOnly).to.be.true;
             expect(quality.reason).to.equal('filler_words_only');
         });
 
         it('should accept quality text with minimum words', () => {
-            const quality = engine.checkQuality('this is good text');
+            const quality = engine.checkQuality('this is good quality text here');
             expect(quality.meetsMinimum).to.be.true;
             expect(quality.isFillerOnly).to.be.false;
             expect(quality.reason).to.equal('quality_ok');
@@ -133,7 +133,7 @@ describe('TranslationRulesEngine', () => {
 
         it('should approve translation for complete sentence', () => {
             const decision = engine.shouldTranslate({
-                text: 'This is a complete sentence.',
+                text: 'This is a complete and correct sentence.',
                 isFinal: false,
                 timeSinceLastChange: 0,
                 trigger: 'interim',
@@ -188,7 +188,7 @@ describe('TranslationRulesEngine', () => {
             earbudsEngine.lastTranslationTime = Date.now() - 9000; // >8 seconds ago
 
             const decision = earbudsEngine.shouldTranslate({
-                text: 'this is good enough text',
+                text: 'this is good enough text now',
                 isFinal: false,
                 timeSinceLastChange: 500,
                 trigger: 'interim',
@@ -222,7 +222,7 @@ describe('TranslationRulesEngine', () => {
 
         it('should approve final result with quality text', () => {
             const decision = engine.shouldTranslate({
-                text: 'this is final quality text',
+                text: 'this is final quality text here',
                 isFinal: true,
                 timeSinceLastChange: 1000,
                 trigger: 'final',
@@ -249,7 +249,7 @@ describe('TranslationRulesEngine', () => {
 
         it('should reject final result with filler words only', () => {
             const decision = engine.shouldTranslate({
-                text: 'uh um ah',
+                text: 'uh um ah uh um ah',
                 isFinal: true,
                 timeSinceLastChange: 1000,
                 trigger: 'final',
@@ -376,7 +376,7 @@ describe('TranslationRulesEngine', () => {
         it('should track approval metrics', () => {
             // Approve one translation
             engine.shouldTranslate({
-                text: 'This is a complete sentence.',
+                text: 'This is a complete and correct sentence.',
                 isFinal: false,
                 timeSinceLastChange: 0,
                 trigger: 'interim',
@@ -432,7 +432,7 @@ describe('TranslationRulesEngine', () => {
         it('should calculate approval rate correctly', () => {
             // 1 approved
             engine.shouldTranslate({
-                text: 'This is a sentence.',
+                text: 'This is a very complete sentence.',
                 isFinal: false,
                 timeSinceLastChange: 0,
                 trigger: 'interim',
@@ -472,7 +472,7 @@ describe('TranslationRulesEngine', () => {
         });
 
         it('should handle Romanian filler words', () => {
-            const quality = engine.checkQuality('păi deci adică');
+            const quality = engine.checkQuality('păi deci adică păi deci adică');
             expect(quality.isFillerOnly).to.be.true;
         });
 
