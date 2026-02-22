@@ -613,6 +613,18 @@ io.on('connection', (socket) => {
         'bunătate',
         'bunătatea',
         'cu bunătate',
+        // Biblical people — commonly garbled by STT in JW meeting context
+        'Isaia',       // Isaiah → STT produces "Nisa aia", "zona" etc. for Bible book references
+        'Ieremia',     // Jeremiah
+        'Ezechiel',    // Ezekiel
+        'Avraam',      // Abraham
+        'David',       // King David → STT produced "Daddy" (Yankee) in one session
+        'Iacov',       // Jacob → STT produced "Yankee" in one session
+        'Moise',       // Moses
+        // Biblical Hebrew words in common Romanian JW use
+        'cei răi',     // the wicked ones → STT produced "cei răni" (wounded) — Matthew 5:45
+        'cei drepți',  // the righteous ones
+        'cei buni',    // the good ones
         // Months — Romanian only; 'mai' OMITTED (it's the most common Romanian particle;
         // boosting it globally destroys token-boundary stability throughout every sentence)
         'ianuarie','februarie','martie','aprilie','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie',
