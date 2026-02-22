@@ -1,0 +1,13 @@
+{
+  "name": "jwpub-glossary-builder",
+  "version": "1.0.0",
+  "description": "Builds a Romanian→English JW glossary from .jwpub publication files",
+  "main": "build-glossary-from-jwpub.js",
+  "scripts": {
+    "build": "node build-glossary-from-jwpub.js"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.10",
+    "he": "^1.2.0"
+  }
+}
