@@ -64,6 +64,22 @@ async function createSchema(logger) {
         CREATE INDEX IF NOT EXISTS idx_billing_session_date ON billing_usage(session_date);
         CREATE INDEX IF NOT EXISTS idx_billing_source_language ON billing_usage(source_language);
         CREATE INDEX IF NOT EXISTS idx_billing_created_at ON billing_usage(created_at);
+
+        CREATE TABLE IF NOT EXISTS translation_log (
+            id SERIAL PRIMARY KEY,
+            session_id VARCHAR(64) NOT NULL,
+            client_id VARCHAR(64) NOT NULL,
+            source_text TEXT NOT NULL,
+            translated_text TEXT NOT NULL,
+            source_language VARCHAR(10),
+            target_language VARCHAR(10),
+            translation_reason VARCHAR(40),
+            app_version VARCHAR(20),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tlog_session ON translation_log(session_id);
+        CREATE INDEX IF NOT EXISTS idx_tlog_created_at ON translation_log(created_at);
     `;
 
     try {
@@ -259,6 +275,61 @@ async function purgeOldData(days = 90, logger) {
 }
 
 /**
+ * Log a translation event for debugging and quality review.
+ * Performs lazy cleanup: deletes entries older than 45 minutes before inserting,
+ * and caps the table at 500 rows to stay within free-tier limits.
+ *
+ * @param {Object} entry - Translation event data
+ * @param {string} entry.sessionId  - Unique session identifier
+ * @param {string} entry.clientId   - Socket client ID
+ * @param {string} entry.sourceText - Original (STT) text
+ * @param {string} entry.translatedText - Translated output
+ * @param {string} entry.sourceLanguage - e.g. 'ro-RO'
+ * @param {string} entry.targetLanguage - e.g. 'en'
+ * @param {string} entry.reason     - Decision reason ('sentence_ending', 'max_interval', …)
+ * @param {string} entry.appVersion - e.g. 'v160'
+ */
+async function logTranslation(entry) {
+    if (!pool) return false;
+
+    try {
+        // Lazy cleanup: remove entries older than 45 minutes for this session
+        await pool.query(
+            `DELETE FROM translation_log WHERE created_at < NOW() - INTERVAL '45 minutes'`
+        );
+
+        // Hard cap: keep only the newest 499 rows across all sessions (free-tier safety)
+        await pool.query(`
+            DELETE FROM translation_log WHERE id NOT IN (
+                SELECT id FROM translation_log ORDER BY created_at DESC LIMIT 499
+            )
+        `);
+
+        await pool.query(
+            `INSERT INTO translation_log
+                (session_id, client_id, source_text, translated_text,
+                 source_language, target_language, translation_reason, app_version)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+                entry.sessionId || '',
+                entry.clientId || '',
+                (entry.sourceText || '').substring(0, 1000),
+                (entry.translatedText || '').substring(0, 1000),
+                entry.sourceLanguage || '',
+                entry.targetLanguage || '',
+                entry.reason || '',
+                entry.appVersion || ''
+            ]
+        );
+        return true;
+    } catch (error) {
+        // Non-fatal — don't let logging errors break translation flow
+        console.error('Failed to log translation:', error.message);
+        return false;
+    }
+}
+
+/**
  * Close database connection (for graceful shutdown)
  */
 async function closeDatabase(logger) {
@@ -275,5 +346,6 @@ module.exports = {
     getUsageSummary,
     getDailyUsage,
     purgeOldData,
+    logTranslation,
     closeDatabase
 };

@@ -22,7 +22,7 @@ describe('TranslationRulesEngine', () => {
             const config = engine.getConfig();
 
             expect(config.name).to.equal('Talks');
-            expect(config.translationInterval).to.equal(8000);
+            expect(config.translationInterval).to.equal(15000);
             expect(config.pauseDetectionMs).to.equal(4000);
             expect(config.displayVisualCards).to.be.true;
         });
@@ -32,7 +32,7 @@ describe('TranslationRulesEngine', () => {
             const config = engine.getConfig();
 
             expect(config.name).to.equal('EarBuds');
-            expect(config.translationInterval).to.equal(8000);
+            expect(config.translationInterval).to.equal(15000);
             expect(config.enableTTS).to.be.true;
             expect(config.displayVisualCards).to.be.false;
         });
@@ -165,11 +165,11 @@ describe('TranslationRulesEngine', () => {
 
         beforeEach(() => {
             engine = new TranslationRulesEngine('talks', mockLogger);
-            // Initialize last translation time
-            engine.lastTranslationTime = Date.now() - 11000; // 11 seconds ago
+            // Initialize last translation time (must exceed 15s interval)
+            engine.lastTranslationTime = Date.now() - 16000; // 16 seconds ago
         });
 
-        it('should approve translation when max interval reached (Talks: 8s)', () => {
+        it('should approve translation when max interval reached (Talks: 15s)', () => {
             const decision = engine.shouldTranslate({
                 text: 'this is good enough text for translation',
                 isFinal: false,
@@ -183,9 +183,9 @@ describe('TranslationRulesEngine', () => {
             expect(decision.confidence).to.equal(0.9);
         });
 
-        it('should use different interval for EarBuds mode (8s)', () => {
+        it('should use different interval for EarBuds mode (15s)', () => {
             const earbudsEngine = new TranslationRulesEngine('earbuds', mockLogger);
-            earbudsEngine.lastTranslationTime = Date.now() - 9000; // >8 seconds ago
+            earbudsEngine.lastTranslationTime = Date.now() - 16000; // >15 seconds ago
 
             const decision = earbudsEngine.shouldTranslate({
                 text: 'this is good enough text now',
@@ -520,8 +520,8 @@ describe('TranslationRulesEngine', () => {
         it('should handle continuous speech in Talks mode', () => {
             const engine = new TranslationRulesEngine('talks', mockLogger);
 
-            // Scenario: Speaker talking continuously for 12 seconds
-            engine.lastTranslationTime = Date.now() - 12000;
+            // Scenario: Speaker talking continuously for 16 seconds (beyond 15s max interval)
+            engine.lastTranslationTime = Date.now() - 16000;
 
             const decision = engine.shouldTranslate({
                 text: 'welcome to JW Broadcasting in this program we will see',
@@ -531,7 +531,7 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            // Should translate due to max interval (8s) reached
+            // Should translate due to max interval (15s) reached
             expect(decision.shouldTranslate).to.be.true;
             expect(decision.reason).to.equal('max_interval');
         });
@@ -713,13 +713,13 @@ describe('TranslationRulesEngine', () => {
             expect(isDuplicate).to.be.false;
         });
 
-        it('should clean up old translations after 15 seconds (TRANSLATION_DEDUP_WINDOW)', () => {
+        it('should clean up old translations after 20 seconds (TRANSLATION_DEDUP_WINDOW)', () => {
             const engine = new TranslationRulesEngine('talks', mockLogger);
 
             engine.recordTranslatedOutput('Cartea lui Obadia');
 
             // Manually set old timestamp
-            engine.recentTranslations[0].timestamp = Date.now() - 16000; // 16 seconds ago (beyond 15s window)
+            engine.recentTranslations[0].timestamp = Date.now() - 21000; // 21 seconds ago (beyond 20s window)
 
             // Should not detect as duplicate (too old)
             const isDuplicate = engine.isTranslationDuplicate('Cartea lui Obadia');

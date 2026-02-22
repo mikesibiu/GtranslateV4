@@ -555,8 +555,10 @@ io.on('connection', (socket) => {
     let translationRules = null; // Centralized translation rules engine
     let currentMode = 'talks'; // Persist selected mode across restarts
     let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
-    // (lastEmittedChunk, committedTranslation, lastFullTranslation removed in v157:
-    //  full-text-then-extract architecture replaced with clean chunk translation)
+    // v160: full-text-then-extract restored with the KEY FIX: committedTranslation = translatedFull
+    // (not committedTranslation = prev_committed + emitted, which caused cascade divergence in v155)
+    let committedTranslation = ''; // Full translation emitted so far (reset on session start)
+    let lastFullTranslation = ''; // Last full-transcript translation (for LCP matching)
 
     // Domain-specific STT phrase hints to reduce mis-hearings (e.g., “vestitori”)
     // STT phrase hints — boost domain-specific vocabulary the base model struggles with.
@@ -918,27 +920,75 @@ io.on('connection', (socket) => {
     }
 
     /**
-     * Shared translation logic: always translate the FULL STT transcript for maximum context,
-     * then extract only the new portion using prefix-match then word-proportion fallback.
+     * Extract the unemitted portion of a full translation using word-level LCP matching.
      *
-     * PROVEN DESIGN (v157): Translate each approved chunk independently.
+     * HOW IT WORKS:
+     *   Normalizes both strings (lowercase, strips edge punctuation per word), then counts
+     *   how many words at the START of translatedFull match committedTranslation.
+     *   If ≥60% match, treat that prefix as "committed" and return the tail.
+     *   If <60%, return null — caller falls back to chunk-only translation.
      *
-     * WHY NOT full-text-then-extract (v150–v156):
-     *   Translating the full accumulated STT transcript and extracting the "new portion"
-     *   via LCP/prefix matching was tried extensively (v150–v156) and proved unreliable.
-     *   Google Translate is non-deterministic — punctuation, capitalisation, and synonym
-     *   variation between calls causes prefix matching to fail ~50% of the time.
-     *   When the fallback (chunk retranslation) fires, committedTranslation diverges from
-     *   translatedFull, which causes every subsequent prefix match to also fail — a cascade.
+     * KEY FIX vs v155:
+     *   Caller must set committedTranslation = translatedFull (not += emitted).
+     *   This ensures each call compares the ENTIRE previous full translation against the
+     *   new full translation — no divergence cascade.
      *
-     * WHY chunk translation works:
-     *   The approved chunk (decision.newText) is typically 8–20 words — enough context for
-     *   the translation model to make correct term choices. The glossary handles systematic
-     *   domain terms (congregation, convention, publisher). Term mappings handle residual
-     *   edge cases. No state divergence, no extraction, no LCP math.
+     * @param {string} translatedFull - Translation of the full STT transcript
+     * @param {string} committedTranslation - Full translation from the previous call
+     * @returns {string|null} New tail to emit, or null if LCP ratio < 60%
+     */
+    function extractByWordLCP(translatedFull, committedTranslation) {
+        const trimmedFull = translatedFull.trim();
+        const trimmedCommitted = committedTranslation.trim();
+        if (!trimmedCommitted) return trimmedFull;
+        if (!trimmedFull) return null;
+
+        // Normalize: split on whitespace, strip leading/trailing punctuation, lowercase
+        const normalizeWords = (s) =>
+            s.split(/\s+/)
+             .map(w => w.toLowerCase().replace(/^[^\w]+|[^\w]+$/g, ''))
+             .filter(w => w.length > 0);
+
+        const committedNorm = normalizeWords(trimmedCommitted);
+        const fullNorm = normalizeWords(trimmedFull);
+        const fullOrigWords = trimmedFull.split(/\s+/); // Preserve original case/punctuation
+
+        if (committedNorm.length === 0) return trimmedFull;
+        if (fullNorm.length <= committedNorm.length) return null; // Nothing new
+
+        // Count consecutive matching words from the start
+        let matchCount = 0;
+        for (let i = 0; i < committedNorm.length && i < fullNorm.length; i++) {
+            if (fullNorm[i] === committedNorm[i]) {
+                matchCount++;
+            } else {
+                break;
+            }
+        }
+
+        const matchRatio = matchCount / committedNorm.length;
+        if (matchRatio < 0.6) return null; // LCP match failed
+
+        const tail = fullOrigWords.slice(matchCount).join(' ').trim();
+        return tail || null;
+    }
+
+    /**
+     * Full-text translation with LCP extraction (v160).
      *
-     * @param {string} fullText - Full STT transcript (used only to update lastTranslatedText)
-     * @param {Object} decision - Decision object from shouldTranslate(); decision.newText is translated
+     * Sends the full STT transcript to Google Translate for maximum context quality,
+     * then extracts only the new (unemitted) portion using word-level LCP matching.
+     *
+     * KEY FIX vs v155: committedTranslation = translatedFull (not += emitted),
+     * so each subsequent LCP match compares the whole previous full translation —
+     * eliminating the divergence cascade that broke v150–v156.
+     *
+     * Fallback: if LCP match ratio < 60%, translates decision.newText (the delta chunk)
+     * directly — same as v157. committedTranslation is still set to translatedFull so
+     * the next attempt has a clean baseline.
+     *
+     * @param {string} fullText - Full STT transcript for this utterance
+     * @param {Object} decision - Decision object from shouldTranslate()
      * @param {boolean} clearInterim - If true, clear lastInterimText after a complete translation
      */
     async function performTranslation(fullText, decision, clearInterim = false) {
@@ -950,29 +1000,66 @@ io.on('connection', (socket) => {
 
         translationInFlight = true;
         try {
-            logger.debug('🔤 Translating chunk', {
+            // ── Step 1: Translate the FULL current transcript for maximum context ──
+            const translatedFull = await translateWithRetry(fullText.trim(), targetLanguage, currentLanguage, clientId);
+
+            logger.debug('🔤 Full-text translation', {
                 clientId,
-                newText: newText.substring(0, 120),
-                words: newText.trim().split(/\s+/).length
+                fullTextWords: fullText.trim().split(/\s+/).length,
+                newTextWords: newText.split(/\s+/).length,
+                hasCommitted: !!committedTranslation,
+                committedWords: committedTranslation ? committedTranslation.split(/\s+/).length : 0
             });
 
-            // Translate only the new chunk — single API call, no extraction needed.
-            const translated = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
-            let emitted = translated.trim();
+            // ── Step 2: Extract only the NEW portion via word-level LCP ──
+            let emitted = null;
+            let usedLCP = false;
 
-            // Apply domain term mappings and preserve numeric/date fidelity
-            emitted = applyTermMappings(emitted, newText);
+            if (committedTranslation) {
+                const tail = extractByWordLCP(translatedFull, committedTranslation);
+                if (tail) {
+                    emitted = tail;
+                    usedLCP = true;
+                    logger.debug('✂️ LCP extraction succeeded', { clientId, tailWords: tail.split(/\s+/).length });
+                } else {
+                    logger.info('⚠️ LCP extraction failed (<60% match) — falling back to chunk translation', {
+                        clientId,
+                        committedPreview: committedTranslation.substring(0, 60),
+                        fullPreview: translatedFull.substring(0, 60)
+                    });
+                }
+            } else {
+                // First translation in this session — emit entire full translation
+                emitted = translatedFull.trim();
+                usedLCP = true;
+            }
+
+            // ── Fallback: chunk-only translation when LCP fails ──
+            if (!emitted) {
+                const chunkTranslated = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
+                emitted = chunkTranslated.trim();
+            }
+
+            // ── KEY FIX: committedTranslation = translatedFull (not += emitted) ──
+            // This prevents the divergence cascade that broke v150-v156:
+            // each subsequent LCP starts from the WHOLE previous full translation.
+            committedTranslation = translatedFull;
+            lastFullTranslation = translatedFull;
+
+            // ── Step 3: Post-processing ──
+            // Apply domain term mappings using fullText for source-aware fixes
+            emitted = applyTermMappings(emitted, fullText);
             emitted = preserveSourceNumbers(newText, emitted);
             emitted = preserveDates(newText, emitted);
 
-            // If translation is identical to source for a known tricky word, apply fallback
+            // Single-word fallback translation
             const normalizedSource = newText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
             const normalizedEmitted = emitted.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
             if (normalizedSource === normalizedEmitted && FALLBACK_TRANSLATIONS[normalizedSource]) {
                 emitted = FALLBACK_TRANSLATIONS[normalizedSource];
             }
 
-            // Update source tracking (used by getNewText() to find the next delta)
+            // Update source tracking
             const ltRaw = `${lastTranslatedText} ${newText}`.trim();
             lastTranslatedText = ltRaw.length > 2000 ? ltRaw.slice(-2000) : ltRaw;
             lastTranslationTime = Date.now();
@@ -1000,6 +1087,7 @@ io.on('connection', (socket) => {
                         clientId,
                         reason: decision.reason,
                         confidence: decision.confidence,
+                        method: usedLCP ? 'full+lcp' : 'chunk_fallback',
                         newContent: emitted.substring(0, 200),
                         sourceText: newText.substring(0, 200),
                         count: translationCount,
@@ -1016,6 +1104,18 @@ io.on('connection', (socket) => {
                         isInterim: !decision.isComplete,
                         reason: decision.reason
                     });
+
+                    // Persist to translation_log for debugging (fire-and-forget)
+                    billingDb.logTranslation({
+                        sessionId: clientId,
+                        clientId: clientId,
+                        sourceText: newText,
+                        translatedText: emitted,
+                        sourceLanguage: currentLanguage,
+                        targetLanguage: targetLanguage,
+                        reason: decision.reason,
+                        appVersion: 'v160'
+                    }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;
                 }
@@ -1053,6 +1153,8 @@ io.on('connection', (socket) => {
                 accumulatedText = '';
                 translationCount = 0;
                 restartAttempts = 0; // Reset restart counter on new session
+                committedTranslation = ''; // Reset full-context translation state for new session
+                lastFullTranslation = '';
             }
 
             sessionActive = true;

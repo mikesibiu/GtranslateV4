@@ -19,7 +19,7 @@ class TranslationRulesEngine {
 
         // Post-translation duplicate detection (CRITICAL FIX)
         this.recentTranslations = []; // Array of {text, timestamp}
-        this.TRANSLATION_DEDUP_WINDOW = 15000; // BUG-20: was 30s — too long for 8s interval; legitimate repeated phrases were blocked
+        this.TRANSLATION_DEDUP_WINDOW = 20000; // Raised from 15s: interval is now 15s so dedup window must be wider
 
         // Decision metrics
         this.metrics = {
@@ -49,7 +49,7 @@ class TranslationRulesEngine {
         const configs = {
             talks: {
                 name: 'Talks',
-                translationInterval: 8000,   // 8 seconds
+                translationInterval: 15000,  // 15 seconds (raised from 8s for fast-speaker context)
                 pauseDetectionMs: 4000,      // 4 second pause
                 requireSentenceEnding: false, // Translate even without sentence endings
                 minWords: 6,
@@ -59,7 +59,7 @@ class TranslationRulesEngine {
             },
             earbuds: {
                 name: 'EarBuds',
-                translationInterval: 8000,   // 8 seconds
+                translationInterval: 15000,  // 15 seconds (raised from 8s for fast-speaker context)
                 pauseDetectionMs: 4000,      // 4 second pause
                 requireSentenceEnding: false,
                 minWords: 6,
