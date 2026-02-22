@@ -156,7 +156,7 @@ const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
 const parent = projectId ? `projects/${projectId}/locations/${location}` : null;
 const glossaryId = 'ro-en-religious-terms';
 const glossaryPath = parent ? `${parent}/glossaries/${glossaryId}` : null;
-const glossaryEnabled = process.env.GLOSSARY_ENABLED !== 'false'; // enabled by default; set GLOSSARY_ENABLED=false to disable
+const glossaryEnabled = process.env.GLOSSARY_ENABLED === 'true'; // opt-in only: set GLOSSARY_ENABLED=true to enable
 const translationModel = process.env.TRANSLATION_MODEL || 'advanced';
 
 if (!projectId) {
@@ -1108,7 +1108,16 @@ io.on('connection', (socket) => {
                                           error.message.includes('maximum allowed stream duration') ||
                                           error.message.includes('Exceeded maximum allowed stream duration');
 
+                    // "Audio Timeout" means Google got no audio for ~10s (silence: prayer, song, break).
+                    // This is NOT a real error — reset the restart counter so silence never kills the stream.
+                    const isAudioTimeout = error.message.includes('Audio Timeout') ||
+                                          error.message.includes('Long duration elapsed without audio');
+
                     if (isStreamTimeout && sessionActive) {
+                        if (isAudioTimeout) {
+                            logger.info('🔇 Audio timeout (silence detected) — resetting restart counter', { clientId });
+                            restartAttempts = 0; // Silence is not a failure; don't count toward max
+                        }
                         logger.info('🔄 Stream timeout detected, auto-restarting...', { clientId });
                         scheduleAutoRestart();
                     } else {
