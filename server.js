@@ -783,7 +783,10 @@ io.on('connection', (socket) => {
             { pattern: /\bvestitori\b/gi, replacement: 'publishers' },
             { pattern: /\bMartorii lui Iehova\b/gi, replacement: "Jehovah's Witnesses" },
             { pattern: /\bnume nou\b/gi, replacement: 'new name' },
-            { pattern: /\bnume noi\b/gi, replacement: 'new names' }
+            { pattern: /\bnume noi\b/gi, replacement: 'new names' },
+            // "congres" is a JW convention, not a political congress
+            { pattern: /\bcongresses\b/gi, replacement: 'conventions' },
+            { pattern: /\bcongress\b/gi, replacement: 'convention' },
         ];
 
         let result = text;
