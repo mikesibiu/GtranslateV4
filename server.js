@@ -239,7 +239,8 @@ const io = socketIo(server, {
             const allowedOrigins = [
                 'http://localhost:3003',
                 'http://127.0.0.1:3003',
-                'https://gtranslate-v4-96dfeefd9842.herokuapp.com'
+                'https://gtranslate-v4-96dfeefd9842.herokuapp.com',
+                'https://gtranslate.farace.net'
             ];
 
             // Also allow Heroku app URL from environment
