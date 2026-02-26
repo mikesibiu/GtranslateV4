@@ -854,6 +854,9 @@ io.on('connection', (socket) => {
             // "congres" is a JW convention, not a political congress
             { pattern: /\bcongresses\b/gi, replacement: 'conventions' },
             { pattern: /\bcongress\b/gi, replacement: 'convention' },
+            // Bible reference format: Romanian "Proverbe de 7,3" → translated "Proverbs of 7,3"
+            // → should be "Proverbs 7:3". Pattern: CapitalizedWord + "of" + N,M → N:M
+            { pattern: /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+of\s+(\d+)[,.](\d+)\b/g, replacement: '$1 $2:$3' },
         ];
 
         let result = text;
