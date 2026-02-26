@@ -895,6 +895,13 @@ io.on('connection', (socket) => {
             result = result.replace(/\bmoney\b/gi, 'kindness');
         }
 
+        // Source-aware fix: "romani" in Romanian = Romani people/language (Roma), not Romans.
+        // JW meetings regularly reference "limba romani" (Romani language) and "frații romani"
+        // (Romani brothers). Exception: "cartea Romani" = the biblical book of Romans.
+        if (/\bromani\b/i.test(sourceText) && !/cart(?:ea)?\s+romani\b/i.test(sourceText)) {
+            result = result.replace(/\bRomans\b/g, 'Romani');
+        }
+
         return result;
     }
 
