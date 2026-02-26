@@ -898,6 +898,19 @@ io.on('connection', (socket) => {
             result = result.replace(/\bmoney\b/gi, 'kindness');
         }
 
+        // Source-aware fix: "cu siguranță" = certainly/surely (adverb), NOT "safety" (noun).
+        // Google/Claude maps "siguranță" to "safety" but "cu siguranță" is the adverb "certainly".
+        if (/cu\s+siguranță/i.test(sourceText)) {
+            result = result.replace(/\bSafety\b/g, 'Certainly');
+            result = result.replace(/\bsafety\b/g, 'certainly');
+        }
+
+        // Grammar fix: "say/says [pronoun]" → "tell/tells [pronoun]".
+        // Romanian "a spune cuiva" (to tell someone) translates literally as "say me/you/him"
+        // but English requires "tell" when a personal object follows.
+        result = result.replace(/\bsays\s+(me|us|him|her|them|you)\b/gi, 'tells $1');
+        result = result.replace(/\bsay\s+(me|us|him|her|them|you)\b/gi, 'tell $1');
+
         // Collapse consecutive duplicate 2-3 word phrases (e.g. "you can't you can't" → "you can't").
         // Caused by Romanian emphasis doubling ("nu poți nu poți") or stream restart repeats.
         result = result.replace(/\b([\w']+(?:\s+[\w']+){1,2})\s+\1\b/gi, '$1');
