@@ -898,6 +898,10 @@ io.on('connection', (socket) => {
             result = result.replace(/\bmoney\b/gi, 'kindness');
         }
 
+        // Collapse consecutive duplicate 2-3 word phrases (e.g. "you can't you can't" → "you can't").
+        // Caused by Romanian emphasis doubling ("nu poți nu poți") or stream restart repeats.
+        result = result.replace(/\b([\w']+(?:\s+[\w']+){1,2})\s+\1\b/gi, '$1');
+
         // Source-aware fix: "conștiință curată" = clean conscience (curată = adjective "clean/pure").
         // Claude sometimes picks the verb "cleanse" instead of the adjective "clean".
         if (/conștiință/i.test(sourceText)) {
@@ -1073,8 +1077,8 @@ io.on('connection', (socket) => {
      * HOW IT WORKS:
      *   Normalizes both strings (lowercase, strips edge punctuation per word), then counts
      *   how many words at the START of translatedFull match committedTranslation.
-     *   If ≥60% match, treat that prefix as "committed" and return the tail.
-     *   If <60%, return null — caller falls back to chunk-only translation.
+     *   If ≥50% match, treat that prefix as "committed" and return the tail.
+     *   If <50%, return null — caller emits the full translation (full context preserved).
      *
      * KEY FIX vs v155:
      *   Caller must set committedTranslation = translatedFull (not += emitted).
@@ -1083,7 +1087,7 @@ io.on('connection', (socket) => {
      *
      * @param {string} translatedFull - Translation of the full STT transcript
      * @param {string} committedTranslation - Full translation from the previous call
-     * @returns {string|null} New tail to emit, or null if LCP ratio < 60%
+     * @returns {string|null} New tail to emit, or null if LCP ratio < 50%
      */
     function extractByWordLCP(translatedFull, committedTranslation) {
         const trimmedFull = translatedFull.trim();
@@ -1115,7 +1119,7 @@ io.on('connection', (socket) => {
         }
 
         const matchRatio = matchCount / committedNorm.length;
-        if (matchRatio < 0.6) return null; // LCP match failed
+        if (matchRatio < 0.5) return null; // LCP match failed
 
         const tail = fullOrigWords.slice(matchCount).join(' ').trim();
         return tail || null;
@@ -1170,7 +1174,7 @@ io.on('connection', (socket) => {
                     usedLCP = true;
                     logger.debug('✂️ LCP extraction succeeded', { clientId, tailWords: tail.split(/\s+/).length });
                 } else {
-                    logger.info('⚠️ LCP extraction failed (<60% match) — falling back to chunk translation', {
+                    logger.info('⚠️ LCP extraction failed (<50% match) — emitting full translation', {
                         clientId,
                         committedPreview: committedTranslation.substring(0, 60),
                         fullPreview: translatedFull.substring(0, 60)
@@ -1182,10 +1186,11 @@ io.on('connection', (socket) => {
                 usedLCP = true;
             }
 
-            // ── Fallback: chunk-only translation when LCP fails ──
+            // ── Fallback: LCP failed — emit full translation (full context preserved) ──
+            // v127 behavior: never translate chunks in isolation. A decontextualized chunk
+            // translation loses grammatical context and produces broken English.
             if (!emitted) {
-                const chunkTranslated = await translateWithRetry(newText, targetLanguage, currentLanguage, clientId);
-                emitted = chunkTranslated.trim();
+                emitted = translatedFull.trim();
             }
 
             // ── KEY FIX: committedTranslation = translatedFull (not += emitted) ──
@@ -1236,7 +1241,7 @@ io.on('connection', (socket) => {
                         clientId,
                         reason: decision.reason,
                         confidence: decision.confidence,
-                        method: usedLCP ? 'full+lcp' : 'chunk_fallback',
+                        method: usedLCP ? 'full+lcp' : 'full+lcp_failed',
                         newContent: emitted.substring(0, 200),
                         sourceText: newText.substring(0, 200),
                         count: translationCount,
