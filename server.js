@@ -895,6 +895,16 @@ io.on('connection', (socket) => {
             result = result.replace(/\bmoney\b/gi, 'kindness');
         }
 
+        // Source-aware fix: "conștiință curată" = clean conscience (curată = adjective "clean/pure").
+        // Claude sometimes picks the verb "cleanse" instead of the adjective "clean".
+        if (/conștiință/i.test(sourceText)) {
+            result = result.replace(/\bcleanse\s+conscience\b/gi, 'clean conscience');
+        }
+
+        // Fix noun/verb confusion: "will/can/could/etc. Decision" → "decide".
+        // Claude occasionally uses the noun "Decision" after modal verbs instead of the verb.
+        result = result.replace(/\b(will|can|could|might|may|should|would|to)\s+Decision\b/g, '$1 decide');
+
         // Source-aware fix: "romani" in Romanian = Romani people/language (Roma), not Romans.
         // JW meetings regularly reference "limba romani" (Romani language) and "frații romani"
         // (Romani brothers). Exception: "cartea Romani" = the biblical book of Romans.
