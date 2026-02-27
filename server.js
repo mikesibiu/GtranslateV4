@@ -33,6 +33,12 @@ const MAX_AUDIO_CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
 const STREAM_DURATION_LIMIT_MS = 290000; // Proactive restart at 290s (Google limit is ~305s)
 
 const APP_PASSWORD = process.env.APP_PASSWORD || null;
+
+// Guard: SESSION_SECRET must be set in production — hardcoded fallback is a security hole
+if (NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+    console.error('FATAL: SESSION_SECRET environment variable is not set. Refusing to start in production.');
+    process.exit(1);
+}
 const sessionMiddleware = session({
     secret: process.env.SESSION_SECRET || 'gtranslate-dev-secret',
     resave: false,
@@ -612,6 +618,7 @@ io.on('connection', (socket) => {
     const INACTIVITY_TIMEOUT_MS = INACTIVITY_TIMEOUT; // Use config value
     let isRestarting = false; // Prevent race conditions during auto-restart
     let translationInFlight = false; // Prevent concurrent translations (race condition fix)
+    let pendingTranslation = null; // Deferred final translation waiting for in-flight to complete
     let restartTimeout = null; // Track the scheduled restart timeout
     let restartAttempts = 0; // Track restart attempts
     const MAX_RESTART_ATTEMPTS = 10; // Maximum auto-restart attempts
@@ -734,6 +741,7 @@ io.on('connection', (socket) => {
     function cleanupStream() {
         isRestarting = false; // Cancel any pending auto-restart
         translationInFlight = false; // Reset so new sessions aren't blocked
+        pendingTranslation = null; // Discard any deferred translation
         lastTranslatedText = '';
         lastInterimText = ''; // BUG-13: prevent stale pause-timer retranslation after restart
 
@@ -821,11 +829,11 @@ io.on('connection', (socket) => {
         restartTimeout = setTimeout(() => {
             restartTimeout = null;
             if (sessionActive && isRestarting) {
-                isRestarting = false;
+                // isRestarting cleared inside createRecognitionStream after buffer flush (TOCTOU fix)
                 createRecognitionStream(currentLanguage, targetLanguage, translationInterval, currentMode, true)
                     .catch((error) => {
                         logger.error('Failed to restart stream', { clientId, error: error.message });
-                        isRestarting = false;
+                        isRestarting = false; // Clear on error so audio stops buffering
                     });
             } else {
                 isRestarting = false;
@@ -1090,8 +1098,8 @@ io.on('connection', (socket) => {
      * HOW IT WORKS:
      *   Normalizes both strings (lowercase, strips edge punctuation per word), then counts
      *   how many words at the START of translatedFull match committedTranslation.
-     *   If ≥50% match, treat that prefix as "committed" and return the tail.
-     *   If <50%, return null — caller emits the full translation (full context preserved).
+     *   If ≥75% match, treat that prefix as "committed" and return the tail.
+     *   If <75%, return null — caller emits the full translation (full context preserved).
      *
      * KEY FIX vs v155:
      *   Caller must set committedTranslation = translatedFull (not += emitted).
@@ -1100,7 +1108,7 @@ io.on('connection', (socket) => {
      *
      * @param {string} translatedFull - Translation of the full STT transcript
      * @param {string} committedTranslation - Full translation from the previous call
-     * @returns {string|null} New tail to emit, or null if LCP ratio < 50%
+     * @returns {string|null} New tail to emit, or null if LCP ratio < 75%
      */
     function extractByWordLCP(translatedFull, committedTranslation) {
         const trimmedFull = translatedFull.trim();
@@ -1132,7 +1140,7 @@ io.on('connection', (socket) => {
         }
 
         const matchRatio = matchCount / committedNorm.length;
-        if (matchRatio < 0.5) return null; // LCP match failed
+        if (matchRatio < 0.75) return null; // LCP match failed (threshold: 75%)
 
         const tail = fullOrigWords.slice(matchCount).join(' ').trim();
         return tail || null;
@@ -1187,7 +1195,7 @@ io.on('connection', (socket) => {
                     usedLCP = true;
                     logger.debug('✂️ LCP extraction succeeded', { clientId, tailWords: tail.split(/\s+/).length });
                 } else {
-                    logger.info('⚠️ LCP extraction failed (<50% match) — emitting full translation', {
+                    logger.info('⚠️ LCP extraction failed (<75% match) — emitting full translation', {
                         clientId,
                         committedPreview: committedTranslation.substring(0, 60),
                         fullPreview: translatedFull.substring(0, 60)
@@ -1304,6 +1312,15 @@ io.on('connection', (socket) => {
             });
         } finally {
             translationInFlight = false;
+            // Run any pending final translation that was deferred while we were in-flight
+            if (pendingTranslation && sessionActive) {
+                const { transcript: pt, decision: pd } = pendingTranslation;
+                pendingTranslation = null;
+                logger.info('▶️ Running deferred pending translation', { clientId, preview: pt.substring(0, 60) });
+                performTranslation(pt, pd, true).catch(err => {
+                    logger.error('Deferred translation error', { clientId, error: err.message });
+                });
+            }
         }
     }
 
@@ -1492,6 +1509,11 @@ io.on('connection', (socket) => {
                             // Skip if another translation is already in flight (prevents race conditions)
                             if (translationInFlight) {
                                 logger.debug('⏳ Translation in flight, deferring', { clientId });
+                                // For final results, save the latest deferred translation to run after in-flight completes
+                                if (isFinal) {
+                                    pendingTranslation = { transcript, decision };
+                                    logger.info('📋 Queued pending final translation', { clientId, preview: transcript.substring(0, 60) });
+                                }
                             } else {
                             // Clear any pending pause timer - we're translating now
                             if (restartStreamTimer) {
@@ -1571,6 +1593,11 @@ io.on('connection', (socket) => {
                 audioBufferDuringRestart = []; // Clear buffer
                 audioBufferWarned = false;
             }
+
+            // TOCTOU fix: clear isRestarting AFTER stream is ready and buffer is flushed.
+            // Previously this was cleared before createRecognitionStream was called, leaving a
+            // window where audio was neither buffered nor written to the new stream.
+            isRestarting = false;
 
             socket.emit('streaming-started', {
                 sourceLanguage: currentLanguage,
