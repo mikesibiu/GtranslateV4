@@ -1,13 +1,13 @@
 /**
- * GTranslate V4 Server
- * Real-time speech translation using Google Cloud Speech-to-Text API
- * Stream proactively restarts at 290s (Google Cloud limit is ~305s)
+ * NovaTranslate Server
+ * Real-time speech translation using Deepgram Nova-3 STT + Google Cloud Translation
+ * Deepgram WebSocket connections are long-lived — no session time limit
  */
 
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const speech = require('@google-cloud/speech');
+const { createClient: createDeepgramClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
 const { TranslationServiceClient } = require('@google-cloud/translate').v3;
 const winston = require('winston');
 const path = require('path');
@@ -30,7 +30,7 @@ const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || '50');
 const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || '5');
 const INACTIVITY_TIMEOUT = parseInt(process.env.INACTIVITY_TIMEOUT || String(30 * 60 * 1000));
 const MAX_AUDIO_CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
-const STREAM_DURATION_LIMIT_MS = 290000; // Proactive restart at 290s (Google limit is ~305s)
+// NOTE: No stream duration limit — Deepgram connections are long-lived (no 305s Google gRPC limit)
 
 const APP_PASSWORD = process.env.APP_PASSWORD || null;
 
@@ -162,9 +162,13 @@ if (googleCredentials) {
 }
 
 // ===== INITIALIZE GOOGLE CLOUD CLIENTS =====
-const speechClient = googleCredentials
-    ? new speech.SpeechClient({ credentials: googleCredentials })
-    : new speech.SpeechClient();
+// ===== DEEPGRAM CLIENT =====
+const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+if (!DEEPGRAM_API_KEY && NODE_ENV === 'production') {
+    logger.error('❌ DEEPGRAM_API_KEY not set — NovaTranslate cannot start in production');
+    process.exit(1);
+}
+const deepgramClient = DEEPGRAM_API_KEY ? createDeepgramClient(DEEPGRAM_API_KEY) : null;
 
 const translateClient = googleCredentials
     ? new TranslationServiceClient({ credentials: googleCredentials })
@@ -198,7 +202,11 @@ if (!projectId) {
     process.exit(1);
 }
 
-logger.info('✅ Google Cloud Speech-to-Text client initialized');
+if (deepgramClient) {
+    logger.info('✅ Deepgram Nova-3 client initialized');
+} else {
+    logger.warn('⚠️ DEEPGRAM_API_KEY not set — STT unavailable (dev mode)');
+}
 logger.info('✅ Google Cloud Translation v3 client initialized', {
     projectId,
     location,
@@ -602,110 +610,31 @@ io.on('connection', (socket) => {
         ipConnections: ipConnections + 1
     });
 
-    let recognizeStream = null;
+    let dgConnection = null; // Active Deepgram live-transcription connection
     let currentLanguage = 'ro-RO';
     let targetLanguage = 'en';
     let accumulatedText = '';
     let translationCount = 0;
     let sessionActive = false;
-    let restartStreamTimer = null;
+    let restartStreamTimer = null; // Pause detection timer
     let lastInterimText = '';
-    let lastTranslationTime = null; // Track when last translation happened for 15s max interval
-    let lastTranslatedText = ''; // Track concatenated source text already translated
-    let translationInterval = 6000; // Store translation interval for restarts
+    let lastTranslationTime = null;
+    let lastTranslatedText = '';
+    let translationInterval = 6000;
     let lastActivityTime = Date.now();
     let inactivityTimer = null;
-    const INACTIVITY_TIMEOUT_MS = INACTIVITY_TIMEOUT; // Use config value
-    let isRestarting = false; // Prevent race conditions during auto-restart
-    let translationInFlight = false; // Prevent concurrent translations (race condition fix)
+    const INACTIVITY_TIMEOUT_MS = INACTIVITY_TIMEOUT;
+    let translationInFlight = false; // Prevent concurrent translations
     let pendingTranslation = null; // Deferred final translation waiting for in-flight to complete
-    let restartTimeout = null; // Track the scheduled restart timeout
-    let restartAttempts = 0; // Track restart attempts
-    const MAX_RESTART_ATTEMPTS = 10; // Maximum auto-restart attempts
-    let audioBufferDuringRestart = []; // Buffer audio during stream restarts
-    let audioBufferWarned = false; // Flag to log buffer-full warning only once
-    let streamDurationTimer = null; // Proactive restart timer (290s)
-    const MAX_AUDIO_BUFFER_SIZE = 50; // Max chunks to buffer (prevent memory issues)
-    let translationRules = null; // Centralized translation rules engine
-    let currentMode = 'talks'; // Persist selected mode across restarts
-    let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
-    // v160: full-text-then-extract restored with the KEY FIX: committedTranslation = translatedFull
-    // (not committedTranslation = prev_committed + emitted, which caused cascade divergence in v155)
-    let committedTranslation = ''; // Full translation emitted so far (reset on session start)
-    let lastFullTranslation = ''; // Last full-transcript translation (for LCP matching)
+    let translationRules = null;
+    let currentMode = 'talks';
+    let lastTextChangeTime = Date.now();
+    // LCP state: committedTranslation = full translation from previous call (reset on session start)
+    let committedTranslation = '';
+    let lastFullTranslation = '';
 
-    // Domain-specific STT phrase hints to reduce mis-hearings (e.g., “vestitori”)
-    // STT phrase hints — boost domain-specific vocabulary the base model struggles with.
-    //
-    // RULES FOR THIS LIST:
-    //  1. Only include words/phrases that actually fail without hints.
-    //  2. Prefer multi-word phrases over single tokens — single-token hints cause the
-    //     decoder to commit early, then decode the NEXT word with weakened beam energy,
-    //     producing garbles in the immediately following word (confirmed root cause).
-    //  3. NEVER include high-frequency Romanian function words or particles.
-    //     “mai” (meaning “more/also/still”) appears in virtually every sentence;
-    //     boosting it at any level creates a global attractor that garbles adjacent tokens.
-    //  4. Boost is set to 10 (half of Google's documented max of 20). Max boost=20
-    //     explicitly increases false positives per Google documentation.
-    const STT_PHRASE_HINTS = [
-        'vestitori',
-        'Martorii lui Iehova',
-        // Convention vocabulary — use only multi-word forms to avoid early-commit garbling
-        // (single-token 'congres'/'congrese' removed: they caused adjacent-word substitutions)
-        'congres special',
-        'congrese speciale',
-        'congres regional',
-        'congrese regionale',
-        'congres de circuit',
-        'congrese de circuit',
-        'asistența totală',
-        'glosar',
-        'traducere',
-        'EarBuds',
-        'gheață',
-        'gheată',
-        'Noua Zeelandă',
-        'New Zealand',
-        'New York',
-        'New World',
-        'nume nou',
-        'nume noi',
-        // Joy/rejoice vocabulary — prevents “bucuriei” → English “rejoice” code-switch
-        'bucurie',
-        'bucuriei',
-        'bucurați-vă',
-        'bucurați',
-        'cartea bucuriei',
-        // Congregation — prevents STT code-switch and helps Translation API pick “congregation” not “church”
-        'congregație',
-        'congregației',
-        'congregațiile',
-        'congregații',
-        // Location/context terms
-        'domiciliu',   // prevents mishearing as “domesti” (house arrest / home territory)
-        'Domești',     // Romanian village name (JW preaching territory reports)
-        'Tongo',       // stadium/venue name (STT garbles to “Togo” — country in Africa)
-        // Hospitality/kindness vocabulary — prevents “bunătate” (kindness) → “bani” (money)
-        'bunătate',
-        'bunătatea',
-        'cu bunătate',
-        // Biblical people — commonly garbled by STT in JW meeting context
-        'Isaia',       // Isaiah → STT produces "Nisa aia", "zona" etc. for Bible book references
-        'Ieremia',     // Jeremiah
-        'Ezechiel',    // Ezekiel
-        'Avraam',      // Abraham
-        'David',       // King David → STT produced "Daddy" (Yankee) in one session
-        'Iacov',       // Jacob → STT produced "Yankee" in one session
-        'Moise',       // Moses
-        // Biblical Hebrew words in common Romanian JW use
-        'cei răi',     // the wicked ones → STT produced "cei răni" (wounded) — Matthew 5:45
-        'cei drepți',  // the righteous ones
-        'cei buni',    // the good ones
-        // Months — Romanian only; 'mai' OMITTED (it's the most common Romanian particle;
-        // boosting it globally destroys token-boundary stability throughout every sentence)
-        'ianuarie','februarie','martie','aprilie','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie',
-        'january','february','march','april','may','june','july','august','september','october','november','december'
-    ];
+    // NOTE: STT_PHRASE_HINTS removed — Deepgram Nova-3 handles domain vocabulary natively
+    // with its superior language model. No custom hints needed (7.6% WER vs Google's 13.1%).
 
     // Helper function to update last activity time
     function updateActivity() {
@@ -727,7 +656,7 @@ io.on('connection', (socket) => {
                 });
 
                 sessionActive = false;
-                cleanupStream();
+                cleanupConnection();
 
                 socket.emit('session-timeout', {
                     message: `Session stopped due to ${Math.floor(INACTIVITY_TIMEOUT_MS / 60000)} minutes of inactivity`,
@@ -737,108 +666,25 @@ io.on('connection', (socket) => {
         }
     }
 
-    // Helper function to clean up stream properly
-    function cleanupStream() {
-        isRestarting = false; // Cancel any pending auto-restart
+    // Helper function to clean up Deepgram connection properly
+    function cleanupConnection() {
         translationInFlight = false; // Reset so new sessions aren't blocked
         pendingTranslation = null; // Discard any deferred translation
         lastTranslatedText = '';
-        lastInterimText = ''; // BUG-13: prevent stale pause-timer retranslation after restart
+        lastInterimText = ''; // prevent stale pause-timer retranslation after restart
 
-        // Cancel proactive stream duration timer
-        if (streamDurationTimer) {
-            clearTimeout(streamDurationTimer);
-            streamDurationTimer = null;
-        }
-
-        // Cancel any pending restart timeout
-        if (restartTimeout) {
-            clearTimeout(restartTimeout);
-            restartTimeout = null;
-        }
-
-        if (recognizeStream) {
+        if (dgConnection) {
             try {
-                // Remove all event listeners to prevent memory leaks
-                recognizeStream.removeAllListeners('error');
-                recognizeStream.removeAllListeners('end');
-                recognizeStream.removeAllListeners('close');
-                recognizeStream.removeAllListeners('data');
-                recognizeStream.removeAllListeners('pipe');
-                recognizeStream.removeAllListeners('unpipe');
-
-                // End the stream if it's still writable
-                if (recognizeStream.writable) {
-                    recognizeStream.end();
-                }
-
-                recognizeStream = null;
+                dgConnection.removeAllListeners();
+                dgConnection.finish();
             } catch (error) {
-                logger.error('Error cleaning up stream', {
+                logger.error('Error cleaning up Deepgram connection', {
                     clientId,
                     error: error.message
                 });
-                recognizeStream = null;
             }
+            dgConnection = null;
         }
-    }
-
-    // Helper function to schedule auto-restart (prevents code duplication)
-    // Guards against double-fire from both 'end' and 'close' events
-    function scheduleAutoRestart() {
-        if (!sessionActive || isRestarting) {
-            recognizeStream = null; // Still clear stale reference
-            return; // Already restarting or session ended
-        }
-
-        isRestarting = true;
-
-        // Cancel any pending restart timeout
-        if (restartTimeout) {
-            clearTimeout(restartTimeout);
-            restartTimeout = null;
-        }
-
-        restartAttempts++;
-
-        if (restartAttempts > MAX_RESTART_ATTEMPTS) {
-            logger.error('❌ Maximum restart attempts exceeded', {
-                clientId,
-                attempts: restartAttempts
-            });
-            sessionActive = false;
-            isRestarting = false;
-            cleanupStream();
-            socket.emit('recognition-error', {
-                message: 'Stream restarted too many times. Please refresh the page and try again.',
-                code: 'MAX_RESTARTS_EXCEEDED'
-            });
-            return;
-        }
-
-        logger.info('🔄 Auto-restarting stream...', {
-            clientId,
-            attempt: restartAttempts,
-            maxAttempts: MAX_RESTART_ATTEMPTS
-        });
-
-        // Clean up old stream before scheduling restart
-        recognizeStream = null;
-        translationInFlight = false; // BUG-21: prevent deadlock if translation was mid-flight at restart
-
-        restartTimeout = setTimeout(() => {
-            restartTimeout = null;
-            if (sessionActive && isRestarting) {
-                // isRestarting cleared inside createRecognitionStream after buffer flush (TOCTOU fix)
-                createRecognitionStream(currentLanguage, targetLanguage, translationInterval, currentMode, true)
-                    .catch((error) => {
-                        logger.error('Failed to restart stream', { clientId, error: error.message });
-                        isRestarting = false; // Clear on error so audio stops buffering
-                    });
-            } else {
-                isRestarting = false;
-            }
-        }, 0); // No delay - restart immediately
     }
 
     // Fallback single-word translations for common Romanian terms that may pass through unchanged
@@ -1289,10 +1135,8 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v160'
+                        appVersion: 'v1'
                     }).catch(() => {}); // Non-fatal
-
-                    restartAttempts = 0;
                 }
             }
 
@@ -1324,288 +1168,198 @@ io.on('connection', (socket) => {
         }
     }
 
-    // Extract stream creation logic into separate function (fixes recursive event emission)
-    async function createRecognitionStream(sourceLanguage, targetLang, interval, mode = 'talks', isRestart = false) {
+    // Create Deepgram live transcription connection (replaces Google Cloud streamingRecognize)
+    // Deepgram connections are long-lived — no 305s limit, no auto-restart needed.
+    async function createDeepgramConnection(sourceLanguage, targetLang, interval, mode = 'talks') {
         try {
             currentLanguage = sourceLanguage;
             targetLanguage = targetLang;
             translationInterval = interval;
-            const intervalMs = translationInterval;
 
-            // Only reset counters on initial start, not on auto-restart
-            if (!isRestart) {
-                accumulatedText = '';
-                translationCount = 0;
-                restartAttempts = 0; // Reset restart counter on new session
-                committedTranslation = ''; // Reset full-context translation state for new session
-                lastFullTranslation = '';
-            }
+            accumulatedText = '';
+            translationCount = 0;
+            committedTranslation = ''; // Reset LCP state for new session
+            lastFullTranslation = '';
 
             sessionActive = true;
             updateActivity(); // Start inactivity timer
 
-            logger.info('🎤 Starting speech recognition stream', {
+            // Deepgram uses ISO 639-1 codes (e.g. 'ro' not 'ro-RO')
+            const dgLanguage = sourceLanguage.split('-')[0];
+
+            logger.info('🎤 Starting Deepgram live transcription', {
                 clientId,
                 sourceLanguage: currentLanguage,
+                dgLanguage,
                 targetLanguage,
-                receivedInterval: translationInterval,
-                finalIntervalMs: intervalMs
+                intervalMs: translationInterval
             });
 
-            const request = {
-                config: {
-                    encoding: 'LINEAR16',
-                    sampleRateHertz: 48000,
-                    languageCode: currentLanguage,
-                    enableAutomaticPunctuation: true,
-                    model: 'latest_long',
-                    useEnhanced: true,
-                    maxAlternatives: 1,
-                    enableWordTimeOffsets: false,
-                    enableWordConfidence: false,
-                    enableSpeakerDiarization: false,
-                    speechContexts: [
-                        {
-                            phrases: STT_PHRASE_HINTS,
-                            boost: 10  // 10 = midpoint; 20 (max) explicitly increases false positives per Google docs
-                        }
-                    ]
-                },
-                interimResults: true,
-                singleUtterance: false
-            };
+            const connection = deepgramClient.listen.live({
+                model: 'nova-3',
+                language: dgLanguage,
+                encoding: 'linear16',
+                sample_rate: 48000,
+                channels: 1,
+                smart_format: true,
+                punctuate: true,
+                interim_results: true,
+                utterance_end_ms: 1000,
+                vad_events: true
+            });
 
-            recognizeStream = speechClient
-                .streamingRecognize(request)
-                .on('error', (error) => {
-                    const errorCode = error.code ? String(error.code) : '';
-                    logger.error('Speech recognition error', {
-                        clientId,
-                        error: error.message,
-                        code: error.code,
-                        errorCode,
-                        stack: error.stack
-                    });
+            dgConnection = connection;
 
-                    // Check if this is a stream timeout error (305 seconds exceeded)
-                    // gRPC codes: 11 = OUT_OF_RANGE, 4 = DEADLINE_EXCEEDED
-                    const isStreamTimeout = error.code === 11 ||
-                                          error.code === 4 ||
-                                          error.message.includes('maximum allowed stream duration') ||
-                                          error.message.includes('Exceeded maximum allowed stream duration');
+            connection.on(LiveTranscriptionEvents.Open, () => {
+                logger.info('✅ Deepgram WebSocket open', { clientId });
+                socket.emit('streaming-started', {
+                    sourceLanguage: currentLanguage,
+                    targetLanguage
+                });
+            });
 
-                    // "Audio Timeout" means Google got no audio for ~10s (silence: prayer, song, break).
-                    // This is NOT a real error — reset the restart counter so silence never kills the stream.
-                    const isAudioTimeout = error.message.includes('Audio Timeout') ||
-                                          error.message.includes('Long duration elapsed without audio');
+            connection.on(LiveTranscriptionEvents.SpeechStarted, () => {
+                logger.debug('🗣️ Speech started', { clientId });
+            });
 
-                    if (isStreamTimeout && sessionActive) {
-                        if (isAudioTimeout) {
-                            logger.info('🔇 Audio timeout (silence detected) — resetting restart counter', { clientId });
-                            restartAttempts = 0; // Silence is not a failure; don't count toward max
-                        }
-                        logger.info('🔄 Stream timeout detected, auto-restarting...', { clientId });
-                        scheduleAutoRestart();
-                    } else {
-                        // Only emit error for non-timeout errors
-                        socket.emit('recognition-error', {
-                            message: error.message,
-                            code: error.code
-                        });
+            connection.on(LiveTranscriptionEvents.Transcript, async (data) => {
+                const alternative = data.channel?.alternatives?.[0];
+                if (!alternative) return;
+
+                const transcript = alternative.transcript || '';
+                const isFinal = data.is_final || false;
+
+                if (transcript.length === 0) {
+                    logger.debug('Empty transcript', { clientId });
+                    return;
+                }
+
+                logger.debug('📝 Deepgram transcript', {
+                    clientId,
+                    transcript: transcript.substring(0, 200),
+                    isFinal,
+                    speechFinal: data.speech_final,
+                    length: transcript.length
+                });
+
+                if (sessionActive) {
+                    socket.emit('interim-result', { text: transcript, isFinal });
+                    updateActivity();
+
+                    const previousInterimText = lastInterimText;
+                    lastInterimText = transcript;
+                    const textChanged = previousInterimText !== transcript;
+
+                    if (textChanged && restartStreamTimer) {
+                        clearTimeout(restartStreamTimer);
+                        restartStreamTimer = null;
                     }
-                })
-                .on('end', () => {
-                    logger.warn('⚠️ Recognition stream ended by Google Cloud', { clientId });
-                    scheduleAutoRestart();
-                })
-                .on('close', () => {
-                    logger.warn('⚠️ Recognition stream closed by Google Cloud', { clientId });
-                    scheduleAutoRestart();
-                })
-                .on('pipe', () => {
-                    logger.debug('📡 Stream pipe event', { clientId });
-                })
-                .on('unpipe', () => {
-                    logger.debug('📡 Stream unpipe event', { clientId });
-                })
-                .on('data', async (data) => {
-                    logger.info('📥 GOOGLE CLOUD DATA EVENT!', {
-                        clientId,
-                        hasResults: !!data.results,
-                        resultsLength: data.results?.length,
-                        rawData: JSON.stringify(data).substring(0, 200)
-                    });
 
-                    const result = data.results[0];
-                    if (!result) return;
+                    // ===========================================
+                    // CENTRALIZED TRANSLATION DECISION
+                    // ===========================================
 
-                    const alternative = result.alternatives[0];
-                    const transcript = alternative.transcript || '';
-                    const isFinal = result.isFinal || false;
-
-                    // Skip empty transcripts but don't block the flow
-                    if (transcript.length === 0) {
-                        logger.debug('Empty transcript in alternative', { clientId });
+                    if (!translationRules) {
+                        logger.error('❌ Translation rules engine not initialized!', { clientId });
                         return;
                     }
 
-                    logger.debug('📝 Recognition result', {
-                        clientId,
-                        transcript: transcript.substring(0, 200),
-                        isFinal,
-                        length: transcript.length,
-                        sessionActive
+                    const decision = translationRules.shouldTranslate({
+                        text: transcript,
+                        isFinal: isFinal,
+                        timeSinceLastChange: textChanged ? 0 : (Date.now() - (lastTextChangeTime || Date.now())),
+                        trigger: isFinal ? 'final' : 'interim',
+                        clientId: clientId
                     });
 
-                    // Send interim results to client for visual feedback
-                    if (sessionActive) {
-                        socket.emit('interim-result', {
-                            text: transcript,
-                            isFinal
-                        });
+                    if (textChanged) {
+                        lastTextChangeTime = Date.now();
+                    }
 
-                        // Update activity timestamp
-                        updateActivity();
+                    // ===========================================
+                    // ACT ON DECISION
+                    // ===========================================
 
-                        // Track text changes for pause detection
-                        const previousInterimText = lastInterimText;
-                        lastInterimText = transcript;
-                        const textChanged = previousInterimText !== transcript;
-
-                        // Clear pause detection timer if text is still changing
-                        if (textChanged && restartStreamTimer) {
-                            clearTimeout(restartStreamTimer);
-                            restartStreamTimer = null;
-                        }
-
-                        // ===========================================
-                        // CENTRALIZED TRANSLATION DECISION
-                        // ===========================================
-
-                        // Safety check: If rules engine not initialized, skip translation logic
-                        if (!translationRules) {
-                            logger.error('❌ Translation rules engine not initialized!', { clientId });
-                            return;
-                        }
-
-                        const decision = translationRules.shouldTranslate({
-                            text: transcript,
-                            isFinal: isFinal,
-                            timeSinceLastChange: textChanged ? 0 : (Date.now() - (lastTextChangeTime || Date.now())),
-                            trigger: isFinal ? 'final' : 'interim',
-                            clientId: clientId
-                        });
-
-                        // Update last text change time
-                        if (textChanged) {
-                            lastTextChangeTime = Date.now();
-                        }
-
-                        // ===========================================
-                        // ACT ON DECISION
-                        // ===========================================
-
-                        if (decision.shouldTranslate) {
-                            // Skip if another translation is already in flight (prevents race conditions)
-                            if (translationInFlight) {
-                                logger.debug('⏳ Translation in flight, deferring', { clientId });
-                                // For final results, save the latest deferred translation to run after in-flight completes
-                                if (isFinal) {
-                                    pendingTranslation = { transcript, decision };
-                                    logger.info('📋 Queued pending final translation', { clientId, preview: transcript.substring(0, 60) });
-                                }
-                            } else {
-                            // Clear any pending pause timer - we're translating now
+                    if (decision.shouldTranslate) {
+                        if (translationInFlight) {
+                            logger.debug('⏳ Translation in flight, deferring', { clientId });
+                            if (isFinal) {
+                                pendingTranslation = { transcript, decision };
+                                logger.info('📋 Queued pending final translation', { clientId, preview: transcript.substring(0, 60) });
+                            }
+                        } else {
                             if (restartStreamTimer) {
                                 clearTimeout(restartStreamTimer);
                                 restartStreamTimer = null;
                             }
-
                             await performTranslation(transcript, decision, true);
-                            } // end of translationInFlight guard
-                        } else {
-                            // Translation rejected - maybe start pause detection timer
-                            // Only set pause timer for interim results when max interval not reached
-                            if (!isFinal && !restartStreamTimer && textChanged && translationRules) {
-                                const pauseMs = translationRules.getConfig().pauseDetectionMs;
-
-                                restartStreamTimer = setTimeout(async () => {
-                                    logger.info('⏰ PAUSE timer fired - checking rules engine', { clientId });
-
-                                    // Re-check with rules engine after pause
-                                    const pauseDecision = translationRules.shouldTranslate({
-                                        text: lastInterimText,
-                                        isFinal: false,
-                                        timeSinceLastChange: pauseMs,
-                                        trigger: 'pause',
-                                        clientId: clientId
-                                    });
-
-                                    if (pauseDecision.shouldTranslate && sessionActive && !translationInFlight) {
-                                        await performTranslation(lastInterimText, pauseDecision, false);
-                                    }
-
-                                    restartStreamTimer = null;
-                                }, pauseMs);
-                            }
-
-                            logger.debug('⏭️ Translation skipped', {
-                                clientId,
-                                reason: decision.reason,
-                                textPreview: transcript.substring(0, 30),
-                                isFinal
-                            });
                         }
+                    } else {
+                        if (!isFinal && !restartStreamTimer && textChanged && translationRules) {
+                            const pauseMs = translationRules.getConfig().pauseDetectionMs;
+                            restartStreamTimer = setTimeout(async () => {
+                                logger.info('⏰ PAUSE timer fired - checking rules engine', { clientId });
+                                const pauseDecision = translationRules.shouldTranslate({
+                                    text: lastInterimText,
+                                    isFinal: false,
+                                    timeSinceLastChange: pauseMs,
+                                    trigger: 'pause',
+                                    clientId: clientId
+                                });
+                                if (pauseDecision.shouldTranslate && sessionActive && !translationInFlight) {
+                                    await performTranslation(lastInterimText, pauseDecision, false);
+                                }
+                                restartStreamTimer = null;
+                            }, pauseMs);
+                        }
+
+                        logger.debug('⏭️ Translation skipped', {
+                            clientId,
+                            reason: decision.reason,
+                            textPreview: transcript.substring(0, 30),
+                            isFinal
+                        });
                     }
-                });
-
-            // Set proactive restart timer (290s before Google's ~305s limit)
-            if (streamDurationTimer) {
-                clearTimeout(streamDurationTimer);
-            }
-            streamDurationTimer = setTimeout(() => {
-                streamDurationTimer = null;
-                if (sessionActive && !isRestarting) {
-                    logger.info('⏰ Proactive stream restart at 290s', { clientId });
-                    scheduleAutoRestart();
                 }
-            }, STREAM_DURATION_LIMIT_MS);
+            });
 
-            // Flush buffered audio from restart gap
-            if (audioBufferDuringRestart.length > 0) {
-                logger.info('📦 Flushing buffered audio from restart', {
+            connection.on(LiveTranscriptionEvents.UtteranceEnd, async (data) => {
+                logger.info('🔚 Utterance end detected', { clientId, lastWordEnd: data.last_word_end });
+                // Treat utterance end as a final signal for the current interim text
+                if (sessionActive && lastInterimText && !translationInFlight && translationRules) {
+                    const decision = translationRules.shouldTranslate({
+                        text: lastInterimText,
+                        isFinal: true,
+                        timeSinceLastChange: 0,
+                        trigger: 'utterance_end',
+                        clientId: clientId
+                    });
+                    if (decision.shouldTranslate) {
+                        await performTranslation(lastInterimText, decision, true);
+                    }
+                }
+            });
+
+            connection.on(LiveTranscriptionEvents.Error, (err) => {
+                logger.error('Deepgram connection error', {
                     clientId,
-                    bufferedChunks: audioBufferDuringRestart.length
+                    error: err.message || String(err)
                 });
-                for (const audioData of audioBufferDuringRestart) {
-                    if (recognizeStream && recognizeStream.writable) {
-                        try {
-                            const buffer = Buffer.from(audioData);
-                            recognizeStream.write(buffer);
-                        } catch (e) {
-                            logger.warn('⚠️ Error flushing buffered audio chunk', {
-                                clientId,
-                                error: e.message
-                            });
-                        }
-                    }
+                socket.emit('recognition-error', {
+                    message: err.message || 'Speech recognition error',
+                    code: 'DEEPGRAM_ERROR'
+                });
+            });
+
+            connection.on(LiveTranscriptionEvents.Close, () => {
+                logger.warn('⚠️ Deepgram connection closed', { clientId });
+                if (dgConnection === connection) {
+                    dgConnection = null;
                 }
-                audioBufferDuringRestart = []; // Clear buffer
-                audioBufferWarned = false;
-            }
-
-            // TOCTOU fix: clear isRestarting AFTER stream is ready and buffer is flushed.
-            // Previously this was cleared before createRecognitionStream was called, leaving a
-            // window where audio was neither buffered nor written to the new stream.
-            isRestarting = false;
-
-            socket.emit('streaming-started', {
-                sourceLanguage: currentLanguage,
-                targetLanguage
             });
 
         } catch (error) {
-            logger.error('Failed to start streaming', {
+            logger.error('Failed to start Deepgram connection', {
                 clientId,
                 error: error.message
             });
@@ -1613,8 +1367,8 @@ io.on('connection', (socket) => {
         }
     }
 
-    // Socket handler for start-streaming event (validates and calls createRecognitionStream)
-    socket.on('start-streaming', async ({ sourceLanguage, targetLang, translationInterval: interval, mode, isRestart }) => {
+    // Socket handler for start-streaming event (validates and calls createDeepgramConnection)
+    socket.on('start-streaming', async ({ sourceLanguage, targetLang, translationInterval: interval, mode }) => {
         // Input validation
         const validLanguageCodes = /^[a-z]{2}-[A-Z]{2}$/;
         const validTargetLanguages = /^[a-z]{2}(-[A-Z]{2})?$/;
@@ -1644,11 +1398,10 @@ io.on('connection', (socket) => {
         const selectedMode = mode && validModes.includes(mode) ? mode : 'talks';
         currentMode = selectedMode;
 
-        // Guard: clean up existing gRPC stream before starting a new one.
-        // Without this, a duplicate start-streaming event leaks the old stream.
-        if (recognizeStream) {
-            logger.warn('⚠️ start-streaming while stream active - stopping existing stream', { clientId });
-            cleanupStream();
+        // Guard: clean up existing Deepgram connection before starting a new one.
+        if (dgConnection) {
+            logger.warn('⚠️ start-streaming while connection active - stopping existing connection', { clientId });
+            cleanupConnection();
         }
 
         // Initialize translation rules engine for this session
@@ -1661,13 +1414,11 @@ io.on('connection', (socket) => {
             config: translationRules.getConfig()
         });
 
-        // Call the extracted function
-        await createRecognitionStream(
+        await createDeepgramConnection(
             sourceLanguage || 'ro-RO',
             targetLang || 'en',
             sanitizedInterval || modeConfig.translationInterval || 6000,
-            selectedMode,
-            isRestart || false
+            selectedMode
         );
     });
 
@@ -1683,162 +1434,121 @@ io.on('connection', (socket) => {
     let audioDataFormat = null;
 
     socket.on('audio-data', (audioData) => {
-        // Buffer audio during restart to prevent gaps
-        if (isRestarting && sessionActive) {
-            if (audioBufferDuringRestart.length < MAX_AUDIO_BUFFER_SIZE) {
-                audioBufferDuringRestart.push(audioData);
-            } else if (!audioBufferWarned) {
-                logger.warn('⚠️ Audio buffer full during restart - dropping chunks', {
-                    clientId,
-                    bufferSize: MAX_AUDIO_BUFFER_SIZE
-                });
-                audioBufferWarned = true;
+        if (!dgConnection || !sessionActive) return;
+
+        try {
+            updateActivity(); // Reset inactivity timer on audio
+            audioChunkCount++;
+
+            // Detect format once, reuse for all subsequent chunks
+            if (!audioDataFormat) {
+                if (audioData instanceof Buffer) {
+                    audioDataFormat = 'buffer';
+                } else if (audioData instanceof ArrayBuffer) {
+                    audioDataFormat = 'arraybuffer';
+                } else if (audioData.buffer) {
+                    audioDataFormat = 'typed-array';
+                } else {
+                    audioDataFormat = 'unknown';
+                }
+                logger.info(`📊 Audio format detected: ${audioDataFormat}`, { clientId });
             }
-            // Still update activity during restart
-            updateActivity();
-            return;
-        }
 
-        if (recognizeStream && sessionActive && !recognizeStream.destroyed && recognizeStream.writable) {
-            try {
-                updateActivity(); // Reset inactivity timer on audio
-                audioChunkCount++;
-
-                // Detect format once, reuse for all subsequent chunks
-                if (!audioDataFormat) {
-                    if (audioData instanceof Buffer) {
-                        audioDataFormat = 'buffer';
-                    } else if (audioData instanceof ArrayBuffer) {
-                        audioDataFormat = 'arraybuffer';
-                    } else if (audioData.buffer) {
-                        audioDataFormat = 'typed-array';
-                    } else {
-                        audioDataFormat = 'unknown';
-                    }
-                    logger.info(`📊 Audio format detected: ${audioDataFormat}`, { clientId });
-                }
-
-                // Fast path based on detected format
-                let buffer;
-                switch (audioDataFormat) {
-                    case 'buffer':
-                        buffer = audioData;
-                        break;
-                    case 'arraybuffer':
-                        buffer = Buffer.from(audioData);
-                        break;
-                    case 'typed-array':
-                        buffer = Buffer.from(audioData.buffer);
-                        break;
-                    default:
-                        buffer = Buffer.from(audioData);
-                }
-
-                // Validate chunk size to prevent DoS attacks
-                if (buffer.length > MAX_AUDIO_CHUNK_SIZE) {
-                    logger.warn('Audio chunk exceeds maximum size', {
-                        clientId,
-                        chunkSize: buffer.length,
-                        maxSize: MAX_AUDIO_CHUNK_SIZE
-                    });
-                    socket.emit('recognition-error', {
-                        message: 'Audio chunk too large',
-                        code: 'CHUNK_TOO_LARGE'
-                    });
-                    return;
-                }
-
-                // Rate limiting: check if client is sending too much data
-                const now = Date.now();
-                if (now - audioRateLimitWindow >= 1000) {
-                    // Reset window every second
-                    audioDataReceived = 0;
-                    audioRateLimitWindow = now;
-                }
-
-                audioDataReceived += buffer.length;
-
-                if (audioDataReceived > MAX_AUDIO_BYTES_PER_SECOND) {
-                    logger.warn('Audio data rate limit exceeded', {
-                        clientId,
-                        bytesPerSecond: audioDataReceived,
-                        maxBytes: MAX_AUDIO_BYTES_PER_SECOND
-                    });
-                    socket.emit('recognition-error', {
-                        message: 'Audio data rate limit exceeded',
-                        code: 'RATE_LIMIT_EXCEEDED'
-                    });
-                    return;
-                }
-
-                if (buffer.length === 0) {
-                    logger.warn('Empty audio chunk received', { clientId });
-                    return;
-                }
-
-                if (audioChunkCount === 1 || audioChunkCount === 5 || audioChunkCount === 10) {
-                    // Log chunks with sample data for debugging
-                    const samples = [];
-                    for (let i = 0; i < Math.min(10, buffer.length / 2); i++) {
-                        samples.push(buffer.readInt16LE(i * 2));
-                    }
-                    const allZeros = samples.every(s => s === 0);
-                    const hasAudio = samples.some(s => Math.abs(s) > 100);
-                    logger.info(`📊 Audio chunk #${audioChunkCount} received`, {
-                        clientId,
-                        byteLength: buffer.length,
-                        firstSamples: samples,
-                        allZeros,
-                        hasAudio
-                    });
-                } else if (audioChunkCount % 50 === 0) {
-                    logger.info('📊 Audio data received', {
-                        clientId,
-                        chunkNumber: audioChunkCount,
-                        byteLength: buffer.length
-                    });
-                }
-
-                const writeSuccess = recognizeStream.write(buffer);
-                if (audioChunkCount === 1) {
-                    logger.info('📤 First chunk written to Google Cloud', {
-                        clientId,
-                        writeSuccess,
-                        streamWritable: recognizeStream.writable,
-                        streamReadable: recognizeStream.readable
-                    });
-                }
-            } catch (error) {
-                logger.error('Error writing audio data', {
-                    clientId,
-                    error: error.message,
-                    code: error.code,
-                    stack: error.stack
-                });
-
-                // If stream is destroyed, notify client
-                if (error.code === 'ERR_STREAM_DESTROYED') {
-                    recognizeStream = null;
-                    socket.emit('recognition-error', {
-                        message: 'Stream destroyed - please restart recording',
-                        code: 'STREAM_DESTROYED'
-                    });
-                }
+            // Fast path based on detected format
+            let buffer;
+            switch (audioDataFormat) {
+                case 'buffer':
+                    buffer = audioData;
+                    break;
+                case 'arraybuffer':
+                    buffer = Buffer.from(audioData);
+                    break;
+                case 'typed-array':
+                    buffer = Buffer.from(audioData.buffer);
+                    break;
+                default:
+                    buffer = Buffer.from(audioData);
             }
-        } else if (recognizeStream && !recognizeStream.writable && sessionActive) {
-            // Stream exists but is not writable - notify client once
-            logger.warn('⚠️ Attempted to write to non-writable stream', { clientId });
-            recognizeStream = null;
-            socket.emit('recognition-error', {
-                message: 'Stream no longer writable - please restart recording',
-                code: 'STREAM_NOT_WRITABLE'
+
+            // Validate chunk size to prevent DoS attacks
+            if (buffer.length > MAX_AUDIO_CHUNK_SIZE) {
+                logger.warn('Audio chunk exceeds maximum size', {
+                    clientId,
+                    chunkSize: buffer.length,
+                    maxSize: MAX_AUDIO_CHUNK_SIZE
+                });
+                socket.emit('recognition-error', {
+                    message: 'Audio chunk too large',
+                    code: 'CHUNK_TOO_LARGE'
+                });
+                return;
+            }
+
+            // Rate limiting: check if client is sending too much data
+            const now = Date.now();
+            if (now - audioRateLimitWindow >= 1000) {
+                audioDataReceived = 0;
+                audioRateLimitWindow = now;
+            }
+
+            audioDataReceived += buffer.length;
+
+            if (audioDataReceived > MAX_AUDIO_BYTES_PER_SECOND) {
+                logger.warn('Audio data rate limit exceeded', {
+                    clientId,
+                    bytesPerSecond: audioDataReceived,
+                    maxBytes: MAX_AUDIO_BYTES_PER_SECOND
+                });
+                socket.emit('recognition-error', {
+                    message: 'Audio data rate limit exceeded',
+                    code: 'RATE_LIMIT_EXCEEDED'
+                });
+                return;
+            }
+
+            if (buffer.length === 0) {
+                logger.warn('Empty audio chunk received', { clientId });
+                return;
+            }
+
+            if (audioChunkCount === 1 || audioChunkCount === 5 || audioChunkCount === 10) {
+                const samples = [];
+                for (let i = 0; i < Math.min(10, buffer.length / 2); i++) {
+                    samples.push(buffer.readInt16LE(i * 2));
+                }
+                const allZeros = samples.every(s => s === 0);
+                const hasAudio = samples.some(s => Math.abs(s) > 100);
+                logger.info(`📊 Audio chunk #${audioChunkCount} received`, {
+                    clientId,
+                    byteLength: buffer.length,
+                    firstSamples: samples,
+                    allZeros,
+                    hasAudio
+                });
+            } else if (audioChunkCount % 50 === 0) {
+                logger.info('📊 Audio data received', {
+                    clientId,
+                    chunkNumber: audioChunkCount,
+                    byteLength: buffer.length
+                });
+            }
+
+            dgConnection.send(buffer);
+            if (audioChunkCount === 1) {
+                logger.info('📤 First chunk sent to Deepgram', { clientId });
+            }
+        } catch (error) {
+            logger.error('Error sending audio data to Deepgram', {
+                clientId,
+                error: error.message,
+                stack: error.stack
             });
         }
     });
 
     // Stop streaming
     socket.on('stop-streaming', () => {
-        logger.info('⏹️ Stopping speech recognition stream', {
+        logger.info('⏹️ Stopping Deepgram transcription', {
             clientId,
             translationCount,
             accumulatedLength: accumulatedText.length
@@ -1858,7 +1568,7 @@ io.on('connection', (socket) => {
             inactivityTimer = null;
         }
 
-        cleanupStream();
+        cleanupConnection();
 
         socket.emit('streaming-stopped', {
             translationCount,
@@ -1891,7 +1601,7 @@ io.on('connection', (socket) => {
             inactivityTimer = null;
         }
 
-        cleanupStream();
+        cleanupConnection();
 
         logger.info('❌ Client disconnected', {
             socketId: socket.id,
@@ -1905,10 +1615,10 @@ io.on('connection', (socket) => {
 // ===== START SERVER =====
 server.listen(PORT, async () => {
     logger.info('═══════════════════════════════════════');
-    logger.info('🎉 GTranslate V4 - Google Cloud Speech');
+    logger.info('🚀 NovaTranslate - Deepgram Nova-3 STT');
     logger.info('═══════════════════════════════════════');
     logger.info(`🌐 Server: http://localhost:${PORT}`);
-    logger.info('🎤 Speech Recognition: Google Cloud (No timeout)');
+    logger.info('🎤 Speech Recognition: Deepgram Nova-3 (No session limit)');
     logger.info('🌍 Translation: Google Cloud');
     logger.info(`📝 Logging: ${path.relative(__dirname, LOG_FILE)}`);
     logger.info('═══════════════════════════════════════');
