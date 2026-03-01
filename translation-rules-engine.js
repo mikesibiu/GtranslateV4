@@ -256,7 +256,7 @@ class TranslationRulesEngine {
         const normalized = translation.toLowerCase().trim();
         const now = Date.now();
 
-        // Clean old entries (older than 15s — TRANSLATION_DEDUP_WINDOW)
+        // Clean old entries (older than 20s — TRANSLATION_DEDUP_WINDOW)
         this.recentTranslations = this.recentTranslations.filter(
             entry => now - entry.timestamp < this.TRANSLATION_DEDUP_WINDOW
         );
@@ -338,7 +338,11 @@ class TranslationRulesEngine {
 
         // Word count check (most specific - check first)
         const words = trimmedText.split(/\s+/).filter(w => w.length > 0);
-        if (words.length < this.MIN_WORDS_FOR_TRANSLATION) {
+        // isFinal results are confirmed speech — accept short tails (≥2 words) so that
+        // continuation text after a pause timer isn't silently dropped.
+        // Non-final interim chunks still require MIN_WORDS_FOR_TRANSLATION (6) for quality.
+        const minWords = isFinal ? 2 : this.MIN_WORDS_FOR_TRANSLATION;
+        if (words.length < minWords) {
             return {
                 meetsMinimum: false,
                 isFillerOnly: false,
@@ -361,7 +365,9 @@ class TranslationRulesEngine {
         }
 
         // Character count check (sanity check - least specific)
-        if (trimmedText.length < this.MIN_CHARS_FOR_TRANSLATION) {
+        // Skip for isFinal: the word-count guard already filters degenerate cases,
+        // and a 2-word tail like "go on" (5 chars) is real confirmed speech.
+        if (!isFinal && trimmedText.length < this.MIN_CHARS_FOR_TRANSLATION) {
             return {
                 meetsMinimum: false,
                 isFillerOnly: false,

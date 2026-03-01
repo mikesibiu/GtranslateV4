@@ -1175,6 +1175,15 @@ io.on('connection', (socket) => {
         }
     }
 
+    /**
+     * Fix known Deepgram misrecognitions of proper nouns in Romanian-accented speech.
+     * Applied to transcript text before sending to client and translation.
+     */
+    function fixTranscript(text) {
+        return text
+            .replace(/\bHokland\b/gi, 'Auckland');
+    }
+
     // Create Deepgram live transcription connection (replaces Google Cloud streamingRecognize)
     // Deepgram connections are long-lived — no 305s limit, no auto-restart needed.
     async function createDeepgramConnection(sourceLanguage, targetLang, interval, mode = 'talks') {
@@ -1211,8 +1220,12 @@ io.on('connection', (socket) => {
                 smart_format: true,
                 punctuate: true,
                 interim_results: true,
-                utterance_end_ms: 1000,
-                vad_events: true
+                // 1500ms: raised from 1000 to reduce mid-sentence splits at breathing pauses.
+                // Tradeoff: +500ms latency at natural sentence boundaries. Do not lower below 1200ms.
+                utterance_end_ms: 1500,
+                vad_events: true,
+                // Boost recognition of proper nouns commonly misheard in Romanian-accented speech
+                keyterm: ['Auckland', 'New Zealand', 'New York']
             });
 
             dgConnection = connection;
@@ -1233,7 +1246,7 @@ io.on('connection', (socket) => {
                 const alternative = data.channel?.alternatives?.[0];
                 if (!alternative) return;
 
-                const transcript = alternative.transcript || '';
+                const transcript = fixTranscript(alternative.transcript || '');
                 const isFinal = data.is_final || false;
 
                 if (transcript.length === 0) {
@@ -1332,18 +1345,22 @@ io.on('connection', (socket) => {
 
             connection.on(LiveTranscriptionEvents.UtteranceEnd, async (data) => {
                 logger.info('🔚 Utterance end detected', { clientId, lastWordEnd: data.last_word_end });
-                // Treat utterance end as a final signal for the current interim text
-                if (sessionActive && lastInterimText && !translationInFlight && translationRules) {
-                    const decision = translationRules.shouldTranslate({
-                        text: lastInterimText,
-                        isFinal: true,
-                        timeSinceLastChange: 0,
-                        trigger: 'utterance_end',
-                        clientId: clientId
-                    });
-                    if (decision.shouldTranslate) {
-                        await performTranslation(lastInterimText, decision, true);
+                try {
+                    // Treat utterance end as a final signal for the current interim text
+                    if (sessionActive && lastInterimText && !translationInFlight && translationRules) {
+                        const decision = translationRules.shouldTranslate({
+                            text: lastInterimText,
+                            isFinal: true,
+                            timeSinceLastChange: 0,
+                            trigger: 'utterance_end',
+                            clientId: clientId
+                        });
+                        if (decision.shouldTranslate) {
+                            await performTranslation(lastInterimText, decision, true);
+                        }
                     }
+                } catch (err) {
+                    logger.error('UtteranceEnd translation error', { clientId, error: err.message });
                 }
             });
 

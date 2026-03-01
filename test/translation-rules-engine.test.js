@@ -259,6 +259,26 @@ describe('TranslationRulesEngine', () => {
             expect(decision.shouldTranslate).to.be.false;
             expect(decision.reason).to.equal('filler_words_only');
         });
+
+        it('should accept 2-word isFinal tail (continuation after pause timer)', () => {
+            // Regression: pause timer fires mid-utterance, setting lastTranslatedText to the
+            // partial text. Then is_final fires for the complete utterance. getNewText() extracts
+            // only the tail ("several committees" = 2 words). With isFinal=true, the threshold
+            // is 2 words — this must NOT be silently dropped.
+            engine.lastTranslatedText = 'organized into'; // set by pause-timer translation
+            const decision = engine.shouldTranslate({
+                text: 'organized into several committees', // full Deepgram is_final transcript
+                isFinal: true,
+                timeSinceLastChange: 0,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            // getNewText extracts "several committees" (2 words) and it must be approved
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('final_result');
+            expect(decision.newText).to.equal('several committees');
+        });
     });
 
     describe('Translation Decisions - Pause Detection', () => {
