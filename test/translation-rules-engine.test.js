@@ -260,11 +260,11 @@ describe('TranslationRulesEngine', () => {
             expect(decision.reason).to.equal('filler_words_only');
         });
 
-        it('should accept 2-word isFinal tail (continuation after pause timer)', () => {
+        it('should accept 2-word isContinuationTail (pause timer fired mid-utterance)', () => {
             // Regression: pause timer fires mid-utterance, setting lastTranslatedText to the
             // partial text. Then is_final fires for the complete utterance. getNewText() extracts
-            // only the tail ("several committees" = 2 words). With isFinal=true, the threshold
-            // is 2 words — this must NOT be silently dropped.
+            // only the tail ("several committees" = 2 words). isContinuationTail=true because
+            // newText !== fullText, so the 2-word threshold applies. Must NOT be dropped.
             engine.lastTranslatedText = 'organized into'; // set by pause-timer translation
             const decision = engine.shouldTranslate({
                 text: 'organized into several committees', // full Deepgram is_final transcript
@@ -274,10 +274,26 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            // getNewText extracts "several committees" (2 words) and it must be approved
+            // getNewText extracts "several committees" (2 words, continuation tail) → approved
             expect(decision.shouldTranslate).to.be.true;
             expect(decision.reason).to.equal('final_result');
             expect(decision.newText).to.equal('several committees');
+        });
+
+        it('should reject short standalone isFinal utterance (not a continuation)', () => {
+            // Regression: lowering isFinal threshold to 2 caused Deepgram's short utterance
+            // splits ("so he said", "always smiling,") to produce individual cards.
+            // Standalone short isFinals (newText === fullText) must still use 6-word threshold.
+            const decision = engine.shouldTranslate({
+                text: 'so he said', // standalone 3-word utterance, no prior lastTranslatedText
+                isFinal: true,
+                timeSinceLastChange: 0,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.false;
+            expect(decision.reason).to.equal('too_few_words');
         });
     });
 

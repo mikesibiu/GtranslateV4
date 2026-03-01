@@ -99,8 +99,16 @@ class TranslationRulesEngine {
         // Extract new text that hasn't been translated yet
         const newText = this.getNewText(context.text);
 
+        // A continuation tail occurs when is_final fires after the pause timer already
+        // translated a prefix of the same utterance. getNewText() extracts only the tail
+        // (e.g. "several committees"). These can be as short as 2 words — they are confirmed
+        // speech, not standalone fragments. Standalone short utterances still need 6 words.
+        const isContinuationTail = context.isFinal &&
+            newText.length > 0 &&
+            newText.trim().toLowerCase() !== context.text.trim().toLowerCase();
+
         // Run quality checks
-        const qualityCheck = this.checkQuality(newText, context.isFinal);
+        const qualityCheck = this.checkQuality(newText, context.isFinal, isContinuationTail);
 
         // Detect sentence endings
         const hasSentenceEnding = this.detectSentenceEnding(context.text);
@@ -325,7 +333,7 @@ class TranslationRulesEngine {
     /**
      * Check text quality (minimum words, characters, filler detection)
      */
-    checkQuality(text, isFinal = false) {
+    checkQuality(text, isFinal = false, isContinuationTail = false) {
         const trimmedText = text.trim();
 
         if (trimmedText.length === 0) {
@@ -338,10 +346,10 @@ class TranslationRulesEngine {
 
         // Word count check (most specific - check first)
         const words = trimmedText.split(/\s+/).filter(w => w.length > 0);
-        // isFinal results are confirmed speech — accept short tails (≥2 words) so that
-        // continuation text after a pause timer isn't silently dropped.
-        // Non-final interim chunks still require MIN_WORDS_FOR_TRANSLATION (6) for quality.
-        const minWords = isFinal ? 2 : this.MIN_WORDS_FOR_TRANSLATION;
+        // Continuation tails (pause timer fired mid-utterance, then is_final fires with a short
+        // remainder) use a 2-word threshold — they are confirmed speech, not standalone fragments.
+        // All other text (standalone isFinal utterances and interim chunks) requires 6 words.
+        const minWords = isContinuationTail ? 2 : this.MIN_WORDS_FOR_TRANSLATION;
         if (words.length < minWords) {
             return {
                 meetsMinimum: false,
@@ -365,9 +373,9 @@ class TranslationRulesEngine {
         }
 
         // Character count check (sanity check - least specific)
-        // Skip for isFinal: the word-count guard already filters degenerate cases,
+        // Skip for continuation tails: word-count guard already covers them,
         // and a 2-word tail like "go on" (5 chars) is real confirmed speech.
-        if (!isFinal && trimmedText.length < this.MIN_CHARS_FOR_TRANSLATION) {
+        if (!isContinuationTail && trimmedText.length < this.MIN_CHARS_FOR_TRANSLATION) {
             return {
                 meetsMinimum: false,
                 isFillerOnly: false,

@@ -1201,7 +1201,16 @@ io.on('connection', (socket) => {
      */
     function fixTranscript(text) {
         return text
-            .replace(/\bHokland\b/gi, 'Auckland');
+            .replace(/\bHokland\b/gi, 'Auckland')
+            // Deepgram mishears Romanian "Bucurați-vă" / "Bucuriți-vă" (Rejoice) as "Buckurites"
+            .replace(/\bBuckurites\b/gi, 'Bucurați-vă')
+            .replace(/\bBuckurities\b/gi, 'Bucuriți-vă')
+            // Deepgram smart_format treats the date range "9-11" as emergency number "911".
+            // Restore the hyphen when "911" immediately precedes a month name (RO or EN).
+            .replace(/\b911\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie|january|february|march|april|june|july|september|october|november|december)\b/gi, '9-11 $1')
+            // Deepgram smart_format splits year ranges (e.g. "2008-2025" → "2008, 2025").
+            // Restore the dash when two 4-digit years are separated only by a comma.
+            .replace(/\b((?:19|20)\d{2}),\s*((?:19|20)\d{2})\b/g, '$1-$2');
     }
 
     // Create Deepgram live transcription connection (replaces Google Cloud streamingRecognize)
