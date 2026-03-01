@@ -643,7 +643,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 NovaTranslate <span style="background: #2196F3; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">DEEPGRAM NOVA-3</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v1</span></h1>
+            <h1>🚀 NovaTranslate <span style="background: #2196F3; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">DEEPGRAM NOVA-3</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v2</span></h1>
             <p>Real-time Speech Translation powered by Deepgram Nova-3</p>
             <div class="badge">No Session Limit • 7.6% WER</div>
             <div style="margin-top: 10px;">
@@ -1189,19 +1189,13 @@
                 });
 
                 this.socket.on('interim-result', (data) => {
-                    const sourceText = sanitizeText(data.text);
+                    const hasRecentTranslation = this.lastTranslation &&
+                        (Date.now() - this.lastTranslationTime < 20000);
 
-                    if (this.ttsEnabled || this.currentMode === 'earbuds') {
-                        const hasRecentTranslation = this.lastTranslation &&
-                            (Date.now() - this.lastTranslationTime < 20000);
-
-                        if (hasRecentTranslation) {
-                            this.interimText.textContent = `${this.lastTranslation}...`;
-                        } else {
-                            this.interimText.textContent = 'Listening...';
-                        }
+                    if (hasRecentTranslation) {
+                        this.interimText.textContent = `${this.lastTranslation}...`;
                     } else {
-                        this.interimText.textContent = sourceText || 'Listening...';
+                        this.interimText.textContent = 'Listening...';
                     }
                 });
 
