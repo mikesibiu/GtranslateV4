@@ -279,6 +279,13 @@ const io = socketIo(server, {
                 allowedOrigins.push(`https://${process.env.HEROKU_APP_NAME}.herokuapp.com`);
             }
 
+            // Allow additional origins from ALLOWED_ORIGINS env var (comma-separated)
+            if (process.env.ALLOWED_ORIGINS) {
+                process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean).forEach(o => {
+                    if (!allowedOrigins.includes(o)) allowedOrigins.push(o);
+                });
+            }
+
             if (allowedOrigins.includes(origin)) {
                 callback(null, true);
             } else {
