@@ -9,12 +9,14 @@ const http = require('http');
 const socketIo = require('socket.io');
 const { createClient: createDeepgramClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
 const { TranslationServiceClient } = require('@google-cloud/translate').v3;
+const { Pool } = require('pg');
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 const billingDb = require('./billing-db');
 const TranslationRulesEngine = require('./translation-rules-engine');
 const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session);
 
 // ===== CONFIGURATION =====
 // Load environment variables if .env file exists
@@ -39,7 +41,25 @@ if (NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
     console.error('FATAL: SESSION_SECRET environment variable is not set. Refusing to start in production.');
     process.exit(1);
 }
+
+// Use PostgreSQL session store when DATABASE_URL is set (production/Koyeb with Neon).
+// Falls back to MemoryStore in local development (no DATABASE_URL).
+let sessionStore;
+if (process.env.DATABASE_URL) {
+    const sessionPool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+        max: 3 // small dedicated pool — sessions don't need many connections
+    });
+    sessionStore = new pgSession({
+        pool: sessionPool,
+        tableName: 'user_sessions',
+        createTableIfMissing: true
+    });
+}
+
 const sessionMiddleware = session({
+    store: sessionStore, // undefined = MemoryStore (dev only)
     secret: process.env.SESSION_SECRET || 'gtranslate-dev-secret',
     resave: false,
     saveUninitialized: false,
@@ -56,7 +76,7 @@ const LOG_DIR = path.join(__dirname, 'logs');
 if (!fs.existsSync(LOG_DIR)) {
     fs.mkdirSync(LOG_DIR, { recursive: true });
 }
-const LOG_FILE = path.join(LOG_DIR, 'gtranslate-v4.log');
+const LOG_FILE = path.join(LOG_DIR, 'novatranslate.log');
 
 // Initialize logger FIRST before using it
 const logger = winston.createLogger({
