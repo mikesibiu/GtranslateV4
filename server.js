@@ -1205,6 +1205,9 @@ io.on('connection', (socket) => {
             // Deepgram mishears Romanian "Bucurați-vă" / "Bucuriți-vă" (Rejoice) as "Buckurites"
             .replace(/\bBuckurites\b/gi, 'Bucurați-vă')
             .replace(/\bBuckurities\b/gi, 'Bucuriți-vă')
+            // Deepgram mishears "la Lomé" (in Lomé, Togo) as "un lome" / "lome"
+            .replace(/\bun\s+lome\b/gi, 'la Lomé')
+            .replace(/\blome\b/gi, 'Lomé')
             // Deepgram smart_format treats the date range "9-11" as emergency number "911".
             // Restore the hyphen when "911" immediately precedes a month name (RO or EN).
             .replace(/\b911\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie|january|february|march|april|june|july|september|october|november|december)\b/gi, '9-11 $1')
@@ -1254,7 +1257,7 @@ io.on('connection', (socket) => {
                 utterance_end_ms: 1500,
                 vad_events: true,
                 // Boost recognition of proper nouns commonly misheard in Romanian-accented speech
-                keyterm: ['Auckland', 'New Zealand', 'New York']
+                keyterm: ['Auckland', 'New Zealand', 'New York', 'Lomé']
             });
 
             dgConnection = connection;
