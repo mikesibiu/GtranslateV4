@@ -80,7 +80,19 @@ let googleCredentials;
 let CREDENTIALS_PATH;
 let credentialsProjectId = null;
 
-if (process.env.GOOGLE_CREDENTIALS_JSON) {
+if (process.env.GOOGLE_CREDENTIALS_JSON_B64) {
+    // Koyeb deployment: base64-encoded JSON (avoids shell quoting issues with multiline JSON)
+    try {
+        const json = Buffer.from(process.env.GOOGLE_CREDENTIALS_JSON_B64, 'base64').toString('utf8');
+        googleCredentials = JSON.parse(json);
+        credentialsProjectId = googleCredentials.project_id || null;
+        logger.info('✅ Using Google credentials from base64 environment variable');
+    } catch (error) {
+        logger.error('❌ Failed to parse GOOGLE_CREDENTIALS_JSON_B64 environment variable');
+        logger.error('Error:', error.message);
+        process.exit(1);
+    }
+} else if (process.env.GOOGLE_CREDENTIALS_JSON) {
     // Heroku/Cloud deployment: credentials from environment variable
     try {
         googleCredentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
