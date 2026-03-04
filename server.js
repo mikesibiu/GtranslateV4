@@ -350,7 +350,8 @@ app.post('/login', express.urlencoded({ extended: false }), (req, res) => {
     const password = (req.body && req.body.password) || '';
     if (APP_PASSWORD && password === APP_PASSWORD) {
         req.session.authenticated = true;
-        return res.redirect('/');
+        const host = req.get('host') || '';
+        return res.redirect(host.startsWith('translate.') ? '/app' : '/');
     }
     res.redirect('/login?error=1');
 });
@@ -360,6 +361,11 @@ app.get('/logout', (req, res) => {
 });
 
 app.get('/', requireAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// NovaTranslate app served at /app when accessed via translate.farace.net
+app.get('/app', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
