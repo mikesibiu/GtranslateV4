@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Translate Hub — farace.net</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: #fff;
+        }
+
+        header p {
+            margin-top: 0.5rem;
+            color: #888;
+            font-size: 0.95rem;
+        }
+
+        .cards {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            width: 100%;
+            max-width: 960px;
+        }
+
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 2rem 1.75rem;
+            width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            border: 1px solid #223;
+            transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+
+        .card.budget:hover  { border-color: #4caf50; }
+        .card.gtranslate:hover { border-color: #e94560; }
+        .card.nova:hover    { border-color: #2196F3; }
+
+        .card-icon {
+            font-size: 2.2rem;
+            line-height: 1;
+        }
+
+        .card-name {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .card-badge {
+            display: inline-block;
+            font-size: 0.6rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            vertical-align: middle;
+            margin-left: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-budget    { background: #4caf50; color: #fff; }
+        .badge-gtranslate { background: #e94560; color: #fff; }
+        .badge-nova      { background: #2196F3; color: #fff; }
+
+        .card-desc {
+            font-size: 0.88rem;
+            color: #aaa;
+            line-height: 1.55;
+            flex: 1;
+        }
+
+        .card-meta {
+            font-size: 0.78rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+
+        .card-open {
+            margin-top: 0.5rem;
+            padding: 0.55rem 1.25rem;
+            border-radius: 6px;
+            border: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: opacity 0.15s;
+            color: #fff;
+        }
+
+        .card-open:hover { opacity: 0.85; }
+        .card.budget   .card-open { background: #4caf50; }
+        .card.gtranslate .card-open { background: #e94560; }
+        .card.nova     .card-open { background: #2196F3; }
+
+        footer {
+            margin-top: 3rem;
+            color: #444;
+            font-size: 0.78rem;
+            text-align: center;
+        }
+
+        @media (max-width: 640px) {
+            .card { width: 100%; max-width: 360px; }
+            header h1 { font-size: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🌐 Translate Hub</h1>
+        <p>Real-time speech translation tools</p>
+    </header>
+
+    <div class="cards">
+
+        <a class="card budget" href="https://ambitious-margette-mysysadmin-78740b17.koyeb.app">
+            <div class="card-icon">💰</div>
+            <div class="card-name">
+                BudgetTranslate
+                <span class="card-badge badge-budget">FREE</span>
+            </div>
+            <div class="card-desc">
+                Browser-based speech translation using the Web Speech API.
+                No cloud STT costs — runs entirely in your browser.
+            </div>
+            <div class="card-meta">Web Speech API · No session limit</div>
+            <div class="card-open">Open</div>
+        </a>
+
+        <a class="card gtranslate" href="https://gtranslate-v4-96dfeefd9842.herokuapp.com">
+            <div class="card-icon">🎤</div>
+            <div class="card-name">
+                GTranslate V4
+                <span class="card-badge badge-gtranslate">GOOGLE STT</span>
+            </div>
+            <div class="card-desc">
+                Real-time speech translation powered by Google Cloud
+                Speech-to-Text V1 and Google Translate.
+            </div>
+            <div class="card-meta">Google STT · 305s session limit</div>
+            <div class="card-open">Open</div>
+        </a>
+
+        <a class="card nova" href="https://novatranslate.farace.net">
+            <div class="card-icon">🚀</div>
+            <div class="card-name">
+                NovaTranslate
+                <span class="card-badge badge-nova">DEEPGRAM</span>
+            </div>
+            <div class="card-desc">
+                Real-time speech translation powered by Deepgram Nova-3.
+                Higher accuracy (7.6% WER) with no session time limit.
+            </div>
+            <div class="card-meta">Deepgram Nova-3 · No session limit</div>
+            <div class="card-open">Open</div>
+        </a>
+
+    </div>
+
+    <footer>farace.net translation tools</footer>
+</body>
+</html>

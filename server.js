@@ -332,6 +332,15 @@ function requireAuth(req, res, next) {
     res.redirect('/login');
 }
 
+// Translate Hub — serve hub page when accessed via translate.farace.net (no auth required)
+app.get('/', (req, res, next) => {
+    const host = req.get('host') || '';
+    if (host.startsWith('translate.')) {
+        return res.sendFile(path.join(__dirname, 'translate-hub.html'));
+    }
+    next();
+});
+
 app.get('/login', (req, res) => {
     if (!APP_PASSWORD || (req.session && req.session.authenticated)) return res.redirect('/');
     res.sendFile(path.join(__dirname, 'login.html'));
