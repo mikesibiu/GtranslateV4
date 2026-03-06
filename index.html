@@ -1442,7 +1442,7 @@
                         });
                         console.log('🖥️ System audio capture granted');
                     } else {
-                        // Capture microphone (or BlackHole input device)
+                        // Capture microphone
                         // Enable echo cancellation + noise suppression for mic:
                         // Without EC, TTS audio playing through speakers feeds back into Deepgram,
                         // causing garbled Romanian transcription (Deepgram hears speech + English TTS).
