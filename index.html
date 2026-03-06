@@ -643,7 +643,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 NovaTranslate <span style="background: #2196F3; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">DEEPGRAM NOVA-3</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v10</span></h1>
+            <h1>🚀 NovaTranslate <span style="background: #2196F3; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6em; vertical-align: middle;">DEEPGRAM NOVA-3</span> <span style="color: #999; font-size: 0.4em; font-weight: normal;">v11</span></h1>
             <p>Real-time Speech Translation powered by Deepgram Nova-3</p>
             <div class="badge">No Session Limit • 7.6% WER</div>
             <div style="margin-top: 10px;">
@@ -661,7 +661,6 @@
                     <label for="audioSource">Audio Source</label>
                     <select id="audioSource">
                         <option value="microphone">🎤 Microphone</option>
-                        <option value="system">🖥️ System Audio (Tab/Screen)</option>
                     </select>
                 </div>
             </div>
@@ -1411,7 +1410,7 @@
                         throw new Error('Invalid translation interval');
                     }
 
-                    if (!['microphone', 'system'].includes(audioSourceType)) {
+                    if (audioSourceType !== 'microphone') {
                         throw new Error('Invalid audio source');
                     }
 
@@ -1420,28 +1419,7 @@
                         throw new Error('Your browser does not support audio capture. Please use Chrome, Safari, or Firefox.');
                     }
 
-                    // Get audio stream based on selected source
-                    if (audioSourceType === 'system') {
-                        // Check if mobile device (system audio not supported on mobile)
-                        const isMobile = /Mobile|Android|iPhone|iPad|iPod/.test(navigator.userAgent);
-                        if (isMobile) {
-                            throw new Error('System audio capture is not available on mobile devices. Please use the Microphone option instead.');
-                        }
-
-                        // Capture system audio (tab/screen audio)
-                        if (!navigator.mediaDevices.getDisplayMedia) {
-                            throw new Error('System audio capture not supported on this device. Please select Microphone.');
-                        }
-                        this.mediaStream = await navigator.mediaDevices.getDisplayMedia({
-                            video: true,  // Required for getDisplayMedia
-                            audio: {
-                                echoCancellation: false,
-                                noiseSuppression: false,
-                                autoGainControl: false
-                            }
-                        });
-                        console.log('🖥️ System audio capture granted');
-                    } else {
+                    {
                         // Capture microphone
                         // Enable echo cancellation + noise suppression for mic:
                         // Without EC, TTS audio playing through speakers feeds back into Deepgram,
