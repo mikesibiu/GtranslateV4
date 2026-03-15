@@ -866,6 +866,11 @@ io.on('connection', (socket) => {
      * @param {string} sourceText - Original Romanian source text (used for context-aware fixes)
      */
     function applyTermMappings(text, sourceText = '') {
+        // Normalize source for diacritic-insensitive matching: STT sometimes drops
+        // diacritics (e.g. "congregatie" instead of "congregație"), so source-aware regex
+        // checks must work against both the original and the stripped form.
+        const sourceNorm = sourceText.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
         const mappings = [
             { pattern: /\bvestitori\b/gi, replacement: 'publishers' },
             { pattern: /\bMartorii lui Iehova\b/gi, replacement: "Jehovah's Witnesses" },
@@ -887,7 +892,8 @@ io.on('connection', (socket) => {
         // Source-aware fix: "congregație" → "congregation" (not "church").
         // Google Translate sometimes returns "church" for "congregație" in religious contexts.
         // JW terminology strictly uses "congregation", never "church".
-        if (/congregați/i.test(sourceText)) {
+        // Uses sourceNorm (diacritics stripped) to match even when STT drops ț → t.
+        if (/congregati/i.test(sourceNorm)) {
             result = result.replace(/\bchurch\b/gi, 'congregation');
             result = result.replace(/\bchurches\b/gi, 'congregations');
         }
@@ -920,7 +926,7 @@ io.on('connection', (socket) => {
 
         // Source-aware fix: "cu siguranță" = certainly/surely (adverb), NOT "safety" (noun).
         // Google/Claude maps "siguranță" to "safety" but "cu siguranță" is the adverb "certainly".
-        if (/cu\s+siguranță/i.test(sourceText)) {
+        if (/cu\s+siguranta/i.test(sourceNorm)) {
             result = result.replace(/\bSafety\b/g, 'Certainly');
             result = result.replace(/\bsafety\b/g, 'certainly');
         }
@@ -937,13 +943,20 @@ io.on('connection', (socket) => {
 
         // Source-aware fix: "conștiință curată" = clean conscience (curată = adjective "clean/pure").
         // Claude sometimes picks the verb "cleanse" instead of the adjective "clean".
-        if (/conștiință/i.test(sourceText)) {
+        if (/constiinta/i.test(sourceNorm)) {
             result = result.replace(/\bcleanse\s+conscience\b/gi, 'clean conscience');
         }
 
         // Fix noun/verb confusion: "will/can/could/etc. Decision" → "decide".
         // Claude occasionally uses the noun "Decision" after modal verbs instead of the verb.
         result = result.replace(/\b(will|can|could|might|may|should|would|to)\s+Decision\b/g, '$1 decide');
+
+        // Source-aware fix: "adunare" = congregation (local) or assembly (circuit/district).
+        // Google Translate maps "adunare" to "gathering" which is incorrect in JW context.
+        if (/\badunare\b/i.test(sourceText)) {
+            result = result.replace(/\bgathering\b/gi, 'congregation');
+            result = result.replace(/\bgatherings\b/gi, 'congregations');
+        }
 
         // Source-aware fix: "romani" in Romanian = Romani people/language (Roma), not Romans.
         // JW meetings regularly reference "limba romani" (Romani language) and "frații romani"
@@ -1002,7 +1015,7 @@ io.on('connection', (socket) => {
         let result = translated;
 
         for (const [engTerm, roTerm] of Object.entries(religiousTerms)) {
-            if (sourceLower.includes(engTerm)) {
+            if (new RegExp('\\b' + engTerm + '\\b').test(sourceLower)) {
                 for (const variant of (romanianVariants[roTerm] || [])) {
                     const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                     result = result.replace(new RegExp(escaped, 'gi'), roTerm);
@@ -1128,10 +1141,12 @@ io.on('connection', (socket) => {
         if (!trimmedCommitted) return trimmedFull;
         if (!trimmedFull) return null;
 
-        // Normalize: split on whitespace, strip leading/trailing punctuation, lowercase
+        // Normalize: split on whitespace, strip leading/trailing punctuation, lowercase.
+        // Use \p{L}\p{N} (unicode property escapes) so Romanian diacritics (ă, â, î, ș, ț)
+        // are preserved as word characters and not stripped by the boundary replace.
         const normalizeWords = (s) =>
             s.split(/\s+/)
-             .map(w => w.toLowerCase().replace(/^[^\w]+|[^\w]+$/g, ''))
+             .map(w => w.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
              .filter(w => w.length > 0);
 
         const committedNorm = normalizeWords(trimmedCommitted);
@@ -1408,14 +1423,16 @@ io.on('connection', (socket) => {
 
                     // "Audio Timeout" means Google got no audio for ~10s (silence: prayer, song, break).
                     // This is NOT a real error — reset the restart counter so silence never kills the stream.
+                    // Checked independently of isStreamTimeout: if Google ever changes the gRPC code for
+                    // this error, it would previously have been emitted as a client error instead of restarted.
                     const isAudioTimeout = error.message.includes('Audio Timeout') ||
                                           error.message.includes('Long duration elapsed without audio');
 
-                    if (isStreamTimeout && sessionActive) {
-                        if (isAudioTimeout) {
-                            logger.info('🔇 Audio timeout (silence detected) — resetting restart counter', { clientId });
-                            restartAttempts = 0; // Silence is not a failure; don't count toward max
-                        }
+                    if (isAudioTimeout && sessionActive) {
+                        logger.info('🔇 Audio timeout (silence detected) — resetting restart counter', { clientId });
+                        restartAttempts = 0; // Silence is not a failure; don't count toward max
+                        scheduleAutoRestart();
+                    } else if (isStreamTimeout && sessionActive) {
                         logger.info('🔄 Stream timeout detected, auto-restarting...', { clientId });
                         scheduleAutoRestart();
                     } else {
@@ -1610,6 +1627,9 @@ io.on('connection', (socket) => {
             // Previously this was cleared before createRecognitionStream was called, leaving a
             // window where audio was neither buffered nor written to the new stream.
             isRestarting = false;
+            // Reset restart counter — stream opened successfully, so this restart was not a failure.
+            // Without this, 10 proactive 290s restarts over ~48 min would hit MAX_RESTART_ATTEMPTS.
+            restartAttempts = 0;
 
             socket.emit('streaming-started', {
                 sourceLanguage: currentLanguage,
