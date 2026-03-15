@@ -742,6 +742,11 @@ io.on('connection', (socket) => {
      * @param {string} sourceText - Original Romanian source text (used for context-aware fixes)
      */
     function applyTermMappings(text, sourceText = '') {
+        // Normalize source for diacritic-insensitive matching: Deepgram sometimes drops
+        // diacritics (e.g. "congregatie" instead of "congregație"), so source-aware regex
+        // checks must work against both the original and the stripped form.
+        const sourceNorm = sourceText.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
         const mappings = [
             { pattern: /\bvestitori\b/gi, replacement: 'publishers' },
             { pattern: /\bMartorii lui Iehova\b/gi, replacement: "Jehovah's Witnesses" },
@@ -763,7 +768,8 @@ io.on('connection', (socket) => {
         // Source-aware fix: "congregație" → "congregation" (not "church").
         // Google Translate sometimes returns "church" for "congregație" in religious contexts.
         // JW terminology strictly uses "congregation", never "church".
-        if (/congregați/i.test(sourceText)) {
+        // Uses sourceNorm (diacritics stripped) to match even when Deepgram drops ț → t.
+        if (/congregati/i.test(sourceNorm)) {
             result = result.replace(/\bchurch\b/gi, 'congregation');
             result = result.replace(/\bchurches\b/gi, 'congregations');
         }
@@ -796,7 +802,7 @@ io.on('connection', (socket) => {
 
         // Source-aware fix: "cu siguranță" = certainly/surely (adverb), NOT "safety" (noun).
         // Google/Claude maps "siguranță" to "safety" but "cu siguranță" is the adverb "certainly".
-        if (/cu\s+siguranță/i.test(sourceText)) {
+        if (/cu\s+siguranta/i.test(sourceNorm)) {
             result = result.replace(/\bSafety\b/g, 'Certainly');
             result = result.replace(/\bsafety\b/g, 'certainly');
         }
@@ -813,13 +819,20 @@ io.on('connection', (socket) => {
 
         // Source-aware fix: "conștiință curată" = clean conscience (curată = adjective "clean/pure").
         // Claude sometimes picks the verb "cleanse" instead of the adjective "clean".
-        if (/conștiință/i.test(sourceText)) {
+        if (/constiinta/i.test(sourceNorm)) {
             result = result.replace(/\bcleanse\s+conscience\b/gi, 'clean conscience');
         }
 
         // Fix noun/verb confusion: "will/can/could/etc. Decision" → "decide".
         // Claude occasionally uses the noun "Decision" after modal verbs instead of the verb.
         result = result.replace(/\b(will|can|could|might|may|should|would|to)\s+Decision\b/g, '$1 decide');
+
+        // Source-aware fix: "adunare" = congregation (local) or assembly (circuit/district).
+        // Google Translate maps "adunare" to "gathering" which is incorrect in JW context.
+        if (/\badunare\b/i.test(sourceText)) {
+            result = result.replace(/\bgathering\b/gi, 'congregation');
+            result = result.replace(/\bgatherings\b/gi, 'congregations');
+        }
 
         // Source-aware fix: "romani" in Romanian = Romani people/language (Roma), not Romans.
         // JW meetings regularly reference "limba romani" (Romani language) and "frații romani"
@@ -878,7 +891,7 @@ io.on('connection', (socket) => {
         let result = translated;
 
         for (const [engTerm, roTerm] of Object.entries(religiousTerms)) {
-            if (sourceLower.includes(engTerm)) {
+            if (new RegExp('\\b' + engTerm + '\\b').test(sourceLower)) {
                 for (const variant of (romanianVariants[roTerm] || [])) {
                     const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                     result = result.replace(new RegExp(escaped, 'gi'), roTerm);
@@ -1004,10 +1017,12 @@ io.on('connection', (socket) => {
         if (!trimmedCommitted) return trimmedFull;
         if (!trimmedFull) return null;
 
-        // Normalize: split on whitespace, strip leading/trailing punctuation, lowercase
+        // Normalize: split on whitespace, strip leading/trailing punctuation, lowercase.
+        // Use \p{L}\p{N} (unicode property escapes) so Romanian diacritics (ă, â, î, ș, ț)
+        // are preserved as word characters and not stripped by the boundary replace.
         const normalizeWords = (s) =>
             s.split(/\s+/)
-             .map(w => w.toLowerCase().replace(/^[^\w]+|[^\w]+$/g, ''))
+             .map(w => w.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
              .filter(w => w.length > 0);
 
         const committedNorm = normalizeWords(trimmedCommitted);
@@ -1393,8 +1408,9 @@ io.on('connection', (socket) => {
             connection.on(LiveTranscriptionEvents.UtteranceEnd, async (data) => {
                 logger.info('🔚 Utterance end detected', { clientId, lastWordEnd: data.last_word_end });
                 try {
-                    // Treat utterance end as a final signal for the current interim text
-                    if (sessionActive && lastInterimText && !translationInFlight && translationRules) {
+                    // Treat utterance end as a final signal for the current interim text.
+                    // If a translation is already in-flight, queue the final rather than dropping it.
+                    if (sessionActive && lastInterimText && translationRules) {
                         const decision = translationRules.shouldTranslate({
                             text: lastInterimText,
                             isFinal: true,
@@ -1403,7 +1419,12 @@ io.on('connection', (socket) => {
                             clientId: clientId
                         });
                         if (decision.shouldTranslate) {
-                            await performTranslation(lastInterimText, decision, true);
+                            if (translationInFlight) {
+                                pendingTranslation = { transcript: lastInterimText, decision };
+                                logger.info('📋 UtteranceEnd queued (in-flight)', { clientId, preview: lastInterimText.substring(0, 60) });
+                            } else {
+                                await performTranslation(lastInterimText, decision, true);
+                            }
                         }
                     }
                 } catch (err) {
