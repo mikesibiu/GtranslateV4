@@ -1,0 +1,1641 @@
+// GTranslate V5 client — extracted from index.html
+// Requires: socket.io loaded before this script
+
+// Unicode sanitization function to prevent formatting-based attacks
+// Compile regex once for performance
+const SANITIZE_REGEX = /[\u202E\u202D\u202C\u200E\u200F\u200B-\u200D\uFEFF\u0000-\u001F\u007F-\u009F]/g;
+
+function sanitizeText(text) {
+    if (!text) return '';
+    return text.replace(SANITIZE_REGEX, '').trim();
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+class GTranslateV4Client {
+    constructor() {
+        this.socket = null;
+        this.audioContext = null;
+        this.mediaStream = null;
+        this.processor = null;
+        this.isRecording = false;
+        this.translationCount = 0;
+        this.sessionStartTime = null;
+        this.sessionTimer = null;
+        this.wordsTranslated = 0;
+        this.audioChunkBuffer = [];
+        this.audioBufferSize = 4096;
+        this.translationInterval = 6000; // Default: 6 seconds
+        this.interimElements = new Set(); // Track interim DOM elements for fast removal
+        this.audioWorkletLoaded = false; // Prevent loading module multiple times
+        this.lastTranslation = ''; // Store last translated text for EarBuds/TTS display
+        this.lastTranslationTime = 0; // Timestamp of last translation update
+        this.lastEarbudsInterimSpoken = '';
+        this.wakeLockHeartbeat = null;
+
+        // Network quality monitoring
+        this.pingStartTime = null;
+        this.latency = 0;
+        this.latencyHistory = [];
+
+        // Session export data
+        this.sessionTranslations = [];
+        this.MAX_SESSION_TRANSLATIONS = 1000; // Prevent memory exhaustion
+
+        // Mode tracking
+        this.currentMode = 'talks'; // Default mode: talks or earbuds
+
+        // Text-to-Speech
+        this.ttsEnabled = false;
+        this.speechSynthesis = window.speechSynthesis;
+        this.currentUtterance = null;
+        this.ttsQueue = []; // Queue for pending translations to speak
+        this.isSpeaking = false; // Track if currently speaking
+        this.speechRate = 0.9; // Default speech rate (slower = less anxious/rushed)
+        this.voicePreference = 'auto'; // Voice selection preference ('auto' or voice name)
+        this.selectedVoice = null; // Actual voice object when user selects specific voice
+        this.voiceCache = new Map(); // Cache voices by language for fast lookup
+        this.recentlySpoken = []; // Track recently spoken text with timestamps (for duplicate detection)
+        this.lastDedupCleanup = 0; // Last time we cleaned up recentlySpoken array
+
+        // Load saved voice preference from localStorage
+        const savedVoicePreference = localStorage.getItem('gtranslate_voice_preference');
+        if (savedVoicePreference) {
+            this.voicePreference = savedVoicePreference;
+            console.log(`🎤 Loaded saved voice preference: ${this.voicePreference}`);
+        }
+
+        // Screen Wake Lock (keep screen on during recording)
+        this.wakeLock = null;
+
+        // Initialize voice cache (handle race condition)
+        if (this.speechSynthesis) {
+            // Handle voiceschanged event (fires when voices are loaded)
+            this.speechSynthesis.addEventListener('voiceschanged', () => {
+                console.log('🎤 voiceschanged event fired');
+                this.buildVoiceCache();
+            });
+
+            // Try immediate load (works in Safari/Firefox, fails in Chrome/Edge)
+            const immediateVoices = this.speechSynthesis.getVoices();
+            if (immediateVoices.length > 0) {
+                console.log('🎤 Voices available immediately:', immediateVoices.length);
+                this.buildVoiceCache();
+            } else {
+                console.log('🎤 Voices not loaded yet, waiting for voiceschanged event...');
+            }
+        }
+
+        // Check browser compatibility on startup
+        this.checkBrowserCompatibility();
+
+        this.initElements();
+        this.initSocket();
+        this.initModeToggle();
+    }
+
+    checkBrowserCompatibility() {
+        const issues = [];
+
+        // Check for critical features
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            issues.push('❌ MediaDevices API not supported');
+        }
+
+        if (!window.AudioContext && !window.webkitAudioContext) {
+            issues.push('❌ Web Audio API not supported');
+        }
+
+        if (typeof WebSocket === 'undefined') {
+            issues.push('❌ WebSocket not supported');
+        }
+
+        // Check for modern browser features
+        const hasAudioWorklet = typeof AudioWorkletNode !== 'undefined';
+        const hasScriptProcessor = typeof AudioContext !== 'undefined' &&
+                                  AudioContext.prototype.createScriptProcessor;
+
+        if (!hasAudioWorklet && !hasScriptProcessor) {
+            issues.push('❌ No audio processing API available');
+        }
+
+        // Browser detection
+        const ua = navigator.userAgent;
+        const isChrome = /Chrome/.test(ua) && /Google Inc/.test(navigator.vendor);
+        const isSafari = /Safari/.test(ua) && /Apple/.test(navigator.vendor);
+        const isFirefox = /Firefox/.test(ua);
+        const isEdge = /Edg/.test(ua);
+        const isMobile = /Mobile|Android|iPhone|iPad/.test(ua);
+
+        console.log('Browser Compatibility Check:', {
+            browser: isChrome ? 'Chrome' : isSafari ? 'Safari' : isFirefox ? 'Firefox' : isEdge ? 'Edge' : 'Unknown',
+            mobile: isMobile,
+            hasAudioWorklet,
+            hasScriptProcessor,
+            issues
+        });
+
+        // Show warning if compatibility issues found
+        if (issues.length > 0) {
+            console.error('Browser compatibility issues:', issues);
+            alert(
+                'Your browser may not be fully compatible with this application:\n\n' +
+                issues.join('\n') +
+                '\n\nPlease use Chrome, Firefox, Safari, or Edge for the best experience.'
+            );
+        }
+
+        return issues.length === 0;
+    }
+
+    initElements() {
+        this.startBtn = document.getElementById('startBtn');
+        this.stopBtn = document.getElementById('stopBtn');
+        this.audioSource = document.getElementById('audioSource');
+        this.sourceLanguage = document.getElementById('sourceLanguage');
+        this.targetLanguage = document.getElementById('targetLanguage');
+        this.statusDiv = document.getElementById('status');
+        this.interimText = document.getElementById('interimText');
+        this.resultsContainer = document.getElementById('resultsContainer');
+        this.translationCountEl = document.getElementById('translationCount');
+        this.sessionTimeEl = document.getElementById('sessionTime');
+        this.wordsTranslatedEl = document.getElementById('wordsTranslated');
+        this.audioLevelBar = document.getElementById('audioLevelBar');
+        this.audioLevelText = document.getElementById('audioLevelText');
+        this.exportBtn = document.getElementById('exportBtn');
+        this.ttsRateContainer = document.getElementById('ttsRateContainer');
+        this.ttsRateSelect = document.getElementById('ttsRate');
+        this.voiceSelectionContainer = document.getElementById('voiceSelectionContainer');
+        this.voiceSelect = document.getElementById('voiceSelect');
+        this.micGainSlider = document.getElementById('micGainSlider');
+        this.micGainValue = document.getElementById('micGainValue');
+        this.autoGainToggle = document.getElementById('autoGainToggle');
+        this.gainHint = document.getElementById('gainHint');
+
+        this.startBtn.addEventListener('click', () => this.startRecording());
+        this.stopBtn.addEventListener('click', () => this.stopRecording());
+        this.exportBtn.addEventListener('click', () => this.exportSession());
+
+        // Re-acquire wake lock and resume synthesis when page becomes visible again
+        document.addEventListener('visibilitychange', async () => {
+            if (!document.hidden) {
+                // Chrome pauses speechSynthesis when tab is backgrounded — resume it
+                if (this.ttsEnabled && this.speechSynthesis && this.speechSynthesis.paused) {
+                    console.log('📱 Page visible — resuming paused speechSynthesis');
+                    this.speechSynthesis.resume();
+                }
+
+                if (this.isRecording && 'wakeLock' in navigator) {
+                    // Page became visible again while recording - re-acquire wake lock
+                    console.log('📱 Page visible again - re-acquiring wake lock');
+                    try {
+                        await this.requestWakeLock();
+                    } catch (err) {
+                        console.warn('⚠️ Could not re-acquire wake lock on visibility change:', err.message);
+                    }
+                }
+            }
+        });
+
+        // TTS rate control (dropdown)
+        this.ttsRateSelect.addEventListener('change', (e) => {
+            this.speechRate = parseFloat(e.target.value);
+            console.log(`🔊 Speech rate set to ${this.speechRate.toFixed(1)}x`);
+        });
+
+        // Voice selection control
+        this.voiceSelect.addEventListener('change', (e) => {
+            const selectedValue = e.target.value;
+
+            // Log all available voices
+            const allVoices = this.speechSynthesis.getVoices();
+
+            if (selectedValue === 'auto') {
+                // Auto mode - let system choose best voice
+                this.voicePreference = 'auto';
+                this.selectedVoice = null;
+            } else {
+                // Specific voice selected - store the voice object
+                const voice = allVoices.find(v => v.name === selectedValue);
+                if (voice) {
+                    this.voicePreference = selectedValue; // Store voice name
+                    this.selectedVoice = voice; // Store voice object
+                } else {
+                    this.voicePreference = 'auto';
+                    this.selectedVoice = null;
+
+                    // Notify user via console about voice selection failure
+                    console.warn(`⚠️ Selected voice not available. Falling back to AUTO mode.`);
+                }
+            }
+
+            // Save voice preference to localStorage
+            try {
+                localStorage.setItem('gtranslate_voice_preference', this.voicePreference);
+                console.log(`🎤 Voice selection saved: ${this.voicePreference}`);
+            } catch (error) {
+                console.error(`❌ Failed to save voice preference to localStorage:`, error);
+            }
+        });
+
+        // Target language change - update voice dropdown
+        this.targetLanguage.addEventListener('change', () => {
+            // Re-populate voice dropdown for new language
+            this.populateVoiceDropdown();
+
+            // Reset voice selection to auto when language changes
+            if (this.voiceSelect) {
+                this.voiceSelect.value = 'auto';
+                this.voicePreference = 'auto';
+                this.selectedVoice = null;
+
+                try {
+                    localStorage.setItem('gtranslate_voice_preference', 'auto');
+                } catch (error) {
+                    console.error(`❌ Failed to update localStorage:`, error);
+                }
+            }
+        });
+
+        // Microphone gain control — manual slider
+        this.micGainSlider.addEventListener('input', (e) => {
+            const gain = parseFloat(e.target.value);
+            this.micGainValue.textContent = gain.toFixed(1);
+
+            // Disable auto-gain when user manually adjusts slider
+            if (this.autoGainToggle.checked) {
+                this.autoGainToggle.checked = false;
+                this.micGainSlider.disabled = false;
+                this.gainHint.textContent = 'Manual gain mode';
+            }
+
+            // Update both the Web Audio gain node AND the AudioWorklet gain
+            if (this.gainNode) {
+                this.gainNode.gain.value = gain;
+            }
+
+            // Send new gain to AudioWorklet (this also disables auto-gain in worklet)
+            if (this.processor && this.processor.port) {
+                this.processor.port.postMessage({ command: 'setGain', value: gain });
+            }
+
+            console.log(`🎤 Microphone gain manually set to ${gain.toFixed(1)}x`);
+        });
+
+        // Auto-gain toggle
+        this.autoGainToggle.addEventListener('change', (e) => {
+            const autoEnabled = e.target.checked;
+            this.micGainSlider.disabled = autoEnabled;
+            this.gainHint.textContent = autoEnabled
+                ? 'Auto-gain enabled: level adjusts automatically'
+                : 'Manual gain mode';
+
+            if (this.processor && this.processor.port) {
+                this.processor.port.postMessage({ command: 'setAutoGain', value: autoEnabled });
+            }
+
+            console.log(`🎤 Auto-gain ${autoEnabled ? 'enabled' : 'disabled'}`);
+        });
+
+        // Initialize slider state based on auto-gain default
+        this.micGainSlider.disabled = this.autoGainToggle.checked;
+    }
+
+    initSocket() {
+        // Configure Socket.IO with reconnection settings
+        this.socket = io({
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            timeout: 10000
+        });
+
+        this.socket.on('connect', () => {
+            console.log('✅ Connected to server');
+            this.updateStatus('Ready to start', 'ready');
+            this.startLatencyMonitoring();
+        });
+
+        // Latency monitoring with ping/pong
+        this.socket.on('pong', () => {
+            if (this.pingStartTime) {
+                this.latency = Date.now() - this.pingStartTime;
+                this.latencyHistory.push(this.latency);
+
+                // Keep only last 10 measurements
+                if (this.latencyHistory.length > 10) {
+                    this.latencyHistory.shift();
+                }
+
+                const avgLatency = this.latencyHistory.reduce((a, b) => a + b, 0) / this.latencyHistory.length;
+
+                console.log(`📡 Network latency: ${this.latency}ms (avg: ${avgLatency.toFixed(0)}ms)`);
+
+                // Warn if latency is high
+                if (avgLatency > 500) {
+                    console.warn('⚠️ High latency detected, audio quality may be affected');
+                }
+            }
+        });
+
+        this.socket.on('disconnect', (reason) => {
+            console.log('❌ Disconnected from server:', reason);
+            this.updateStatus('Disconnected from server', 'error');
+
+            // Auto-stop recording if disconnected during session
+            if (this.isRecording) {
+                this.stopRecording();
+            }
+        });
+
+        this.socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            this.updateStatus('Cannot connect to server', 'error');
+        });
+
+        this.socket.on('reconnect_attempt', (attemptNumber) => {
+            console.log(`Reconnection attempt ${attemptNumber}...`);
+            this.updateStatus(`Reconnecting... (${attemptNumber}/5)`, 'error');
+        });
+
+        this.socket.on('reconnect_failed', () => {
+            console.error('Reconnection failed');
+            this.updateStatus('Connection failed. Please refresh the page.', 'error');
+            if (this.isRecording) {
+                this.stopRecording();
+            }
+        });
+
+        // Handle server-side connection rejection
+        this.socket.on('connection-error', (data) => {
+            console.error('Connection rejected:', data.message);
+            this.updateStatus(data.message, 'error');
+            alert(data.message); // Show alert for critical connection issues
+        });
+
+        // Handle session timeout
+        this.socket.on('session-timeout', (data) => {
+            console.warn('Session timeout:', data.message);
+            this.updateStatus(data.message, 'error');
+            alert(`Session expired: ${data.message}`);
+            if (this.isRecording) {
+                this.stopRecording();
+            }
+        });
+
+        this.socket.on('streaming-started', (data) => {
+            console.log('🎤 Streaming started', data);
+            this.updateStatus('Listening...', 'listening');
+
+            // Store source language for billing tracking
+            this.currentSourceLanguage = data.sourceLanguage;
+
+            // Start tracking STT time for billing
+            this.sttStartTime = Date.now();
+        });
+
+        this.socket.on('interim-result', (data) => {
+            if (this.currentMode === 'earbuds') {
+                // Show live STT text in earbuds mode so user can confirm mic is working
+                this.interimText.textContent = data.text ? `Hearing: ${data.text}...` : 'Listening...';
+                return;
+            }
+            const hasRecentTranslation = this.lastTranslation &&
+                (Date.now() - this.lastTranslationTime < 20000);
+
+            if (hasRecentTranslation) {
+                this.interimText.textContent = `${this.lastTranslation}...`;
+            } else {
+                this.interimText.textContent = 'Listening...';
+            }
+        });
+
+        this.socket.on('translation-result', (data) => {
+            console.log('📥 TRANSLATION RECEIVED!', data);
+
+            if (data.translated) {
+                this.lastTranslation = sanitizeText(data.translated);
+                this.lastTranslationTime = Date.now();
+            }
+
+            this.addTranslation(data);
+
+            // Track translation usage for billing
+            if (data.translated && this.currentSourceLanguage) {
+                const charCount = data.translated.length;
+                // Assume glossary is used if available (you could enhance this with actual glossary status)
+                const useGlossary = false; // Set to true when glossary is confirmed enabled
+
+                if (useGlossary) {
+                    this.trackBilling('glossary', charCount, this.currentSourceLanguage);
+                } else {
+                    this.trackBilling('translation', charCount, this.currentSourceLanguage);
+                }
+            }
+        });
+
+        this.socket.on('streaming-stopped', (data) => {
+            console.log('⏹️ Streaming stopped', data);
+        });
+
+        this.socket.on('recognition-error', (error) => {
+            console.error('Recognition error:', error);
+            const errorMsg = error.message || JSON.stringify(error);
+            const errorCode = error.code ? String(error.code) : '';
+
+            // Don't show errors for auto-restart events (server handles it)
+            if (!errorCode || (!errorCode.includes('STREAM_ENDED') && !errorCode.includes('STREAM_CLOSED'))) {
+                this.updateStatus(`⚠️ ${errorMsg}`, 'error');
+
+                // Auto-stop only for fatal errors, not stream restarts
+                if (errorCode && errorCode.includes('DESTROYED')) {
+                    console.warn('Stream is dead, stopping recording');
+                    if (this.isRecording) {
+                        this.stopRecording();
+                    }
+                }
+            } else {
+                console.log('Stream restarting...', errorCode);
+            }
+        });
+
+        this.socket.on('translation-error', (error) => {
+            console.error('Translation error:', error);
+        });
+    }
+
+    initModeToggle() {
+        const modeOptions = document.querySelectorAll('.mode-option');
+
+        modeOptions.forEach(option => {
+            option.addEventListener('click', () => {
+                // Remove active class from all options
+                modeOptions.forEach(opt => opt.classList.remove('active'));
+
+                // Add active class to clicked option
+                option.classList.add('active');
+
+                // Update current mode
+                this.currentMode = option.dataset.mode;
+
+                // Update translation interval
+                this.translationInterval = parseInt(option.dataset.interval);
+
+                // Handle TTS auto-enable for EarBuds mode
+                const enableTTS = option.dataset.enableTts === 'true';
+                this.ttsEnabled = enableTTS;
+
+                // Show/hide TTS rate control and voice selection based on TTS state
+                if (this.ttsRateContainer) {
+                    this.ttsRateContainer.style.display = enableTTS ? 'flex' : 'none';
+                }
+                if (this.voiceSelectionContainer) {
+                    this.voiceSelectionContainer.style.display = enableTTS ? 'block' : 'none';
+                }
+
+                // Stop any currently playing speech if TTS is being disabled
+                if (!enableTTS && this.speechSynthesis) {
+                    this.speechSynthesis.cancel();
+                    this.ttsQueue = [];
+                    this.isSpeaking = false;
+                }
+
+                console.log(`Mode changed: ${this.currentMode}, Interval: ${this.translationInterval}ms, TTS: ${enableTTS}`);
+            });
+        });
+    }
+
+    async requestWakeLock() {
+        // Request screen wake lock to keep screen on during recording
+        // Critical for mobile EarBuds mode where user listens with screen off
+        if ('wakeLock' in navigator) {
+            try {
+                this.wakeLock = await navigator.wakeLock.request('screen');
+                console.log('🔒 Screen wake lock acquired - screen will stay on');
+                this.startWakeLockHeartbeat();
+
+                // Re-acquire wake lock automatically if it's released
+                this.wakeLock.addEventListener('release', async () => {
+                    console.log('🔓 Wake lock released - attempting to re-acquire');
+
+                    // Only re-acquire if we're still recording
+                    if (this.isRecording) {
+                        try {
+                            await this.requestWakeLock();
+                            console.log('🔒 Wake lock re-acquired successfully');
+                        } catch (err) {
+                            console.warn('⚠️ Could not re-acquire wake lock:', err.message);
+                        }
+                    }
+                });
+            } catch (err) {
+                console.warn('⚠️ Could not acquire wake lock:', err.message);
+                // Non-fatal - continue without wake lock
+
+                // Warn user on mobile if wake lock fails
+                if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+                    this.updateStatus('⚠️ Screen may turn off - keep phone unlocked', 'warning');
+                }
+            }
+        } else {
+            console.log('ℹ️ Wake Lock API not supported on this device');
+
+            // Warn mobile users that screen must stay on
+            if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+                this.updateStatus('⚠️ Keep screen on - app will stop if screen locks', 'warning');
+                setTimeout(() => {
+                    this.updateStatus('Listening...', 'listening');
+                }, 5000);
+            }
+        }
+    }
+
+    startWakeLockHeartbeat() {
+        if (this.wakeLockHeartbeat || !('wakeLock' in navigator)) {
+            return;
+        }
+
+        this.wakeLockHeartbeat = setInterval(async () => {
+            if (!this.isRecording) {
+                this.stopWakeLockHeartbeat();
+                return;
+            }
+
+            if (!this.wakeLock) {
+                try {
+                    await this.requestWakeLock();
+                } catch (err) {
+                    console.warn('⚠️ Wake lock heartbeat failed:', err.message);
+                }
+            }
+        }, 45000); // Retry roughly every 45 seconds
+    }
+
+    stopWakeLockHeartbeat() {
+        if (this.wakeLockHeartbeat) {
+            clearInterval(this.wakeLockHeartbeat);
+            this.wakeLockHeartbeat = null;
+        }
+    }
+
+    async releaseWakeLock() {
+        if (this.wakeLock) {
+            try {
+                await this.wakeLock.release();
+                this.wakeLock = null;
+                console.log('🔓 Screen wake lock released - screen can turn off');
+            } catch (err) {
+                console.warn('⚠️ Error releasing wake lock:', err);
+            }
+        }
+
+        this.stopWakeLockHeartbeat();
+    }
+
+    async startRecording() {
+        try {
+            // Request wake lock to keep screen on (critical for mobile EarBuds mode)
+            await this.requestWakeLock();
+
+            // Validate inputs before starting
+            const sourceLanguage = this.sourceLanguage.value;
+            const targetLang = this.targetLanguage.value;
+            const audioSourceType = this.audioSource.value;
+
+            // Input validation
+            if (!sourceLanguage || !targetLang) {
+                throw new Error('Please select both source and target languages');
+            }
+
+            const validLanguageCodes = /^[a-z]{2}-[A-Z]{2}$/;
+            const validTargetLanguages = /^[a-z]{2}(-[A-Z]{2})?$/;
+
+            if (!validLanguageCodes.test(sourceLanguage)) {
+                throw new Error('Invalid source language code');
+            }
+
+            if (!validTargetLanguages.test(targetLang)) {
+                throw new Error('Invalid target language code');
+            }
+
+            if (typeof this.translationInterval !== 'number' || this.translationInterval < 1000 || this.translationInterval > 60000) {
+                throw new Error('Invalid translation interval');
+            }
+
+            if (!['microphone', 'system'].includes(audioSourceType)) {
+                throw new Error('Invalid audio source');
+            }
+
+            // Check browser support
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('Your browser does not support audio capture. Please use Chrome, Safari, or Firefox.');
+            }
+
+            // Get audio stream based on selected source
+            if (audioSourceType === 'system') {
+                // Check if mobile device (system audio not supported on mobile)
+                const isMobile = /Mobile|Android|iPhone|iPad|iPod/.test(navigator.userAgent);
+                if (isMobile) {
+                    throw new Error('System audio capture is not available on mobile devices. Please use the Microphone option instead.');
+                }
+
+                // Capture system audio (tab/screen audio)
+                if (!navigator.mediaDevices.getDisplayMedia) {
+                    throw new Error('System audio capture not supported on this device. Please select Microphone.');
+                }
+                this.mediaStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: true,  // Required for getDisplayMedia
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+                console.log('🖥️ System audio capture granted');
+            } else {
+                // Capture microphone (or BlackHole input device)
+                try {
+                    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false,  // Critical: disable auto gain
+                            sampleRate: 48000,
+                            channelCount: 1
+                        }
+                    });
+                    console.log('🎤 Microphone access granted');
+                } catch (micError) {
+                    // Handle specific permission errors
+                    if (micError.name === 'NotAllowedError') {
+                        throw new Error('Microphone permission denied. Please allow microphone access in your browser settings and try again.');
+                    } else if (micError.name === 'NotFoundError') {
+                        throw new Error('No microphone found. Please connect a microphone and try again.');
+                    } else if (micError.name === 'NotReadableError') {
+                        throw new Error('Microphone is already in use by another application. Please close other apps using the microphone and try again.');
+                    } else {
+                        throw micError;
+                    }
+                }
+            }
+
+            console.log('   Audio tracks:', this.mediaStream.getAudioTracks().length);
+            console.log('   Track enabled:', this.mediaStream.getAudioTracks()[0]?.enabled);
+            console.log('   Track settings:', this.mediaStream.getAudioTracks()[0]?.getSettings());
+
+            // Create audio context
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+            console.log('🎧 Audio context created');
+            console.log('   Sample rate:', this.audioContext.sampleRate);
+            console.log('   State:', this.audioContext.state);
+
+            // Fix Safari AudioContext suspended state
+            if (this.audioContext.state === 'suspended') {
+                console.log('⚠️ AudioContext is suspended, resuming...');
+                await this.audioContext.resume();
+                console.log('✅ AudioContext resumed, state:', this.audioContext.state);
+            }
+
+            // Try AudioWorklet first, fallback to ScriptProcessor for older Safari
+            const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+            console.log('🎤 Media stream source created');
+
+            // Create gain node to store gain value (used by ScriptProcessor fallback)
+            // Note: Not connected to audio graph for AudioWorklet (gain applied inside worklet)
+            this.gainNode = this.audioContext.createGain();
+            const gainValue = this.micGainSlider && this.micGainSlider.value ?
+                              parseFloat(this.micGainSlider.value) : 10.0;
+            this.gainNode.gain.value = gainValue;
+            console.log(`🎤 Gain value set to ${gainValue.toFixed(1)}x`);
+
+            // Try AudioWorklet, fallback to ScriptProcessor
+            let usingWorklet = false;
+            if (this.audioContext.audioWorklet && typeof AudioWorkletNode !== 'undefined') {
+                try {
+                    // Load AudioWorklet module only once (prevents memory leak)
+                    if (!this.audioWorkletLoaded) {
+                        await this.audioContext.audioWorklet.addModule('audio-processor.js');
+                        this.audioWorkletLoaded = true;
+                        console.log('✅ AudioWorklet module loaded');
+                    } else {
+                        console.log('✅ AudioWorklet module already loaded (reusing)');
+                    }
+
+                    // Create AudioWorkletNode
+                    this.processor = new AudioWorkletNode(this.audioContext, 'audio-processor');
+                    usingWorklet = true;
+
+                    // Send gain settings to AudioWorklet
+                    const autoGainOn = this.autoGainToggle && this.autoGainToggle.checked;
+                    if (autoGainOn) {
+                        this.processor.port.postMessage({ command: 'setAutoGain', value: true });
+                    } else {
+                        const gainValue = this.micGainSlider && this.micGainSlider.value ?
+                                          parseFloat(this.micGainSlider.value) : 10.0;
+                        this.processor.port.postMessage({ command: 'setGain', value: gainValue });
+                    }
+
+                    console.log(`✅ Using AudioWorklet for audio processing (autoGain: ${autoGainOn})`);
+                } catch (workletError) {
+                    console.warn('⚠️ AudioWorklet failed, falling back to ScriptProcessor:', workletError);
+                }
+            }
+
+            // Fallback to ScriptProcessor for Safari < 14.1
+            // (includes simple AGC for the fallback path)
+            if (!usingWorklet) {
+                console.log('⚠️ Using ScriptProcessor fallback (deprecated but widely supported)');
+                this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+
+                // AGC state for ScriptProcessor fallback
+                let spGain = this.gainNode ? this.gainNode.gain.value : 10.0;
+                let spLevelSmooth = 0.0;
+                const spTarget = 0.35;
+
+                this.processor.onaudioprocess = (event) => {
+                    if (!this.isRecording) return;
+
+                    const inputData = event.inputBuffer.getChannelData(0);
+
+                    // AGC: measure raw peak and adjust gain
+                    if (this.autoGainToggle && this.autoGainToggle.checked) {
+                        let rawPeak = 0;
+                        for (let i = 0; i < inputData.length; i++) {
+                            const abs = Math.abs(inputData[i]);
+                            if (abs > rawPeak) rawPeak = abs;
+                        }
+                        spLevelSmooth = spLevelSmooth * 0.9 + rawPeak * 0.1;
+                        if (spLevelSmooth > 0.001) {
+                            const desired = spTarget / spLevelSmooth;
+                            const coeff = desired < spGain ? 0.15 : 0.005;
+                            spGain += (desired - spGain) * coeff;
+                            spGain = Math.max(1.0, Math.min(60.0, spGain));
+                        }
+                    } else {
+                        spGain = this.gainNode ? this.gainNode.gain.value : 10.0;
+                    }
+
+                    // Apply gain, calculate level, convert to Int16
+                    let maxLevel = 0;
+                    const int16Data = new Int16Array(inputData.length);
+
+                    for (let i = 0; i < inputData.length; i++) {
+                        const amplifiedSample = inputData[i] * spGain;
+                        const absSample = Math.abs(amplifiedSample);
+                        if (absSample > maxLevel) maxLevel = absSample;
+                        const clamped = amplifiedSample < -1 ? -1 : (amplifiedSample > 1 ? 1 : amplifiedSample);
+                        int16Data[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
+                    }
+
+                    // Update gain display
+                    if (this.autoGainToggle && this.autoGainToggle.checked) {
+                        this.micGainValue.textContent = spGain.toFixed(1);
+                    }
+
+                    this.updateAudioLevel(maxLevel);
+                    this.socket.emit('audio-data', int16Data.buffer);
+                };
+            }
+
+            // Only setup port message handler for AudioWorklet
+            if (usingWorklet) {
+                let messageCount = 0;
+                this.processor.port.onmessage = (event) => {
+                    if (!this.isRecording) return;
+
+                    const audioData = event.data.audioData;
+                    const level = event.data.level;
+
+                    // Debug first few messages
+                    messageCount++;
+                    if (messageCount <= 5) {
+                        const buffer = new Int16Array(audioData);
+                        const samples = Array.from(buffer.slice(0, 10));
+                        const maxSample = Math.max(...samples.map(s => Math.abs(s)));
+                        const hasAudio = maxSample > 100;
+                        console.log(`📊 AudioWorklet message #${messageCount}:`, {
+                            byteLength: audioData.byteLength,
+                            firstSamples: samples,
+                            maxSample,
+                            levelFloat: level.toFixed(4),
+                            hasAudio,
+                            recommendation: hasAudio ? '✅ Good' : '⚠️ TOO QUIET - Speak louder or check mic volume'
+                        });
+                    }
+
+                    // Update visual level meter
+                    this.updateAudioLevel(level);
+
+                    // Update gain display when auto-gain is active
+                    if (event.data.currentGain !== undefined && this.autoGainToggle && this.autoGainToggle.checked) {
+                        const g = event.data.currentGain;
+                        this.micGainValue.textContent = g.toFixed(1);
+                        this.micGainSlider.value = Math.min(g, parseFloat(this.micGainSlider.max));
+                    }
+
+                    // Send audio data to server
+                    this.socket.emit('audio-data', audioData);
+                };
+            }
+
+            // Force stereo output so TTS plays in both ears
+            // Without this, mono processor → destination can put iOS audio session in mono mode
+            this.audioContext.destination.channelCount = 2;
+
+            // Connect audio graph based on processor type
+            if (usingWorklet) {
+                // AudioWorklet: source → processor (gain applied inside worklet) → silent output
+                // Do NOT use Web Audio gainNode - would apply gain twice (10x × 10x = 100x!)
+                source.connect(this.processor);
+
+                // CRITICAL: Connect processor to a GainNode set to 0.001 then to destination
+                // This keeps the AudioWorklet alive without actually outputting audible sound
+                // If we don't connect to destination, browser may stop processing audio
+                // Note: 0.001 is imperceptible even at max volume, but not optimized away by browser
+                const silentGain = this.audioContext.createGain();
+                silentGain.gain.value = 0.001; // Nearly silent (avoids browser optimization)
+                silentGain.channelCount = 2;
+                silentGain.channelCountMode = 'explicit';
+                silentGain.channelInterpretation = 'speakers'; // Upmix mono → stereo
+                this.processor.connect(silentGain);
+                silentGain.connect(this.audioContext.destination);
+
+                console.log('🔇 AudioWorklet connected: source → processor → stereo silent output (0.001x)');
+            } else {
+                // ScriptProcessor: source → processor (gain applied inside processor code)
+                // Gain is applied manually in onaudioprocess handler
+                source.connect(this.processor);
+
+                const silentStereo = this.audioContext.createGain();
+                silentStereo.channelCount = 2;
+                silentStereo.channelCountMode = 'explicit';
+                silentStereo.channelInterpretation = 'speakers';
+                this.processor.connect(silentStereo);
+                silentStereo.connect(this.audioContext.destination);
+
+                console.log('🔇 ScriptProcessor connected: source → processor → stereo output');
+            }
+
+            // Start streaming on server (with validated inputs and mode)
+            console.log('📤 CLIENT: Sending mode:', this.currentMode, 'interval:', this.translationInterval, 'ms');
+            this.socket.emit('start-streaming', {
+                sourceLanguage: sourceLanguage,
+                targetLang: targetLang,
+                translationInterval: this.translationInterval,
+                mode: this.currentMode,  // Send mode to server for centralized rules
+                sampleRate: this.audioContext ? this.audioContext.sampleRate : 48000
+            });
+
+            this.isRecording = true;
+            this.translationCount = 0;
+            this.wordsTranslated = 0;
+            this.resultsContainer.innerHTML = '';
+            this.startBtn.disabled = true;
+            this.stopBtn.disabled = false;
+            this.audioSource.disabled = true;
+            this.sourceLanguage.disabled = true;
+            this.targetLanguage.disabled = true;
+
+            this.startSessionTimer();
+
+        } catch (error) {
+            console.error('Failed to start recording:', error);
+            this.updateStatus(`Error: ${error.message}`, 'error');
+        }
+    }
+
+    stopRecording() {
+        this.isRecording = false;
+
+        // Track STT usage for billing
+        if (this.sttStartTime && this.currentSourceLanguage) {
+            const sttDurationMs = Date.now() - this.sttStartTime;
+            const sttMinutes = sttDurationMs / 60000;
+            this.trackBilling('stt', sttMinutes, this.currentSourceLanguage);
+            this.sttStartTime = null;
+        }
+
+        // Release wake lock - screen can turn off now
+        this.releaseWakeLock();
+
+        if (this.gainNode) {
+            this.gainNode.disconnect();
+            this.gainNode = null;
+        }
+
+        if (this.processor) {
+            // Send stop message to AudioWorklet (only if it has a port)
+            if (this.processor.port) {
+                this.processor.port.postMessage({ command: 'stop' });
+            }
+            this.processor.disconnect();
+            this.processor = null;
+        }
+
+        if (this.audioContext) {
+            this.audioContext.close();
+            this.audioContext = null;
+            this.audioWorkletLoaded = false; // Reset flag so new AudioContext can load module
+        }
+
+        if (this.mediaStream) {
+            this.mediaStream.getTracks().forEach(track => track.stop());
+            this.mediaStream = null;
+        }
+
+        this.audioChunkBuffer = [];
+
+        this.socket.emit('stop-streaming');
+
+        this.startBtn.disabled = false;
+        this.stopBtn.disabled = true;
+        this.audioSource.disabled = false;
+        this.sourceLanguage.disabled = false;
+        this.targetLanguage.disabled = false;
+
+        this.stopSessionTimer();
+        this.updateStatus('Ready to start', 'ready');
+        this.interimText.textContent = 'Waiting for speech...';
+        this.lastTranslation = '';
+        this.lastTranslationTime = 0;
+
+        // Stop any playing speech and clear queue
+        if (this.speechSynthesis) {
+            this.speechSynthesis.cancel();
+            this.ttsQueue = []; // Clear pending translations
+            this.isSpeaking = false;
+            console.log('🔇 TTS stopped and queue cleared');
+        }
+    }
+
+    addTranslation(data) {
+        // Server-side duplicate detection handles dedup (3 layers in translation-rules-engine)
+        // Client-side dedup removed to avoid silently dropping legitimate translations
+
+        // Display translations on screen (ALL modes including EarBuds)
+        this.translationCount++;
+        this.wordsTranslated += data.original.split(/\s+/).length;
+
+        this.translationCountEl.textContent = `${this.translationCount} translations`;
+        this.wordsTranslatedEl.textContent = this.wordsTranslated;
+
+        // Store translation for export (only final translations)
+        if (!data.isInterim) {
+            this.sessionTranslations.push({
+                timestamp: new Date().toISOString(),
+                original: data.original,
+                translated: data.translated
+            });
+
+            // Prevent memory exhaustion with auto-export
+            if (this.sessionTranslations.length > this.MAX_SESSION_TRANSLATIONS) {
+                console.warn(`⚠️ Session translation limit reached (${this.MAX_SESSION_TRANSLATIONS}), auto-exporting oldest 500...`);
+
+                // Export oldest 500 to file
+                const oldTranslations = this.sessionTranslations.splice(0, 500);
+                this.exportPartialSession(oldTranslations);
+            }
+
+            // Enable export button once we have translations
+            this.exportBtn.disabled = false;
+
+            // Speak final translations only (EarBuds auto-enables TTS)
+            this.lastEarbudsInterimSpoken = '';
+            this.speakTranslation(data.translated, this.targetLanguage.value);
+        }
+
+        // If this is a final translation (not interim), clear all previous interim translations
+        if (!data.isInterim) {
+            this.clearInterimTranslations();
+        }
+
+        // EarBuds mode: Audio-first, skip visual translation cards (only show STT interim text)
+        if (this.currentMode === 'earbuds') {
+            return; // Skip visual display in EarBuds mode
+        }
+
+        // Use template literals for faster HTML construction
+        const item = document.createElement('div');
+        item.className = data.isInterim ? 'translation-item interim' : 'translation-item';
+
+        item.innerHTML = `
+            <div class="original">📝 ${escapeHtml(sanitizeText(data.original))}</div>
+            <div class="translated">💬 ${escapeHtml(sanitizeText(data.translated))}</div>
+        `;
+
+        // Track interim elements for fast removal
+        if (data.isInterim) {
+            this.interimElements.add(item);
+        }
+
+        // Use fragment to batch DOM operations
+        const fragment = document.createDocumentFragment();
+        fragment.appendChild(item);
+        this.resultsContainer.insertBefore(fragment, this.resultsContainer.firstChild);
+
+        // Limit DOM size to prevent performance degradation
+        const maxItems = 50;
+        while (this.resultsContainer.children.length > maxItems) {
+            const lastChild = this.resultsContainer.lastChild;
+            // Remove from interim tracking if applicable
+            this.interimElements.delete(lastChild);
+            this.resultsContainer.removeChild(lastChild);
+        }
+    }
+
+    clearInterimTranslations() {
+        // O(n) removal without DOM queries
+        this.interimElements.forEach(element => {
+            if (element.parentNode) {
+                element.parentNode.removeChild(element);
+            }
+        });
+        this.interimElements.clear();
+    }
+
+    startSessionTimer() {
+        this.sessionStartTime = Date.now();
+        this.sessionTimer = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - this.sessionStartTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            this.sessionTimeEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }, 1000);
+    }
+
+    stopSessionTimer() {
+        if (this.sessionTimer) {
+            clearInterval(this.sessionTimer);
+            this.sessionTimer = null;
+        }
+    }
+
+    updateStatus(message, type) {
+        this.statusDiv.textContent = message;
+        this.statusDiv.className = `status ${type}`;
+    }
+
+    startLatencyMonitoring() {
+        // Ping server every 5 seconds to measure latency
+        this.latencyMonitorInterval = setInterval(() => {
+            this.pingStartTime = Date.now();
+            this.socket.emit('ping');
+        }, 5000);
+    }
+
+    stopLatencyMonitoring() {
+        if (this.latencyMonitorInterval) {
+            clearInterval(this.latencyMonitorInterval);
+            this.latencyMonitorInterval = null;
+        }
+    }
+
+    async trackBilling(type, amount, language) {
+        // Send billing data to API for persistent storage in database
+        try {
+            const response = await fetch('/api/billing/track', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ type, amount, language })
+            });
+
+            if (response.ok) {
+                console.log(`💰 Billing tracked: ${type} = ${amount.toFixed(2)} for ${language || 'unknown'}`);
+            } else {
+                console.warn('Failed to track billing:', await response.text());
+            }
+        } catch (e) {
+            console.warn('Failed to track billing:', e);
+        }
+
+        // Also update localStorage as a backup/cache (for offline viewing)
+        try {
+            const billingData = JSON.parse(localStorage.getItem('gtranslate_billing_session') || '{}');
+
+            // Initialize if needed
+            if (!billingData.languages) {
+                billingData.languages = {};
+                billingData.sttMinutes = 0;
+                billingData.translationChars = 0;
+                billingData.glossaryChars = 0;
+                billingData.startTime = Date.now();
+            }
+
+            // Update totals
+            switch(type) {
+                case 'stt':
+                    billingData.sttMinutes = (billingData.sttMinutes || 0) + amount;
+                    break;
+                case 'translation':
+                    billingData.translationChars = (billingData.translationChars || 0) + amount;
+                    break;
+                case 'glossary':
+                    billingData.glossaryChars = (billingData.glossaryChars || 0) + amount;
+                    break;
+            }
+
+            // Update per-language
+            if (language) {
+                if (!billingData.languages[language]) {
+                    billingData.languages[language] = {
+                        sttMinutes: 0,
+                        translationChars: 0,
+                        glossaryChars: 0
+                    };
+                }
+
+                switch(type) {
+                    case 'stt':
+                        billingData.languages[language].sttMinutes += amount;
+                        break;
+                    case 'translation':
+                        billingData.languages[language].translationChars += amount;
+                        break;
+                    case 'glossary':
+                        billingData.languages[language].glossaryChars += amount;
+                        break;
+                }
+            }
+
+            localStorage.setItem('gtranslate_billing_session', JSON.stringify(billingData));
+        } catch (e) {
+            console.warn('Failed to update localStorage billing:', e);
+        }
+    }
+
+    exportSession() {
+        if (this.sessionTranslations.length === 0) {
+            alert('No translations to export');
+            return;
+        }
+
+        // Create export data
+        const exportData = {
+            sessionDate: new Date().toISOString(),
+            translationCount: this.sessionTranslations.length,
+            wordsTranslated: this.wordsTranslated,
+            translations: this.sessionTranslations
+        };
+
+        // Generate filename
+        const dateStr = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+        const filename = `gtranslate-session-${dateStr}.json`;
+
+        // Create blob and download
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+
+        // Cleanup with delay to ensure download starts
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 100);
+
+        console.log(`✅ Session exported: ${filename} (${this.sessionTranslations.length} translations)`);
+    }
+
+    exportPartialSession(translations) {
+        const exportData = {
+            sessionDate: new Date().toISOString(),
+            translationCount: translations.length,
+            isPartialExport: true,
+            note: 'Auto-exported due to reaching session limit',
+            translations: translations
+        };
+
+        const dateStr = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+        const filename = `gtranslate-partial-${dateStr}.json`;
+
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 100);
+
+        console.log(`📦 Partial session auto-exported: ${filename} (${translations.length} translations)`);
+    }
+
+    speakTranslation(text, targetLanguage, options = {}) {
+        const { recordHistory = true } = options;
+        if (!this.ttsEnabled || !this.speechSynthesis) {
+            return;
+        }
+
+        // Normalize text for comparison (trim whitespace, lowercase)
+        const normalizedText = text.trim().toLowerCase();
+
+        // Skip empty text
+        if (normalizedText.length === 0) {
+            return;
+        }
+
+        // Clean up old entries periodically (not on every call for performance)
+        const now = Date.now();
+        const safeInterval = (typeof this.translationInterval === 'number' && this.translationInterval > 0)
+            ? this.translationInterval
+            : 10000;
+        const DEDUP_WINDOW_MS = Math.max(safeInterval * 2, 12000);
+
+        if (!this.lastDedupCleanup || now - this.lastDedupCleanup > 5000 || this.recentlySpoken.length > 50) {
+            this.recentlySpoken = this.recentlySpoken.filter(entry =>
+                now - entry.timestamp < DEDUP_WINDOW_MS
+            );
+            this.lastDedupCleanup = now;
+        }
+
+        // Check for duplicates in recently spoken
+        const isDuplicate = this.recentlySpoken.some(entry => {
+            // Exact match
+            if (entry.text === normalizedText) {
+                console.log(`⏭️ [DEDUP] Exact match - skipping`);
+                return true;
+            }
+
+            // Only apply substring checks if both texts are substantial (>= 10 chars)
+            const bothSubstantial = entry.text.length >= 10 && normalizedText.length >= 10;
+
+            if (bothSubstantial) {
+                // New text is subset of old (old contains new)
+                if (entry.text.includes(normalizedText)) {
+                    console.log(`⏭️ [DEDUP] New is substring of old - skipping`);
+                    return true;
+                }
+
+                // Old text is subset of new (new contains old)
+                if (normalizedText.includes(entry.text)) {
+                    const overlap = entry.text.length / normalizedText.length;
+                    const additionalChars = normalizedText.length - entry.text.length;
+
+                    // Block if >80% overlap AND less than 10 new characters
+                    if (overlap > 0.80 && additionalChars < 10) {
+                        console.log(`⏭️ [DEDUP] Too similar - ${(overlap*100).toFixed(0)}% overlap, +${additionalChars} chars`);
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        });
+
+        if (isDuplicate) {
+            return;
+        }
+
+        // Skip if already in queue
+        const alreadyInQueue = this.ttsQueue.some(item =>
+            item.text.trim().toLowerCase() === normalizedText
+        );
+        if (alreadyInQueue) {
+            console.log(`⏭️ [DEDUP] Already in queue - skipping`);
+            return;
+        }
+
+        // Add to queue
+        this.ttsQueue.push({ text, targetLanguage });
+
+        // Add to recentlySpoken IMMEDIATELY to prevent race conditions
+        if (recordHistory) {
+            this.recentlySpoken.push({
+                text: normalizedText,
+                timestamp: Date.now()
+            });
+        }
+
+        console.log(`📝 Added to TTS queue (${this.ttsQueue.length} pending): "${text.substring(0, 50)}..."`);
+
+        // Start processing queue if not already speaking
+        if (!this.isSpeaking) {
+            this.processNextInQueue();
+        } else {
+            // Watchdog: Chrome synthesis can silently crash leaving isSpeaking stuck true.
+            // If we've been "speaking" for >25s with no onend event, reset and restart.
+            const stuckMs = this._speakStartTime ? Date.now() - this._speakStartTime : 0;
+            if (stuckMs > 25000) {
+                console.warn(`⚠️ [TTS] isSpeaking stuck for ${Math.round(stuckMs / 1000)}s — Chrome synthesis may have crashed, resetting`);
+                this.isSpeaking = false;
+                this._speakStartTime = 0;
+                this.speechSynthesis.cancel();
+                this.processNextInQueue();
+            }
+        }
+    }
+
+    buildVoiceCache() {
+        this.voiceCache.clear();
+        const voices = this.speechSynthesis.getVoices();
+
+        // Group voices by language code for instant O(1) lookup
+        voices.forEach(voice => {
+            const baseLang = voice.lang.split('-')[0];
+
+            if (!this.voiceCache.has(voice.lang)) {
+                this.voiceCache.set(voice.lang, []);
+            }
+            if (!this.voiceCache.has(baseLang)) {
+                this.voiceCache.set(baseLang, []);
+            }
+
+            this.voiceCache.get(voice.lang).push(voice);
+            this.voiceCache.get(baseLang).push(voice);
+        });
+
+        console.log(`✅ Voice cache built: ${this.voiceCache.size} language variants, ${voices.length} total voices`);
+
+        // Log high-quality voices for debugging
+        const highQualityVoices = voices.filter(v =>
+            v.name.includes('Neural') || v.name.includes('Wavenet') || v.name.includes('Studio') ||
+            v.name.includes('Premium') || v.name.includes('Enhanced') || v.name.includes('Natural') ||
+            (v.name.includes('Microsoft') && v.name.includes('Online')) ||
+            (v.name.includes('Google') && !v.localService)
+        );
+        if (highQualityVoices.length > 0) {
+            console.log(`🎙️ High-quality voices available:`, highQualityVoices.map(v => `${v.name} [${v.lang}]`));
+        } else {
+            console.log(`⚠️ No high-quality voices detected. Available voices:`, voices.slice(0, 10).map(v => `${v.name} [${v.lang}]`));
+        }
+
+        // Update voice dropdown with available voices
+        this.populateVoiceDropdown();
+    }
+
+    populateVoiceDropdown() {
+        if (!this.voiceSelect) return;
+
+        const voices = this.speechSynthesis.getVoices();
+
+        // Log ALL available voices for debugging
+        console.log(`🎤 ALL VOICES (${voices.length} total):`, voices.map(v => `${v.name} [${v.lang}] ${v.localService ? 'Local' : 'Cloud'}`));
+
+        // Get current target language if available
+        const targetLang = this.targetLanguage?.value || 'en';
+
+        // Filter voices for current language
+        const relevantVoices = voices.filter(v =>
+            v.lang.startsWith(targetLang) || v.lang.split('-')[0] === targetLang
+        );
+
+        console.log(`🎤 Found ${relevantVoices.length} voices for language: ${targetLang}`);
+        console.log(`🎤 Filtered voices:`, relevantVoices.map(v => `${v.name} [${v.lang}]`));
+
+        // Clear existing options except "Auto"
+        this.voiceSelect.innerHTML = '<option value="auto">Auto (Best Quality)</option>';
+
+        // Add ALL relevant voices (not just top 4) so user can see everything
+        relevantVoices.forEach((voice) => {
+            const option = document.createElement('option');
+            option.value = voice.name;
+            option.textContent = `${voice.name} ${voice.localService ? '(Local)' : '(Cloud)'}`;
+            this.voiceSelect.appendChild(option);
+        });
+
+        console.log(`🎤 Populated dropdown with ${relevantVoices.length} voices`);
+
+        // Restore saved voice preference if applicable
+        if (this.voicePreference && this.voicePreference !== 'auto') {
+            // Try to find the saved voice in the current language's voices
+            const savedVoice = voices.find(v => v.name === this.voicePreference);
+            if (savedVoice) {
+                // Check if voice is in the dropdown (matches current language)
+                const isInDropdown = relevantVoices.some(v => v.name === this.voicePreference);
+                if (isInDropdown) {
+                    this.voiceSelect.value = this.voicePreference;
+                    this.selectedVoice = savedVoice;
+                    console.log(`🎤 Restored saved voice: ${savedVoice.name} [${savedVoice.lang}]`);
+                } else {
+                    // Saved voice doesn't match current language - reset to auto
+                    console.log(`🎤 Saved voice "${this.voicePreference}" not available for ${targetLang}, resetting to auto`);
+                    this.voiceSelect.value = 'auto';
+                    this.voicePreference = 'auto';
+                    this.selectedVoice = null;
+                }
+            }
+        } else {
+            // Ensure dropdown shows "auto"
+            this.voiceSelect.value = 'auto';
+        }
+    }
+
+    processNextInQueue() {
+        // Check if queue is empty
+        if (this.ttsQueue.length === 0) {
+            this.isSpeaking = false;
+            return;
+        }
+
+        // CRITICAL: Ensure voices are loaded before processing TTS
+        let allVoices = this.speechSynthesis.getVoices();
+
+        if (allVoices.length === 0) {
+            console.warn('⚠️ Voices not loaded yet, retrying in 100ms...');
+            // Don't dequeue yet - will retry
+            this.isSpeaking = false;
+
+            // Retry after short delay
+            setTimeout(() => {
+                if (this.ttsQueue.length > 0 && !this.isSpeaking) {
+                    this.processNextInQueue();
+                }
+            }, 100);
+            return;
+        }
+
+        // Rebuild voice cache if empty (race condition protection)
+        if (this.voiceCache.size === 0) {
+            console.warn('⚠️ Voice cache empty, rebuilding...');
+            this.buildVoiceCache();
+        }
+
+        // Get next item from queue
+        const { text, targetLanguage } = this.ttsQueue.shift();
+        this.isSpeaking = true;
+        this._speakStartTime = Date.now(); // Watchdog timestamp
+
+        // Note: Already added to recentlySpoken in speakTranslation() to prevent race conditions
+        // Don't add again here or we'll have duplicates in the tracking array
+
+        // Create utterance
+        const utterance = new SpeechSynthesisUtterance(text);
+        this.currentUtterance = utterance;
+
+        // Map target language codes to speech synthesis language codes
+        const langMap = {
+            'en': 'en-US',
+            'en-US': 'en-US',
+            'es': 'es-ES',
+            'fr': 'fr-FR',
+            'de': 'de-DE',
+            'it': 'it-IT',
+            'pt': 'pt-PT',
+            'ru': 'ru-RU',
+            'ja': 'ja-JP',
+            'ko': 'ko-KR',
+            'zh': 'zh-CN',
+            'ar': 'ar-SA',
+            'hi': 'hi-IN',
+            'ro': 'ro-RO'
+        };
+
+        // Set language for voice
+        const speechLang = langMap[targetLanguage] || targetLanguage || 'en-US';
+        utterance.lang = speechLang;
+
+        // O(1) lookup from voice cache instead of O(n) search
+        const langVoices = this.voiceCache.get(speechLang) ||
+                           this.voiceCache.get(speechLang.split('-')[0]) ||
+                           [];
+
+        // Find best voice based on user preference
+        let preferredVoice;
+
+        if (this.selectedVoice) {
+            // User selected a specific voice from dropdown - use it directly
+            preferredVoice = this.selectedVoice;
+            console.log(`🔊 Using user-selected voice: ${preferredVoice.name} [${preferredVoice.lang}]`);
+        } else if (this.voicePreference === 'auto') {
+            // Auto mode - prioritize most natural sounding
+            preferredVoice =
+                // Priority 1: Google Cloud voices (most natural - Neural/Wavenet/Studio)
+                langVoices.find(voice =>
+                    voice.name.includes('Google') &&
+                    (voice.name.includes('Neural') || voice.name.includes('Studio') || voice.name.includes('Wavenet') || voice.name.includes('Natural'))
+                ) ||
+                // Priority 2: Microsoft high-quality voices (Edge/Azure)
+                langVoices.find(voice =>
+                    (voice.name.includes('Microsoft') || voice.name.includes('Edge')) &&
+                    (voice.name.includes('Neural') || voice.name.includes('Online'))
+                ) ||
+                // Priority 3: Apple premium voices (macOS/iOS)
+                langVoices.find(voice =>
+                    (voice.name.includes('Premium') || voice.name.includes('Enhanced')) ||
+                    (voice.name.includes('Samantha') || voice.name.includes('Alex') ||
+                     voice.name.includes('Karen') || voice.name.includes('Tessa') ||
+                     voice.name.includes('Flo') || voice.name.includes('Grandma') ||
+                     voice.name.includes('Eddy') || voice.name.includes('Reed'))
+                ) ||
+                // Priority 4: Any remote/cloud voice (usually better quality)
+                langVoices.find(voice => voice.localService === false) ||
+                // Priority 5: English-specific high quality voices
+                langVoices.find(voice =>
+                    voice.name.includes('Daniel') || voice.name.includes('Moira') ||
+                    voice.name.includes('Amelie') || voice.name.includes('Anna')
+                ) ||
+                // Priority 6: First available local voice
+                langVoices[0];
+        } else {
+            // Fallback: try to find voice by name (for legacy saved preferences)
+            const allVoices = this.speechSynthesis.getVoices();
+            preferredVoice = allVoices.find(v => v.name === this.voicePreference);
+
+            // Fallback to auto selection if exact match not found
+            if (!preferredVoice) {
+                console.warn(`⚠️ Saved voice "${this.voicePreference}" not found, using auto selection`);
+                preferredVoice = langVoices[0];
+            }
+        }
+
+        // Final fallback if no voice found for target language
+        if (!preferredVoice && langVoices.length > 0) {
+            preferredVoice = langVoices[0];
+            console.warn(`⚠️ Using fallback voice for ${speechLang}: ${preferredVoice.name}`);
+        }
+
+        // CRITICAL: If still no voice, use ANY available voice (prevents silent failure on mobile)
+        if (!preferredVoice && allVoices.length > 0) {
+            preferredVoice = allVoices[0];
+            console.error(`❌ No matching voice found, using first available: ${preferredVoice.name}`);
+        }
+
+        // Fail gracefully if absolutely no voices available
+        if (!preferredVoice) {
+            console.error('❌ CRITICAL: No voices available at all! Cannot play TTS.');
+            this.processNextInQueue(); // Skip this item and continue
+            return;
+        }
+
+        utterance.voice = preferredVoice;
+        console.log(`🔊 Using voice: ${preferredVoice.name} (${preferredVoice.lang}) - Local: ${preferredVoice.localService}`);
+
+        // Speech settings - optimize based on voice quality
+        // High-quality voices sound better at normal pitch, low-quality need lower pitch
+        const isHighQuality = preferredVoice && (
+            preferredVoice.name.includes('Neural') ||
+            preferredVoice.name.includes('Wavenet') ||
+            preferredVoice.name.includes('Studio') ||
+            preferredVoice.name.includes('Premium') ||
+            preferredVoice.name.includes('Enhanced') ||
+            !preferredVoice.localService
+        );
+
+        utterance.rate = this.speechRate;
+        utterance.pitch = isHighQuality ? 1.0 : 0.92; // Natural pitch for HQ voices, lower for robotic ones
+        utterance.volume = 1.0;
+
+        console.log(`🔊 TTS Settings: rate=${utterance.rate}, pitch=${utterance.pitch}, volume=${utterance.volume}, highQuality=${isHighQuality}`);
+
+        // Event handlers
+        utterance.onstart = () => {
+            console.log(`🔊 Speaking (${this.ttsQueue.length} in queue): "${text.substring(0, 50)}..."`);
+            console.log(`🔊 Actual utterance rate: ${utterance.rate}, pitch: ${utterance.pitch}`);
+        };
+
+        utterance.onend = () => {
+            console.log(`✅ Finished speaking`);
+            // Process next item in queue
+            this.processNextInQueue();
+        };
+
+        utterance.onerror = (event) => {
+            console.error('🔊 Speech synthesis error:', event.error);
+            // Continue to next item even on error
+            this.processNextInQueue();
+        };
+
+        // Chrome bug: synthesis can get stuck in paused state when tab is backgrounded
+        if (this.speechSynthesis.paused) {
+            this.speechSynthesis.resume();
+        }
+
+        // Speak
+        this.speechSynthesis.speak(utterance);
+    }
+
+    updateAudioLevel(level) {
+        // level is 0.0 to 1.0
+        const percentage = Math.round(level * 100);
+        this.audioLevelBar.style.width = `${percentage}%`;
+        this.audioLevelText.textContent = `${percentage}%`;
+
+        // Change color based on level
+        if (level < 0.01) {
+            this.audioLevelText.style.color = '#999'; // Too quiet
+        } else if (level < 0.1) {
+            this.audioLevelText.style.color = '#ff9800'; // Weak
+        } else {
+            this.audioLevelText.style.color = '#4caf50'; // Good
+        }
+    }
+}
+
+// Initialize app
+const app = new GTranslateV4Client();

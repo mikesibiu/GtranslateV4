@@ -340,6 +340,10 @@ app.get('/audio-processor.js', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'audio-processor.js'));
 });
 
+app.get('/client.js', requireAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, 'client.js'));
+});
+
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 app.get('/health', (req, res) => {
