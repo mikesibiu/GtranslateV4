@@ -30,7 +30,7 @@ async trackBilling(type, amount, language) {
         });
 
         if (response.ok) {
-            console.log(`💰 Billing tracked: ${type} = ${amount.toFixed(2)} for ${language || 'unknown'}`);
+            console.log(`💰 Billing tracked: ${type} = ${Number(amount).toFixed(2)} for ${language || 'unknown'}`);
         } else {
             console.warn('Failed to track billing:', await response.text());
         }

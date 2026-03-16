@@ -310,8 +310,8 @@ processNextInQueue() {
             langVoices[0];
     } else {
         // Fallback: try to find voice by name (for legacy saved preferences)
-        const allVoices = this.speechSynthesis.getVoices();
-        preferredVoice = allVoices.find(v => v.name === this.voicePreference);
+        const savedVoices = this.speechSynthesis.getVoices();
+        preferredVoice = savedVoices.find(v => v.name === this.voicePreference);
 
         // Fallback to auto selection if exact match not found
         if (!preferredVoice) {
