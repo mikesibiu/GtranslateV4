@@ -43,37 +43,64 @@ http://localhost:3003
 
 ```
 GtranslateV4/
-├── server.js                  # Main server with Socket.IO
-├── index.html                 # Web interface
-├── audio-processor.js         # AudioWorklet processor
-├── package.json               # Dependencies
-├── docker-compose.yml         # Docker orchestration
-├── google-credentials.json    # Google Cloud credentials (you create)
+├── server.js                       # Main server with Socket.IO, Google STT + Translation
+├── index.html                      # Web interface (HTML + CSS only, ~805 lines)
+├── audio-processor.js              # AudioWorklet processor for mic capture
 │
-├── docker/                    # Docker files
+├── Client JavaScript (loaded in order):
+│   ├── client-utils.js             # Shared utilities: sanitizeText, escapeHtml, SANITIZE_REGEX
+│   ├── client.js                   # GTranslateV4Client class: constructor, init*, addTranslation, updateStatus
+│   ├── client-audio.js             # Audio methods: wake lock, startRecording, stopRecording, updateAudioLevel
+│   ├── client-session.js           # Session methods: latency monitoring, billing, exportSession
+│   ├── client-tts.js               # TTS methods: speakTranslation, voice cache, processNextInQueue
+│   └── client-init.js              # App instantiation: new GTranslateV4Client()
+│
+├── translation-post-processor.js   # Pure functions: extractByWordLCP, applyTermMappings, verifyReligiousTerms, etc.
+├── translation-rules-engine.js     # Translation timing/dedup decision logic
+├── billing-db.js                   # Session billing database helpers
+│
+├── package.json                    # Dependencies
+├── docker-compose.yml              # Docker orchestration
+├── google-credentials.json         # Google Cloud credentials (you create)
+│
+├── docker/                         # Docker files
 │   ├── Dockerfile
 │   ├── .dockerignore
-│   ├── DOCKER-DEPLOYMENT.md   # Full Docker guide
+│   ├── DOCKER-DEPLOYMENT.md        # Full Docker guide
 │   └── README.md
 │
-├── glossaries/                # Custom glossary files
-│   └── *.csv                  # Term translations
-├── build-glossary.js          # Glossary builder script
-├── GLOSSARY-GUIDE.md          # Glossary documentation
+├── glossaries/                     # Custom glossary files
+│   └── *.csv                       # Term translations
+├── build-glossary.js               # Glossary builder script
+├── GLOSSARY-GUIDE.md               # Glossary documentation
 │
-├── documents/                 # PDF source files for glossaries
+├── documents/                      # PDF source files for glossaries
 │   └── *.pdf
 │
-├── test/                      # Automated tests
+├── test/                           # Automated tests
+│   ├── translation-post-processor.test.js  # Unit tests for post-processing functions
 │   ├── mode-switching.integration.test.js
 │   └── translation-interval.test.js
 │
-├── archive/                   # Old versions (archived)
+├── archive/                        # Old versions (archived)
 │   └── old-versions/
 │
-├── SETUP.md                   # Setup instructions
-└── README.md                  # This file
+├── SETUP.md                        # Setup instructions
+└── README.md                       # This file
 ```
+
+### Client Module Architecture
+
+The browser client is split into 6 files loaded sequentially as `<script>` tags (no bundler required). Each file after `client.js` uses `Object.assign(GTranslateV4Client.prototype, {...})` to mix in methods before the app is instantiated:
+
+| File | Contents | ~Lines |
+|------|----------|--------|
+| `client-utils.js` | `sanitizeText`, `escapeHtml`, `SANITIZE_REGEX` | 20 |
+| `client.js` | Class declaration, constructor, `init*` wiring, `addTranslation`, `updateStatus` | 606 |
+| `client-audio.js` | Wake lock, `startRecording`, `stopRecording`, `updateAudioLevel` | 484 |
+| `client-session.js` | Latency monitoring, `trackBilling`, `exportSession` | 162 |
+| `client-tts.js` | `speakTranslation`, voice cache, `processNextInQueue` | 389 |
+| `client-init.js` | `const app = new GTranslateV4Client()` | 5 |
 
 ## Technology Stack
 
@@ -240,5 +267,5 @@ For issues and questions:
 
 ---
 
-**Version:** 4.0.0
-**Last Updated:** October 2025
+**Version:** v169
+**Last Updated:** March 2026
