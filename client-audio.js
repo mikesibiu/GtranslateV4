@@ -3,6 +3,9 @@
 
 Object.assign(GTranslateV4Client.prototype, {
     async requestWakeLock() {
+        // Release any existing sentinel before acquiring a new one (prevents double-sentinel leak)
+        await this.releaseWakeLock();
+
         // Request screen wake lock to keep screen on during recording
         // Critical for mobile EarBuds mode where user listens with screen off
         if ('wakeLock' in navigator) {
@@ -351,10 +354,11 @@ Object.assign(GTranslateV4Client.prototype, {
                 silentStereo.channelCount = 2;
                 silentStereo.channelCountMode = 'explicit';
                 silentStereo.channelInterpretation = 'speakers';
+                silentStereo.gain.value = 0; // Prevent mic audio from playing through speakers
                 this.processor.connect(silentStereo);
                 silentStereo.connect(this.audioContext.destination);
 
-                console.log('🔇 ScriptProcessor connected: source → processor → stereo output');
+                console.log('🔇 ScriptProcessor connected: source → processor → silent stereo output');
             }
 
             // Start streaming on server (with validated inputs and mode)
