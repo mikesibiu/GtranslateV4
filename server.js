@@ -264,6 +264,23 @@ app.use((req, res, next) => {
     next();
 });
 
+// Build CORS allowlist once at startup (not per-request)
+const _allowedOriginsSet = new Set([
+    'http://localhost:3003',
+    'http://127.0.0.1:3003',
+    'https://gtranslate-v4-96dfeefd9842.herokuapp.com',
+    'https://gtranslate.farace.net',
+    'https://translate.farace.net',
+    'https://gtranslate-mysysadmin-aa6fe3a2.koyeb.app'
+]);
+// Allow additional origins from ALLOWED_ORIGINS env var (comma-separated)
+if (process.env.ALLOWED_ORIGINS) {
+    process.env.ALLOWED_ORIGINS.split(',').forEach(o => {
+        const trimmed = o.trim();
+        if (trimmed) _allowedOriginsSet.add(trimmed);
+    });
+}
+
 // Strengthen CORS configuration
 const io = socketIo(server, {
     cors: {
@@ -271,20 +288,7 @@ const io = socketIo(server, {
             // Allow same-origin requests (no origin header)
             if (!origin) return callback(null, true);
 
-            // Whitelist of allowed origins
-            const allowedOrigins = [
-                'http://localhost:3003',
-                'http://127.0.0.1:3003',
-                'https://gtranslate-v4-96dfeefd9842.herokuapp.com',
-                'https://gtranslate.farace.net'
-            ];
-
-            // Also allow Heroku app URL from environment
-            if (process.env.HEROKU_APP_NAME) {
-                allowedOrigins.push(`https://${process.env.HEROKU_APP_NAME}.herokuapp.com`);
-            }
-
-            if (allowedOrigins.includes(origin)) {
+            if (_allowedOriginsSet.has(origin)) {
                 callback(null, true);
             } else {
                 logger.warn('CORS blocked origin', { origin });
