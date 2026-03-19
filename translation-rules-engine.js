@@ -350,10 +350,14 @@ class TranslationRulesEngine {
 
         // Word count check (most specific - check first)
         const words = trimmedText.split(/\s+/).filter(w => w.length > 0);
-        // Continuation tails (pause timer fired mid-utterance, then is_final fires with a short
-        // remainder) use a 2-word threshold — they are confirmed speech, not standalone fragments.
-        // All other text (standalone isFinal utterances and interim chunks) requires 6 words.
-        const minWords = isContinuationTail ? 2 : this.MIN_WORDS_FOR_TRANSLATION;
+        // Confirmed speech uses lower thresholds; speculative interim chunks use the full 6.
+        // - isContinuationTail (pause timer emitted prefix, is_final fires with short remainder):
+        //   threshold 2 — the tail is always real content even if just 2 words.
+        // - isFinal standalone (Deepgram utterance boundary splits a long sentence into short
+        //   fragments like "prin regatul său ceresc" = 4 words): threshold 3 — confirmed speech,
+        //   grouped into paragraphs by the client so small cards are not a UX concern.
+        // - interim: full 6-word threshold to avoid noise bursts.
+        const minWords = isContinuationTail ? 2 : (isFinal ? 3 : this.MIN_WORDS_FOR_TRANSLATION);
         if (words.length < minWords) {
             return {
                 meetsMinimum: false,
@@ -377,9 +381,9 @@ class TranslationRulesEngine {
         }
 
         // Character count check (sanity check - least specific)
-        // Skip for continuation tails: word-count guard already covers them,
+        // Skip for isFinal and continuation tails: word-count guard already covers them,
         // and a 2-word tail like "go on" (5 chars) is real confirmed speech.
-        if (!isContinuationTail && trimmedText.length < this.MIN_CHARS_FOR_TRANSLATION) {
+        if (!isFinal && !isContinuationTail && trimmedText.length < this.MIN_CHARS_FOR_TRANSLATION) {
             return {
                 meetsMinimum: false,
                 isFillerOnly: false,

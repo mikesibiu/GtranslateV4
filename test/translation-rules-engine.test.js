@@ -280,12 +280,13 @@ describe('TranslationRulesEngine', () => {
             expect(decision.newText).to.equal('several committees');
         });
 
-        it('should reject short standalone isFinal utterance (not a continuation)', () => {
-            // Regression: lowering isFinal threshold to 2 caused Deepgram's short utterance
-            // splits ("so he said", "always smiling,") to produce individual cards.
-            // Standalone short isFinals (newText === fullText) must still use 6-word threshold.
+        it('should reject 1-2 word standalone isFinal utterance (noise threshold)', () => {
+            // Standalone isFinals use a threshold of 3. 1-2 word fragments are noise/filler.
+            // (Previously 6-word threshold; lowered to 3 because Deepgram splits long sentences
+            // at breathing pauses, producing 3-5 word utterances that are real confirmed speech.
+            // With paragraph buffering on the client, even 3-word emissions group into paragraphs.)
             const decision = engine.shouldTranslate({
-                text: 'so he said', // standalone 3-word utterance, no prior lastTranslatedText
+                text: 'he said', // standalone 2-word utterance
                 isFinal: true,
                 timeSinceLastChange: 0,
                 trigger: 'final',
@@ -294,6 +295,35 @@ describe('TranslationRulesEngine', () => {
 
             expect(decision.shouldTranslate).to.be.false;
             expect(decision.reason).to.equal('too_few_words');
+        });
+
+        it('should accept exactly 3-word standalone isFinal (boundary case)', () => {
+            // 3 is the exact minimum for standalone isFinals — must pass.
+            const decision = engine.shouldTranslate({
+                text: 'prin har dumnezeiesc', // 3-word standalone utterance
+                isFinal: true,
+                timeSinceLastChange: 0,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('final_result');
+        });
+
+        it('should accept 4-word standalone isFinal utterance (Deepgram sentence split)', () => {
+            // Deepgram splits long sentences at breathing pauses into short isFinal utterances.
+            // 4-word fragments like "through his heavenly kingdom" are real confirmed speech.
+            const decision = engine.shouldTranslate({
+                text: 'through his heavenly kingdom',
+                isFinal: true,
+                timeSinceLastChange: 0,
+                trigger: 'final',
+                clientId: 'test-123'
+            });
+
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('final_result');
         });
     });
 
@@ -658,7 +688,7 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            // Should REJECT with 66.7% overlap (threshold is now 60%)
+            // Should REJECT with 66.7% overlap (threshold is 65%)
             expect(decision2.shouldTranslate).to.be.false;
             expect(decision2.newText).to.equal(''); // Duplicate detected
         });
@@ -686,7 +716,7 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            // Should REJECT with 50% overlap (threshold is now 45%)
+            // Should REJECT with 50% overlap (threshold is 65%; 50% < 65% so subset dedup fires)
             expect(decision2.shouldTranslate).to.be.false;
             expect(decision2.newText).to.equal('');
         });

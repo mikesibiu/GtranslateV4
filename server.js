@@ -944,6 +944,16 @@ io.on('connection', (socket) => {
      */
     function fixTranscript(text) {
         return text
+            // Deepgram Nova-3 mishears Romanian "Iehova" (Jehovah) as phonetically similar strings.
+            // These are transcript-level fixes applied before translation so Google Translate
+            // receives the correct Romanian proper noun and renders it as "Jehovah" in English.
+            // Variants observed in production logs and screenshots:
+            .replace(/\bIocKova\b/gi, 'Iehova')   // "IocKova" — hard-K misparse
+            .replace(/\bYocova\b/gi, 'Iehova')     // "Yocova" — Y-onset variant
+            .replace(/\bYekov\b/gi, 'Iehova')      // "Yekov" — truncated + Y-onset
+            .replace(/\bEhova\b/gi, 'Iehova')      // "Ehova" — initial I dropped
+            .replace(/\bIhova\b/gi, 'Iehova')      // "Ihova" — silent E elided
+            .replace(/\bIeova\b/gi, 'Iehova')      // "Ieova" — H dropped
             .replace(/\bHokland\b/gi, 'Auckland')
             // Deepgram mishears Romanian "Bucurați-vă" / "Bucuriți-vă" (Rejoice) as "Buckurites"
             .replace(/\bBuckurites\b/gi, 'Bucurați-vă')
@@ -999,8 +1009,10 @@ io.on('connection', (socket) => {
                 // Tradeoff: +500ms latency at natural sentence boundaries. Do not lower below 1200ms.
                 utterance_end_ms: 1500,
                 vad_events: true,
-                // Boost recognition of proper nouns commonly misheard in Romanian-accented speech
-                keyterm: ['Auckland', 'New Zealand', 'New York', 'Lomé']
+                // Boost recognition of proper nouns commonly misheard in Romanian-accented speech.
+                // "Iehova" (Romanian for Jehovah) is the most critical — Nova-3 often mishears it
+                // as "Ehova", "Yekov", "IocKova", etc. Keyterm boost improves prior probability.
+                keyterm: ['Auckland', 'New Zealand', 'New York', 'Lomé', 'Iehova']
             });
 
             dgConnection = connection;
