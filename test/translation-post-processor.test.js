@@ -119,6 +119,27 @@ describe('extractByWordLCP', () => {
             expect(result).to.equal('of this');
         });
 
+        it('greedy scan: standalone punctuation tokens in full do not cause index misalignment', () => {
+            // Bug: fullOrigWords included "—" but fullNorm filtered it → indices diverge.
+            // Fix: both arrays built together, pure-punctuation tokens excluded from both.
+            const committed = 'Hello world today';
+            const full      = 'Hello — world today more';
+            const result = extractByWordLCP(full, committed);
+            expect(result).to.equal('more');
+        });
+
+        it('greedy scan: three consecutive substitutions fail below 75% (WINDOW does not false-pass)', () => {
+            // 13-word committed; if 3 consecutive content words all substituted (not found in window),
+            // matchCount = 10, ratio = 10/13 = 76.9% → still passes. Need ≥4 misses to fail.
+            // This test uses 8-word committed with 3 consecutive misses → 5/8 = 62.5% < 75% → null.
+            const committed = 'one two three four five six seven eight';
+            const full      = 'one two ALPHA BETA GAMMA six seven eight extra';
+            const result = extractByWordLCP(full, committed);
+            // "three","four","five" all not found in their windows (ALPHA/BETA/GAMMA block them)
+            // → matchCount ≤ 5, ratio ≤ 62.5% < 75% → null
+            expect(result).to.be.null;
+        });
+
         it('greedy scan: multiple scattered diffs (production regression — triple repeat)', () => {
             // Mirrors the screenshot bug: "connection"→"contact" (synonym), "the" inserted,
             // "congregate"→"congregation" (word form) — 3 differences in 13 committed words.
