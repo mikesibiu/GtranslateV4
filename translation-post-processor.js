@@ -30,6 +30,9 @@ function applyTermMappings(text, sourceText = '') {
     const mappings = [
         { pattern: /\bvestitori\b/gi, replacement: 'publishers' },
         { pattern: /\bMartorii lui Iehova\b/gi, replacement: "Jehovah's Witnesses" },
+        // Fix transliteration variants of Jehovah produced by Google Translate from Romanian "Iehova"
+        // Matches "Yehova" and "Yehovah" — both observed in production output
+        { pattern: /\bYehovah?\b/gi, replacement: 'Jehovah' },
         { pattern: /\bnume nou\b/gi, replacement: 'new name' },
         { pattern: /\bnume noi\b/gi, replacement: 'new names' },
         // "congres" is a JW convention, not a political congress

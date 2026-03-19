@@ -154,6 +154,18 @@ describe('applyTermMappings', () => {
             );
         });
 
+        it('Yehovah → Jehovah (Google Translate transliteration variant)', () => {
+            expect(applyTermMappings('trust in Yehovah and serve him')).to.equal(
+                'trust in Jehovah and serve him'
+            );
+        });
+
+        it('Yehova → Jehovah (Google Translate transliteration variant)', () => {
+            expect(applyTermMappings('in Yehova and let us serve him with loyalty')).to.equal(
+                'in Jehovah and let us serve him with loyalty'
+            );
+        });
+
         it('congress → convention (singular)', () => {
             expect(applyTermMappings('The annual congress was held')).to.equal(
                 'The annual convention was held'

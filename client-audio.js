@@ -375,6 +375,7 @@ Object.assign(GTranslateV4Client.prototype, {
             this.translationCount = 0;
             this.wordsTranslated = 0;
             this.resultsContainer.innerHTML = '';
+            this.sealCurrentParagraph();
             this.startBtn.disabled = true;
             this.stopBtn.disabled = false;
             this.audioSource.disabled = true;
@@ -391,6 +392,7 @@ Object.assign(GTranslateV4Client.prototype, {
 
     stopRecording() {
         this.isRecording = false;
+        this.sealCurrentParagraph(); // Cancel any pending paragraph seal timer
 
         // Track STT usage for billing
         if (this.sttStartTime && this.currentSourceLanguage) {
