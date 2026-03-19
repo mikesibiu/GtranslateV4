@@ -955,6 +955,9 @@ io.on('connection', (socket) => {
             .replace(/\bIhova\b/gi, 'Iehova')      // "Ihova" — silent E elided
             .replace(/\bIeova\b/gi, 'Iehova')      // "Ieova" — H dropped
             .replace(/\bHokland\b/gi, 'Auckland')
+            // Deepgram merges "Sora Mioara" (Sister Mioara) into a single token "saramyoara".
+            // "Sora" = Romanian for "sister" (JW address form); Mioara is a common Romanian name.
+            .replace(/\bsaramyoara\b/gi, 'Sora Mioara')
             // Deepgram mishears Romanian "Bucurați-vă" / "Bucuriți-vă" (Rejoice) as "Buckurites"
             .replace(/\bBuckurites\b/gi, 'Bucurați-vă')
             .replace(/\bBuckurities\b/gi, 'Bucuriți-vă')
