@@ -853,5 +853,68 @@ describe('TranslationRulesEngine', () => {
             // CRITICAL: Must detect duplicate even though source texts differ
             expect(isDuplicate).to.be.true;
         });
+
+        // ── 65% threshold boundary tests ──────────────────────────────────────────────
+        // isTranslationDuplicate uses >= 0.65 (changed from 0.80 in Phase 1 security/quality
+        // fixes). These tests guard against that threshold being silently reverted.
+
+        it('65% threshold: 70% word overlap IS a duplicate (above threshold)', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            // 10 words each; 7 shared = 7/10 = 70% ≥ 65% → duplicate
+            engine.recordTranslatedOutput('one two three four five six seven eight nine ten');
+            expect(engine.isTranslationDuplicate(
+                'one two three four five six seven alpha beta gamma'
+            )).to.be.true;
+        });
+
+        it('65% threshold: 60% word overlap is NOT a duplicate (below threshold)', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            // 10 words each; 6 shared = 6/10 = 60% < 65% → not duplicate
+            engine.recordTranslatedOutput('one two three four five six seven eight nine ten');
+            expect(engine.isTranslationDuplicate(
+                'one two three four five six alpha beta gamma delta'
+            )).to.be.false;
+        });
+
+        it('65% threshold: exactly 65% word overlap IS blocked (>= not >)', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            // 20 words each; 13 shared = 13/20 = 65.0% exactly → duplicate (>= 0.65)
+            const base = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty';
+            engine.recordTranslatedOutput(base);
+            expect(engine.isTranslationDuplicate(
+                'one two three four five six seven eight nine ten eleven twelve thirteen A B C D E F G'
+            )).to.be.true;
+        });
+    });
+
+    describe('Pre-Translation Duplicate Detection (getNewText overlap)', () => {
+        // getNewText uses > 0.65 (strict). Tests guard against threshold regression.
+
+        it('70% word overlap in source → getNewText returns empty (suppressed)', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            // 10 words in last, 10 in new, 7 shared = 70% > 0.65 → ''
+            engine.lastTranslatedText = 'one two three four five six seven eight nine ten';
+            const result = engine.getNewText('one two three four five six seven alpha beta gamma');
+            expect(result).to.equal('');
+        });
+
+        it('60% word overlap in source → getNewText returns full text (passes through)', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            // 10 words in last, 10 in new, 6 shared = 60% ≤ 0.65 → full text returned
+            engine.lastTranslatedText = 'one two three four five six seven eight nine ten';
+            const result = engine.getNewText('one two three four five six alpha beta gamma delta');
+            expect(result).to.equal('one two three four five six alpha beta gamma delta');
+        });
+
+        it('exactly 65% overlap in source → getNewText passes through (> not >=)', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            // 20 words each; 13 shared = 65.0% exactly. getNewText uses > 0.65, so 65% passes.
+            const base = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty';
+            engine.lastTranslatedText = base;
+            const newText = 'one two three four five six seven eight nine ten eleven twelve thirteen A B C D E F G';
+            const result = engine.getNewText(newText);
+            // 65% is NOT > 0.65, so it is not suppressed — returns the full new text
+            expect(result).to.equal(newText);
+        });
     });
 });
