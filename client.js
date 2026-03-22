@@ -17,6 +17,9 @@ class GTranslateV4Client {
         this.audioBufferSize = 4096;
         this.translationInterval = 6000; // Default: 6 seconds
         this.interimElements = new Set(); // Track interim DOM elements for fast removal
+        this.currentParagraphEl = null;   // Active paragraph card for buffered display
+        this.paragraphWordCount = 0;
+        this.paragraphSealTimer = null;
         this.audioWorkletLoaded = false; // Prevent loading module multiple times
         this.lastTranslation = ''; // Store last translated text for EarBuds/TTS display
         this.lastTranslationTime = 0; // Timestamp of last translation update
@@ -545,33 +548,68 @@ class GTranslateV4Client {
             return; // Skip visual display in EarBuds mode
         }
 
-        // Use template literals for faster HTML construction
-        const item = document.createElement('div');
-        item.className = data.isInterim ? 'translation-item interim' : 'translation-item';
-
-        item.innerHTML = `
-            <div class="original">📝 ${escapeHtml(sanitizeText(data.original))}</div>
-            <div class="translated">💬 ${escapeHtml(sanitizeText(data.translated))}</div>
-        `;
-
-        // Track interim elements for fast removal
         if (data.isInterim) {
+            // Interim: temporary card cleared when final arrives
+            const item = document.createElement('div');
+            item.className = 'translation-item interim';
+            item.innerHTML = `
+                <div class="original">📝 ${escapeHtml(sanitizeText(data.original))}</div>
+                <div class="translated">💬 ${escapeHtml(sanitizeText(data.translated))}</div>
+            `;
             this.interimElements.add(item);
-        }
+            const fragment = document.createDocumentFragment();
+            fragment.appendChild(item);
+            this.resultsContainer.insertBefore(fragment, this.resultsContainer.firstChild);
+        } else {
+            // Final: buffer into a paragraph card so several sentences read as flowing text
+            const translated = sanitizeText(data.translated).trim();
+            const wordCount = translated.split(/\s+/).filter(Boolean).length;
+            this.paragraphWordCount += wordCount;
 
-        // Use fragment to batch DOM operations
-        const fragment = document.createDocumentFragment();
-        fragment.appendChild(item);
-        this.resultsContainer.insertBefore(fragment, this.resultsContainer.firstChild);
+            if (!this.currentParagraphEl) {
+                this.currentParagraphEl = document.createElement('div');
+                this.currentParagraphEl.className = 'translation-item translation-paragraph';
+                this.currentParagraphEl.innerHTML = '<div class="translated">💬 <span class="para-text"></span></div>';
+                const fragment = document.createDocumentFragment();
+                fragment.appendChild(this.currentParagraphEl);
+                this.resultsContainer.insertBefore(fragment, this.resultsContainer.firstChild);
+            }
+
+            const paraText = this.currentParagraphEl.querySelector('.para-text');
+            if (paraText) {
+                const separator = paraText.textContent ? ' ' : '';
+                paraText.textContent += separator + translated;
+            } else {
+                console.error('[paragraph] .para-text span missing — translation dropped:', translated);
+            }
+
+            // Seal paragraph after 8s of silence or when it reaches ~60 words
+            clearTimeout(this.paragraphSealTimer);
+            if (this.paragraphWordCount >= 60) {
+                this.sealCurrentParagraph();
+            } else {
+                this.paragraphSealTimer = setTimeout(() => this.sealCurrentParagraph(), 8000);
+            }
+        }
 
         // Limit DOM size to prevent performance degradation
         const maxItems = 50;
         while (this.resultsContainer.children.length > maxItems) {
             const lastChild = this.resultsContainer.lastChild;
-            // Remove from interim tracking if applicable
+            if (lastChild === this.currentParagraphEl) {
+                this.sealCurrentParagraph();
+                break;
+            }
             this.interimElements.delete(lastChild);
             this.resultsContainer.removeChild(lastChild);
         }
+    }
+
+    sealCurrentParagraph() {
+        clearTimeout(this.paragraphSealTimer);
+        this.paragraphSealTimer = null;
+        this.currentParagraphEl = null;
+        this.paragraphWordCount = 0;
     }
 
     clearInterimTranslations() {

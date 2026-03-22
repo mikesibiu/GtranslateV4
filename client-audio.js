@@ -392,6 +392,10 @@ async startRecording() {
         this.translationCount = 0;
         this.wordsTranslated = 0;
         this.resultsContainer.innerHTML = '';
+        clearTimeout(this.paragraphSealTimer);
+        this.paragraphSealTimer = null;
+        this.currentParagraphEl = null;
+        this.paragraphWordCount = 0;
         this.startBtn.disabled = true;
         this.stopBtn.disabled = false;
         this.audioSource.disabled = true;
@@ -408,6 +412,10 @@ async startRecording() {
 
 stopRecording() {
     this.isRecording = false;
+    clearTimeout(this.paragraphSealTimer);
+    this.paragraphSealTimer = null;
+    this.currentParagraphEl = null;
+    this.paragraphWordCount = 0;
 
     // Track STT usage for billing
     if (this.sttStartTime && this.currentSourceLanguage) {
