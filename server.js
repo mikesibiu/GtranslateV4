@@ -745,7 +745,12 @@ io.on('connection', (socket) => {
         // Months — Romanian only; 'mai' OMITTED (it's the most common Romanian particle;
         // boosting it globally destroys token-boundary stability throughout every sentence)
         'ianuarie','februarie','martie','aprilie','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie',
-        'january','february','march','april','may','june','july','august','september','october','november','december'
+        'january','february','march','april','may','june','july','august','september','october','november','december',
+        // Watchtower magazine — prevents STT from garbling "Turnul de Veghe" to phonetic variants
+        'Turnul de Veghe',
+        'revista Turnul de Veghe',
+        // Romanian name "Edi" — prevents Google STT from mishearing as other words
+        'Edi'
     ];
 
     // Helper function to update last activity time
