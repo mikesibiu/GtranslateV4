@@ -959,6 +959,9 @@ io.on('connection', (socket) => {
             .replace(/\bAvran\b/gi, 'Avraam')      // "Avran" — final M dropped
             // Deepgram mishears Romanian city "Sibiu" as "CBU" (phonetic confusion)
             .replace(/\bCBU\b/g, 'Sibiu')
+            // Deepgram mishears "imitați" (imitate) as "limitați" (limit) — initial L inserted.
+            // Scoped to "pe Iehova" phrase to avoid correcting legitimate "limitați" uses.
+            .replace(/\blimitați pe Iehova\b/gi, 'imitați pe Iehova')
             // Deepgram merges "Sora Mioara" (Sister Mioara) into a single token "saramyoara".
             // "Sora" = Romanian for "sister" (JW address form); Mioara is a common Romanian name.
             .replace(/\bsaramyoara\b/gi, 'Sora Mioara')
@@ -1019,7 +1022,7 @@ io.on('connection', (socket) => {
                 // Boost recognition of proper nouns commonly misheard in Romanian-accented speech.
                 // "Iehova" (Romanian for Jehovah) is the most critical — Nova-3 often mishears it
                 // as "Ehova", "Yekov", "IocKova", etc. Keyterm boost improves prior probability.
-                keyterm: ['Auckland', 'New Zealand', 'New York', 'Lomé', 'Iehova', 'Avraam', 'Sibiu']
+                keyterm: ['Auckland', 'New Zealand', 'New York', 'Lomé', 'Iehova', 'Avraam', 'Sibiu', 'imitați pe Iehova']
             });
 
             dgConnection = connection;
