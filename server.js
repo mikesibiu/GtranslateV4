@@ -1048,6 +1048,14 @@ io.on('connection', (socket) => {
 
                 const transcript = fixTranscript(alternative.transcript || '');
                 const isFinal = data.is_final || false;
+                // Deepgram confidence score: 0–1. Low-confidence final transcripts are
+                // likely mishearings — Nova-3 fails silently (fluent wrong English) rather
+                // than obviously, so we suppress translation below the threshold rather
+                // than risk emitting a convincing but incorrect sentence.
+                // Threshold 0.80: tuned conservatively — raise if too much is dropped,
+                // lower if fluent mistranslations still appear.
+                const MIN_CONFIDENCE = 0.80;
+                const confidence = alternative.confidence ?? 1;
 
                 if (transcript.length === 0) {
                     logger.debug('Empty transcript', { clientId });
@@ -1058,6 +1066,7 @@ io.on('connection', (socket) => {
                     clientId,
                     transcript: transcript.substring(0, 200),
                     isFinal,
+                    confidence,
                     speechFinal: data.speech_final,
                     length: transcript.length
                 });
@@ -1070,9 +1079,29 @@ io.on('connection', (socket) => {
                     lastInterimText = transcript;
                     const textChanged = previousInterimText !== transcript;
 
+                    // Update lastTextChangeTime here (before the confidence gate) so that
+                    // a suppressed final doesn't leave a stale timeSinceLastChange for the
+                    // next utterance's shouldTranslate call.
+                    if (textChanged) {
+                        lastTextChangeTime = Date.now();
+                    }
+
                     if (textChanged && restartStreamTimer) {
                         clearTimeout(restartStreamTimer);
                         restartStreamTimer = null;
+                    }
+
+                    // Confidence gate: suppress translation for low-confidence finals.
+                    // Still update lastInterimText above so pause-timer has current text.
+                    // Interim results are never gated — only finals produce translations.
+                    if (isFinal && confidence < MIN_CONFIDENCE) {
+                        logger.warn('⚠️ Low-confidence final suppressed — no translation', {
+                            clientId,
+                            confidence,
+                            threshold: MIN_CONFIDENCE,
+                            transcript: transcript.substring(0, 100)
+                        });
+                        return;
                     }
 
                     // ===========================================
@@ -1091,10 +1120,6 @@ io.on('connection', (socket) => {
                         trigger: isFinal ? 'final' : 'interim',
                         clientId: clientId
                     });
-
-                    if (textChanged) {
-                        lastTextChangeTime = Date.now();
-                    }
 
                     // ===========================================
                     // ACT ON DECISION
