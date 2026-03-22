@@ -583,12 +583,14 @@ class GTranslateV4Client {
                 console.error('[paragraph] .para-text span missing — translation dropped:', translated);
             }
 
-            // Seal paragraph after 8s of silence or when it reaches ~60 words
+            // Seal paragraph after 20s of silence or when it reaches ~60 words.
+            // 20s (vs 8s in NovaTranslate): Google Cloud STT fires every ~8s, so the
+            // seal timer must be longer to avoid racing against the translation interval.
             clearTimeout(this.paragraphSealTimer);
             if (this.paragraphWordCount >= 60) {
                 this.sealCurrentParagraph();
             } else {
-                this.paragraphSealTimer = setTimeout(() => this.sealCurrentParagraph(), 8000);
+                this.paragraphSealTimer = setTimeout(() => this.sealCurrentParagraph(), 20000);
             }
         }
 
