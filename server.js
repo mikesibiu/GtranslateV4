@@ -965,6 +965,17 @@ io.on('connection', (socket) => {
             // Deepgram mishears "Edi" (Romanian name) as "Erie" — scoped to Romanian verb "va"
             // to avoid replacing legitimate "Erie" references (city/lake in Pennsylvania).
             .replace(/\bErie va\b/g, 'Edi va')
+            // Deepgram mishears "întrunirii" (of this meeting) as "intruiri" — drops initial î and n.
+            // Scoped to "acestei intruiri" to avoid corrupting unrelated words.
+            .replace(/\bacestei intruiri\b/gi, 'acestei întrunirii')
+            // Deepgram mishears "imităm" (we imitate) as "imimtem" — consonant doubling artifact.
+            .replace(/\bimimtem\b/gi, 'imităm')
+            // Deepgram mishears "Iehova" as "Iork" — phonetic variant of IocKova/Ehova family.
+            // Also catches "York" when preceded by "pe Tine" (Romanian "You") — prayer context
+            // where "pe Tine York" can only mean "pe Tine Iehova". Bare "York" not replaced
+            // to avoid false positives on city/place references.
+            .replace(/\bIork\b/gi, 'Iehova')
+            .replace(/\bpe Tine York\b/g, 'pe Tine Iehova')
             // Deepgram merges "Sora Mioara" (Sister Mioara) into a single token "saramyoara".
             // "Sora" = Romanian for "sister" (JW address form); Mioara is a common Romanian name.
             .replace(/\bsaramyoara\b/gi, 'Sora Mioara')
@@ -1025,7 +1036,7 @@ io.on('connection', (socket) => {
                 // Boost recognition of proper nouns commonly misheard in Romanian-accented speech.
                 // "Iehova" (Romanian for Jehovah) is the most critical — Nova-3 often mishears it
                 // as "Ehova", "Yekov", "IocKova", etc. Keyterm boost improves prior probability.
-                keyterm: ['Auckland', 'New Zealand', 'New York', 'Lomé', 'Iehova', 'Avraam', 'Sibiu', 'imitați pe Iehova', 'Turnul de Veghe', 'revista Turnul de Veghe', 'Edi va']
+                keyterm: ['Auckland', 'New Zealand', 'New York', 'Lomé', 'Iehova', 'Avraam', 'Sibiu', 'imitați pe Iehova', 'imităm pe Iehova', 'Turnul de Veghe', 'revista Turnul de Veghe', 'Edi va', 'întrunirii', 'întrunire']
             });
 
             dgConnection = connection;
