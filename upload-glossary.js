@@ -9,7 +9,7 @@ const path = require('path');
 
 // Configuration
 const CREDENTIALS_PATH = path.join(__dirname, 'google-credentials.json');
-const GLOSSARY_FILE = path.join(__dirname, 'glossaries', 'glossary_2025-10-04T20-34-34.csv');
+const GLOSSARY_FILE = path.join(__dirname, 'glossaries', 'glossary_final.csv');
 const GLOSSARY_ID = 'ro-en-religious-terms';
 
 // Check for credentials
