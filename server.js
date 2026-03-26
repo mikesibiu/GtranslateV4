@@ -864,7 +864,18 @@ io.on('connection', (socket) => {
             maxAttempts: MAX_RESTART_ATTEMPTS
         });
 
-        // Clean up old stream before scheduling restart
+        // Remove listeners from old stream BEFORE nulling it.
+        // Without this, the dying stream fires 'end'/'close' AFTER the new stream starts,
+        // triggering scheduleAutoRestart() again on the healthy new stream — killing it.
+        // This cascade caused Audio Timeout every 10s after any silence period.
+        if (recognizeStream) {
+            try {
+                recognizeStream.removeAllListeners('error');
+                recognizeStream.removeAllListeners('end');
+                recognizeStream.removeAllListeners('close');
+                recognizeStream.removeAllListeners('data');
+            } catch (e) { /* ignore */ }
+        }
         recognizeStream = null;
         translationInFlight = false; // BUG-21: prevent deadlock if translation was mid-flight at restart
 
