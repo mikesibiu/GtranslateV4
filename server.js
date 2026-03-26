@@ -747,7 +747,15 @@ io.on('connection', (socket) => {
         'Turnul de Veghe',
         'revista Turnul de Veghe',
         // Romanian name "Edi" — prevents Google STT from mishearing as other words
-        'Edi'
+        'Edi',
+        // Convention — definite article forms ("congresul/adunarea") not covered by bare "congres" hints
+        // STT mishears "congresul de circuit" as "congresul de tip construcție" without boosting
+        'congresul de circuit',
+        'congresul regional',
+        'congresul special',
+        'adunare de circuit',
+        'adunarea de circuit',
+        'adunarea locală'
     ];
 
     // Helper function to update last activity time
