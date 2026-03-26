@@ -1065,7 +1065,7 @@ io.on('connection', (socket) => {
                 // than risk emitting a convincing but incorrect sentence.
                 // Threshold 0.80: tuned conservatively — raise if too much is dropped,
                 // lower if fluent mistranslations still appear.
-                const MIN_CONFIDENCE = 0.80;
+                const MIN_CONFIDENCE = 0.65;
                 const confidence = alternative.confidence ?? 1;
 
                 if (transcript.length === 0) {
