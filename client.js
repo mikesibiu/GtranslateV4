@@ -392,8 +392,12 @@ class GTranslateV4Client {
 
         this.socket.on('interim-result', (data) => {
             if (this.currentMode === 'earbuds') {
-                // Show live STT text in earbuds mode so user can confirm mic is working
-                this.interimText.textContent = data.text ? `Hearing: ${data.text}...` : 'Listening...';
+                // Show last known English translation while listening (not raw Romanian STT)
+                const hasRecentTranslation = this.lastTranslation &&
+                    (Date.now() - this.lastTranslationTime < 20000);
+                this.interimText.textContent = hasRecentTranslation
+                    ? `${this.lastTranslation}...`
+                    : 'Listening...';
                 return;
             }
             const hasRecentTranslation = this.lastTranslation &&
@@ -543,10 +547,7 @@ class GTranslateV4Client {
             this.clearInterimTranslations();
         }
 
-        // EarBuds mode: Audio-first, skip visual translation cards (only show STT interim text)
-        if (this.currentMode === 'earbuds') {
-            return; // Skip visual display in EarBuds mode
-        }
+        // EarBuds mode: show paragraph cards (same as talks mode) so user has written backup
 
         if (data.isInterim) {
             // Interim: temporary card cleared when final arrives
