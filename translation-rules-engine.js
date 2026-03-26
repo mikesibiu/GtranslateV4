@@ -355,10 +355,10 @@ class TranslationRulesEngine {
         // Confirmed speech uses lower thresholds; speculative interim chunks use the full 6.
         // - isContinuationTail (interval fired mid-utterance, isFinal fires with short remainder):
         //   threshold 2 — the tail is always confirmed speech even if just 2 words.
-        // - isFinal standalone (utterance boundary splits sentence into short fragment):
-        //   threshold 3 — confirmed speech.
+        // - isFinal standalone: threshold 1 — STT isFinal is confirmed speech regardless of length.
+        //   Single-word finals like "Amin" (prayer close) or "Da"/"Nu" must not be filtered.
         // - interim: full 6-word threshold to avoid noise/filler bursts.
-        const minWords = isContinuationTail ? 2 : (isFinal ? 3 : this.MIN_WORDS_FOR_TRANSLATION);
+        const minWords = isContinuationTail ? 2 : (isFinal ? 1 : this.MIN_WORDS_FOR_TRANSLATION);
         if (words.length < minWords) {
             return {
                 meetsMinimum: false,

@@ -43,6 +43,14 @@ function applyTermMappings(text, sourceText = '') {
         // "don't must to" → "don't have to"; "must to" → "must"
         { pattern: /\bdon['']t\s+must\s+to\b/gi, replacement: "don't have to" },
         { pattern: /\bmust\s+to\s+/gi, replacement: 'must ' },
+        // STT mishearing: "congresul de circuit" (circuit assembly) is sometimes transcribed
+        // as "congresul de tip construcție", producing "construction type convention/assembly".
+        // NOTE: the congress→convention rule above runs first, so by the time these patterns
+        // execute the text already reads "construction type convention". The "congress" variant
+        // is kept as a defensive fallback in case mapping order ever changes.
+        { pattern: /\bconstruction[\s-]type\s+convention\b/gi, replacement: 'circuit assembly' },
+        { pattern: /\bconstruction[\s-]type\s+assembly\b/gi, replacement: 'circuit assembly' },
+        { pattern: /\bconstruction[\s-]type\s+congress\b/gi, replacement: 'circuit assembly' },
     ];
 
     let result = text;

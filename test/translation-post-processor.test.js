@@ -357,6 +357,33 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('STT mishearing: construction type → circuit assembly', () => {
+        it('construction type convention → circuit assembly', () => {
+            expect(applyTermMappings("it wasn't until the construction type convention and"))
+                .to.equal("it wasn't until the circuit assembly and");
+        });
+
+        it('construction type assembly → circuit assembly', () => {
+            expect(applyTermMappings('attended the construction type assembly last week'))
+                .to.equal('attended the circuit assembly last week');
+        });
+
+        it('Construction Type Convention (capitalized) → circuit assembly', () => {
+            expect(applyTermMappings('The Construction Type Convention was in Cluj'))
+                .to.equal('The circuit assembly was in Cluj');
+        });
+
+        it('construction type congress (defensive fallback) → circuit assembly', () => {
+            expect(applyTermMappings('the construction type congress next month'))
+                .to.equal('the circuit assembly next month');
+        });
+
+        it('does not touch unrelated "construction" text', () => {
+            expect(applyTermMappings('the construction of the Kingdom Hall'))
+                .to.equal('the construction of the Kingdom Hall');
+        });
+    });
+
     describe('source-aware: romani → Romani', () => {
         it('Romans → Romani when source has "romani" (people/language)', () => {
             expect(applyTermMappings('The Romans are here', 'frații romani din'))

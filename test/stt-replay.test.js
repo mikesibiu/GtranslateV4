@@ -247,12 +247,12 @@ describe('STT Replay: short utterances in Q&A context', () => {
         expect(d.reason).to.equal('final_result');
     });
 
-    it('2-word standalone isFinal does NOT fire (below threshold 3)', () => {
+    it('2-word standalone isFinal fires (isFinal threshold is 1)', () => {
         const engine = new TranslationRulesEngine('talks', mockLogger);
         const d = engine.shouldTranslate({
             text: 'multumesc bine',
             isFinal: true, timeSinceLastChange: 0, trigger: 'final', clientId: 'test'
         });
-        expect(d.shouldTranslate).to.be.false;
+        expect(d.shouldTranslate).to.be.true;
     });
 });

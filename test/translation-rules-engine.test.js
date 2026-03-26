@@ -96,10 +96,22 @@ describe('TranslationRulesEngine', () => {
             expect(quality.meetsMinimum).to.be.true;
         });
 
-        it('isFinal=true: 2-word text rejects (standalone isFinal threshold is 3)', () => {
+        it('isFinal=true: 2-word text passes (standalone isFinal threshold is 1)', () => {
             const quality = engine.checkQuality('Amin bine', true, false);
+            expect(quality.meetsMinimum).to.be.true;
+        });
+
+        it('isFinal=true: single non-filler word "Amin" passes', () => {
+            const quality = engine.checkQuality('Amin', true, false);
+            expect(quality.meetsMinimum).to.be.true;
+        });
+
+        it('isFinal=true: single filler word "da" reaches filler gate (not word-count gate)', () => {
+            // Word-count gate passes (1 >= 1). Filler gate is the backstop.
+            const quality = engine.checkQuality('da', true, false);
             expect(quality.meetsMinimum).to.be.false;
-            expect(quality.reason).to.equal('too_few_words');
+            expect(quality.isFillerOnly).to.be.true;
+            expect(quality.reason).to.equal('filler_words_only');
         });
 
         it('isContinuationTail=true: 2-word text passes (threshold 2)', () => {
@@ -261,7 +273,7 @@ describe('TranslationRulesEngine', () => {
             expect(decision.confidence).to.equal(0.8);
         });
 
-        it('should reject final result with single word', () => {
+        it('should pass final result with single word (isFinal threshold is 1)', () => {
             const decision = engine.shouldTranslate({
                 text: 'pair',
                 isFinal: true,
@@ -270,8 +282,8 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            expect(decision.shouldTranslate).to.be.false;
-            expect(decision.reason).to.equal('too_few_words');
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('final_result');
         });
 
         it('should reject final result with filler words only', () => {
@@ -300,7 +312,7 @@ describe('TranslationRulesEngine', () => {
             expect(decision.reason).to.equal('final_result');
         });
 
-        it('isFinal 2-word fragment rejects (standalone isFinal threshold is 3)', () => {
+        it('isFinal 2-word fragment passes (standalone isFinal threshold is 1)', () => {
             const decision = engine.shouldTranslate({
                 text: 'Amin bine',
                 isFinal: true,
@@ -309,8 +321,9 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            expect(decision.shouldTranslate).to.be.false;
-            expect(decision.reason).to.equal('too_few_words');
+            // isFinal confirmed speech — any length passes (threshold 1)
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('final_result');
         });
 
         it('continuation tail: 2-word isFinal tail passes after interval fired mid-utterance', () => {
@@ -344,8 +357,8 @@ describe('TranslationRulesEngine', () => {
             expect(decision.reason).to.equal('too_few_words');
         });
 
-        it('continuation tail cap: 6-word remainder not classified as tail (uses isFinal threshold 3, passes)', () => {
-            // newWordCount=6 > 5 cap → isContinuationTail=false → minWords=3 (isFinal) → passes
+        it('continuation tail cap: 6-word remainder not classified as tail (uses isFinal threshold 1, passes)', () => {
+            // newWordCount=6 > 5 cap → isContinuationTail=false → minWords=1 (isFinal) → passes
             engine.lastTranslatedText = 'acesta este textul lung';
             const decision = engine.shouldTranslate({
                 text: 'acesta este textul lung cu mare bucurie si pace',
@@ -646,9 +659,9 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            // Should BLOCK single-word final result
-            expect(decision.shouldTranslate).to.be.false;
-            expect(decision.reason).to.equal('too_few_words');
+            // isFinal confirmed speech — single-word passes (threshold 1)
+            expect(decision.shouldTranslate).to.be.true;
+            expect(decision.reason).to.equal('final_result');
         });
 
         it('should handle EarBuds mode longer intervals', () => {
