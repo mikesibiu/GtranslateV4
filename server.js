@@ -665,6 +665,7 @@ io.on('connection', (socket) => {
     const MAX_AUDIO_BUFFER_SIZE = 50; // Max chunks to buffer (prevent memory issues)
     let translationRules = null; // Centralized translation rules engine
     let currentMode = 'talks'; // Persist selected mode across restarts
+    let consecutiveAudioTimeouts = 0; // Guard against infinite restart storm during silence
     let lastTextChangeTime = Date.now(); // Track when text last changed for pause detection
     // v160: full-text-then-extract restored with the KEY FIX: committedTranslation = translatedFull
     // (not committedTranslation = prev_committed + emitted, which caused cascade divergence in v155)
@@ -927,7 +928,8 @@ io.on('connection', (socket) => {
             return;
         }
 
-        translationInFlight = true;
+        // translationInFlight is set by the caller before the async gap (RC-4 fix).
+        // performTranslation must not set it again — the finally block clears it.
         try {
             // ── Step 1: Translate the FULL current transcript for maximum context ──
             const translatedFull = await translateWithRetry(fullText.trim(), targetLanguage, currentLanguage, clientId);
@@ -1093,9 +1095,13 @@ io.on('connection', (socket) => {
                 accumulatedText = '';
                 translationCount = 0;
                 restartAttempts = 0; // Reset restart counter on new session
-                committedTranslation = ''; // Reset full-context translation state for new session
-                lastFullTranslation = '';
             }
+            // Always reset LCP state on any restart (auto or manual).
+            // Google STT starts a fresh transcript accumulation on every new stream,
+            // so committedTranslation from the previous stream is always stale and
+            // will cause every LCP extraction to fail until it's cleared.
+            committedTranslation = '';
+            lastFullTranslation = '';
 
             sessionActive = true;
             updateActivity(); // Start inactivity timer
@@ -1158,9 +1164,23 @@ io.on('connection', (socket) => {
                                           error.message.includes('Long duration elapsed without audio');
 
                     if (isAudioTimeout && sessionActive) {
-                        logger.info('🔇 Audio timeout (silence detected) — resetting restart counter', { clientId });
-                        restartAttempts = 0; // Silence is not a failure; don't count toward max
-                        scheduleAutoRestart();
+                        consecutiveAudioTimeouts++;
+                        logger.info('🔇 Audio timeout (silence detected)', { clientId, consecutiveAudioTimeouts });
+                        if (consecutiveAudioTimeouts >= 5) {
+                            // Sustained silence storm — stop restarting, notify client.
+                            // Without this cap, restartAttempts resets to 0 on each timeout,
+                            // so MAX_RESTART_ATTEMPTS is never reached and the loop runs forever.
+                            consecutiveAudioTimeouts = 0;
+                            sessionActive = false;
+                            cleanupStream();
+                            socket.emit('recognition-error', {
+                                message: 'No audio received for an extended period. Tap Stop and Start to resume.',
+                                code: 'SUSTAINED_AUDIO_TIMEOUT'
+                            });
+                        } else {
+                            restartAttempts = 0; // Silence is not a failure; don't count toward max
+                            scheduleAutoRestart();
+                        }
                     } else if (isStreamTimeout && sessionActive) {
                         logger.info('🔄 Stream timeout detected, auto-restarting...', { clientId });
                         scheduleAutoRestart();
@@ -1187,6 +1207,7 @@ io.on('connection', (socket) => {
                     logger.debug('📡 Stream unpipe event', { clientId });
                 })
                 .on('data', async (data) => {
+                    consecutiveAudioTimeouts = 0; // Real data received — silence storm ended
                     logger.info('📥 GOOGLE CLOUD DATA EVENT!', {
                         clientId,
                         hasResults: !!data.results,
@@ -1273,6 +1294,9 @@ io.on('connection', (socket) => {
                                     logger.info('📋 Queued pending final translation', { clientId, preview: transcript.substring(0, 60) });
                                 }
                             } else {
+                            // Acquire lock BEFORE the async gap so a second data event
+                            // in the same tick cannot also pass the translationInFlight check.
+                            translationInFlight = true;
                             // Clear any pending pause timer - we're translating now
                             if (restartStreamTimer) {
                                 clearTimeout(restartStreamTimer);
@@ -1300,6 +1324,7 @@ io.on('connection', (socket) => {
                                     });
 
                                     if (pauseDecision.shouldTranslate && sessionActive && !translationInFlight) {
+                                        translationInFlight = true;
                                         await performTranslation(lastInterimText, pauseDecision, false);
                                     }
 

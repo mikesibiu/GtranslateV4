@@ -38,6 +38,11 @@ function applyTermMappings(text, sourceText = '') {
         // Bible reference format: Romanian "Proverbe de 7,3" → translated "Proverbs of 7,3"
         // → should be "Proverbs 7:3". Pattern: CapitalizedWord + "of" + N,M → N:M
         { pattern: /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+of\s+(\d+)[,.](\d+)\b/g, replacement: '$1 $2:$3' },
+        // "must to [verb]" — literal calque of Romanian "trebuie să [verb]".
+        // Google Translate produces this when the fragment lacks sentence context.
+        // "don't must to" → "don't have to"; "must to" → "must"
+        { pattern: /\bdon['']t\s+must\s+to\b/gi, replacement: "don't have to" },
+        { pattern: /\bmust\s+to\s+/gi, replacement: 'must ' },
     ];
 
     let result = text;
