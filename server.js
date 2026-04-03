@@ -52,6 +52,11 @@ if (process.env.DATABASE_URL) {
         ssl: { rejectUnauthorized: false },
         max: 3 // small dedicated pool — sessions don't need many connections
     });
+    // Without this handler, pg emits an uncaught 'error' event on idle connections
+    // (e.g. network blips to Neon) which crashes the Node.js process.
+    sessionPool.on('error', (err) => {
+        console.error('[session-pool] Idle client error (non-fatal):', err.message);
+    });
     sessionStore = new pgSession({
         pool: sessionPool,
         tableName: 'user_sessions',
@@ -1540,5 +1545,14 @@ process.on('SIGTERM', async () => {
     server.close(() => {
         logger.info('Server closed');
         process.exit(0);
+    });
+});
+
+// Safety net: log unhandled rejections without crashing (the pg pool error handler
+// above is the primary fix, but this catches any other missed async errors).
+process.on('unhandledRejection', (reason) => {
+    logger.error('Unhandled promise rejection (non-fatal):', {
+        reason: reason instanceof Error ? reason.message : String(reason),
+        stack: reason instanceof Error ? reason.stack : undefined
     });
 });

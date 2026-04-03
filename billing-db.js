@@ -18,19 +18,23 @@ function initializeDatabase(logger) {
 
     if (!connectionString) {
         logger.warn('⚠️ DATABASE_URL not found - billing data will not be persisted');
-        logger.warn('   Set up Heroku Postgres: heroku addons:create heroku-postgresql:mini');
+        logger.warn('   Set DATABASE_URL to a Neon connection string in Koyeb environment variables.');
         return false;
     }
 
     try {
         pool = new Pool({
             connectionString,
-            ssl: process.env.NODE_ENV === 'production' ? {
-                rejectUnauthorized: false  // Heroku Postgres uses internal CA not trusted by Node.js
-            } : false,
+            ssl: { rejectUnauthorized: false },
             max: 10, // Maximum connections in pool
             idleTimeoutMillis: 30000,
             connectionTimeoutMillis: 10000,
+        });
+
+        // Without this handler, pg emits an uncaught 'error' event on idle connections
+        // (e.g. network blips to Neon) which crashes the Node.js process.
+        pool.on('error', (err) => {
+            logger.error('Billing pool idle client error (non-fatal):', { error: err.message });
         });
 
         logger.info('✅ PostgreSQL connection pool initialized');
