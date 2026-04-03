@@ -655,7 +655,7 @@ io.on('connection', (socket) => {
     const INACTIVITY_TIMEOUT_MS = INACTIVITY_TIMEOUT; // Use config value
     let isRestarting = false; // Prevent race conditions during auto-restart
     let translationInFlight = false; // Prevent concurrent translations (race condition fix)
-    let pendingTranslation = null; // Deferred final translation waiting for in-flight to complete
+    let pendingTranslationQueue = []; // Queue of deferred final translations (replaces single slot — fast speakers fired multiple isFinals while one was in-flight, middle sentences were silently dropped)
     let restartTimeout = null; // Track the scheduled restart timeout
     let restartAttempts = 0; // Track restart attempts
     const MAX_RESTART_ATTEMPTS = 10; // Maximum auto-restart attempts
@@ -792,7 +792,7 @@ io.on('connection', (socket) => {
     function cleanupStream() {
         isRestarting = false; // Cancel any pending auto-restart
         translationInFlight = false; // Reset so new sessions aren't blocked
-        pendingTranslation = null; // Discard any deferred translation
+        pendingTranslationQueue = []; // Discard any deferred translations
         lastTranslatedText = '';
         lastInterimText = ''; // BUG-13: prevent stale pause-timer retranslation after restart
 
@@ -887,6 +887,7 @@ io.on('connection', (socket) => {
         }
         recognizeStream = null;
         translationInFlight = false; // BUG-21: prevent deadlock if translation was mid-flight at restart
+        pendingTranslationQueue = []; // Discard queued translations — stale after stream restart
 
         restartTimeout = setTimeout(() => {
             restartTimeout = null;
@@ -1078,11 +1079,16 @@ io.on('connection', (socket) => {
             });
         } finally {
             translationInFlight = false;
-            // Run any pending final translation that was deferred while we were in-flight
-            if (pendingTranslation && sessionActive) {
-                const { transcript: pt, decision: pd } = pendingTranslation;
-                pendingTranslation = null;
-                logger.info('▶️ Running deferred pending translation', { clientId, preview: pt.substring(0, 60) });
+            // Drain one item from the pending queue (each item re-enters this finally,
+            // so the whole queue is processed in order without recursion depth growing).
+            if (pendingTranslationQueue.length > 0 && sessionActive) {
+                const { transcript: pt, decision: pd } = pendingTranslationQueue.shift();
+                logger.info('▶️ Running deferred pending translation', {
+                    clientId,
+                    preview: pt.substring(0, 60),
+                    remaining: pendingTranslationQueue.length
+                });
+                translationInFlight = true;
                 performTranslation(pt, pd, true).catch(err => {
                     logger.error('Deferred translation error', { clientId, error: err.message });
                 });
@@ -1296,10 +1302,27 @@ io.on('connection', (socket) => {
                             // Skip if another translation is already in flight (prevents race conditions)
                             if (translationInFlight) {
                                 logger.debug('⏳ Translation in flight, deferring', { clientId });
-                                // For final results, save the latest deferred translation to run after in-flight completes
+                                // For final results, enqueue — don't overwrite (old single-slot approach
+                                // silently dropped every isFinal except the last when speaker talked fast).
                                 if (isFinal) {
-                                    pendingTranslation = { transcript, decision };
-                                    logger.info('📋 Queued pending final translation', { clientId, preview: transcript.substring(0, 60) });
+                                    // Cap queue at 4 — if a network spike causes translation to back
+                                    // up beyond this, drop the oldest entry (it's already stale context)
+                                    // rather than accumulating a flood of out-of-sync output.
+                                    const MAX_PENDING_QUEUE_DEPTH = 4;
+                                    if (pendingTranslationQueue.length >= MAX_PENDING_QUEUE_DEPTH) {
+                                        const dropped = pendingTranslationQueue.shift();
+                                        logger.warn('⚠️ Pending queue at capacity — dropping oldest entry', {
+                                            clientId,
+                                            dropped: dropped.transcript.substring(0, 60),
+                                            queueDepth: pendingTranslationQueue.length
+                                        });
+                                    }
+                                    pendingTranslationQueue.push({ transcript, decision });
+                                    logger.info('📋 Queued pending final translation', {
+                                        clientId,
+                                        preview: transcript.substring(0, 60),
+                                        queueDepth: pendingTranslationQueue.length
+                                    });
                                 }
                             } else {
                             // Acquire lock BEFORE the async gap so a second data event
@@ -1758,5 +1781,13 @@ process.on('SIGTERM', async () => {
     server.close(() => {
         logger.info('Server closed');
         process.exit(0);
+    });
+});
+
+// Safety net: log unhandled rejections without crashing.
+process.on('unhandledRejection', (reason) => {
+    logger.error('Unhandled promise rejection (non-fatal):', {
+        reason: reason instanceof Error ? reason.message : String(reason),
+        stack: reason instanceof Error ? reason.stack : undefined
     });
 });
