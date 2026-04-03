@@ -8,6 +8,15 @@ Branch: main. NovaTranslate branch uses Deepgram instead of Google STT.
 
 ---
 
+## "Any recent errors?" workflow
+When the user asks "any recent errors?" or similar:
+1. Read `Errors-observed.md` from the GtranslateV4 main branch (it's in the repo root)
+2. Parse the most recent dated block(s)
+3. Diagnose each finding and propose fixes
+4. Search the KB for related known issues before suggesting anything
+
+---
+
 ## Mandatory rules — no exceptions
 
 1. **Always search the KB before doing anything** (Step 1 below)
