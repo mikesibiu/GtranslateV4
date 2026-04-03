@@ -693,7 +693,7 @@ io.on('connection', (socket) => {
     let inactivityTimer = null;
     const INACTIVITY_TIMEOUT_MS = INACTIVITY_TIMEOUT;
     let translationInFlight = false; // Prevent concurrent translations
-    let pendingTranslation = null; // Deferred final translation waiting for in-flight to complete
+    let pendingTranslationQueue = []; // Queue of deferred final translations (replaces single slot — fast speakers fired multiple isFinals while one was in-flight, middle sentences were silently dropped)
     let translationRules = null;
     let currentMode = 'talks';
     let lastTextChangeTime = Date.now();
@@ -737,7 +737,7 @@ io.on('connection', (socket) => {
     // Helper function to clean up Deepgram connection properly
     function cleanupConnection() {
         translationInFlight = false; // Reset so new sessions aren't blocked
-        pendingTranslation = null; // Discard any deferred translation
+        pendingTranslationQueue = []; // Discard any deferred translations
         lastTranslatedText = '';
         lastInterimText = ''; // prevent stale pause-timer retranslation after restart
 
@@ -928,10 +928,14 @@ io.on('connection', (socket) => {
         } finally {
             translationInFlight = false;
             // Run any pending final translation that was deferred while we were in-flight
-            if (pendingTranslation && sessionActive) {
-                const { transcript: pt, decision: pd } = pendingTranslation;
-                pendingTranslation = null;
-                logger.info('▶️ Running deferred pending translation', { clientId, preview: pt.substring(0, 60) });
+            if (pendingTranslationQueue.length > 0 && sessionActive) {
+                const { transcript: pt, decision: pd } = pendingTranslationQueue.shift();
+                logger.info('▶️ Running deferred pending translation', {
+                    clientId,
+                    preview: pt.substring(0, 60),
+                    remaining: pendingTranslationQueue.length
+                });
+                translationInFlight = true;
                 performTranslation(pt, pd, true).catch(err => {
                     logger.error('Deferred translation error', { clientId, error: err.message });
                 });
@@ -1145,8 +1149,21 @@ io.on('connection', (socket) => {
                         if (translationInFlight) {
                             logger.debug('⏳ Translation in flight, deferring', { clientId });
                             if (isFinal) {
-                                pendingTranslation = { transcript, decision };
-                                logger.info('📋 Queued pending final translation', { clientId, preview: transcript.substring(0, 60) });
+                                const MAX_PENDING_QUEUE_DEPTH = 4;
+                                if (pendingTranslationQueue.length >= MAX_PENDING_QUEUE_DEPTH) {
+                                    const dropped = pendingTranslationQueue.shift();
+                                    logger.warn('⚠️ Pending queue at capacity — dropping oldest entry', {
+                                        clientId,
+                                        dropped: dropped.transcript.substring(0, 60),
+                                        queueDepth: pendingTranslationQueue.length
+                                    });
+                                }
+                                pendingTranslationQueue.push({ transcript, decision });
+                                logger.info('📋 Queued pending final translation', {
+                                    clientId,
+                                    preview: transcript.substring(0, 60),
+                                    queueDepth: pendingTranslationQueue.length
+                                });
                             }
                         } else {
                             if (restartStreamTimer) {
@@ -1199,8 +1216,16 @@ io.on('connection', (socket) => {
                         });
                         if (decision.shouldTranslate) {
                             if (translationInFlight) {
-                                pendingTranslation = { transcript: lastInterimText, decision };
-                                logger.info('📋 UtteranceEnd queued (in-flight)', { clientId, preview: lastInterimText.substring(0, 60) });
+                                const MAX_PENDING_QUEUE_DEPTH = 4;
+                                if (pendingTranslationQueue.length >= MAX_PENDING_QUEUE_DEPTH) {
+                                    pendingTranslationQueue.shift();
+                                }
+                                pendingTranslationQueue.push({ transcript: lastInterimText, decision });
+                                logger.info('📋 UtteranceEnd queued (in-flight)', {
+                                    clientId,
+                                    preview: lastInterimText.substring(0, 60),
+                                    queueDepth: pendingTranslationQueue.length
+                                });
                             } else {
                                 await performTranslation(lastInterimText, decision, true);
                             }
