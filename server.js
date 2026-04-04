@@ -694,6 +694,7 @@ io.on('connection', (socket) => {
     const INACTIVITY_TIMEOUT_MS = INACTIVITY_TIMEOUT;
     let translationInFlight = false; // Prevent concurrent translations
     let pendingTranslationQueue = []; // Queue of deferred final translations (replaces single slot — fast speakers fired multiple isFinals while one was in-flight, middle sentences were silently dropped)
+    const MAX_PENDING_QUEUE_DEPTH = 4; // Cap: prevents stale backlog flooding output after network spike
     let translationRules = null;
     let currentMode = 'talks';
     let lastTextChangeTime = Date.now();
@@ -935,7 +936,8 @@ io.on('connection', (socket) => {
                     preview: pt.substring(0, 60),
                     remaining: pendingTranslationQueue.length
                 });
-                translationInFlight = true;
+                // Do NOT pre-set translationInFlight here — performTranslation sets it
+                // itself (after the !newText guard) so the flag is never stuck on early return.
                 performTranslation(pt, pd, true).catch(err => {
                     logger.error('Deferred translation error', { clientId, error: err.message });
                 });
@@ -1149,7 +1151,6 @@ io.on('connection', (socket) => {
                         if (translationInFlight) {
                             logger.debug('⏳ Translation in flight, deferring', { clientId });
                             if (isFinal) {
-                                const MAX_PENDING_QUEUE_DEPTH = 4;
                                 if (pendingTranslationQueue.length >= MAX_PENDING_QUEUE_DEPTH) {
                                     const dropped = pendingTranslationQueue.shift();
                                     logger.warn('⚠️ Pending queue at capacity — dropping oldest entry', {
@@ -1216,15 +1217,27 @@ io.on('connection', (socket) => {
                         });
                         if (decision.shouldTranslate) {
                             if (translationInFlight) {
-                                const MAX_PENDING_QUEUE_DEPTH = 4;
-                                if (pendingTranslationQueue.length >= MAX_PENDING_QUEUE_DEPTH) {
-                                    pendingTranslationQueue.shift();
+                                // Dedup: Transcript isFinal handler may have already queued the
+                                // same text for this utterance boundary — don't double-emit.
+                                const alreadyQueued = pendingTranslationQueue.some(
+                                    e => e.transcript === lastInterimText
+                                );
+                                if (!alreadyQueued) {
+                                    if (pendingTranslationQueue.length >= MAX_PENDING_QUEUE_DEPTH) {
+                                        const dropped = pendingTranslationQueue.shift();
+                                        logger.warn('⚠️ Pending queue at capacity (UtteranceEnd) — dropping oldest entry', {
+                                            clientId,
+                                            dropped: dropped.transcript.substring(0, 60),
+                                            queueDepth: pendingTranslationQueue.length
+                                        });
+                                    }
+                                    pendingTranslationQueue.push({ transcript: lastInterimText, decision });
                                 }
-                                pendingTranslationQueue.push({ transcript: lastInterimText, decision });
                                 logger.info('📋 UtteranceEnd queued (in-flight)', {
                                     clientId,
                                     preview: lastInterimText.substring(0, 60),
-                                    queueDepth: pendingTranslationQueue.length
+                                    queueDepth: pendingTranslationQueue.length,
+                                    dedupSkipped: alreadyQueued
                                 });
                             } else {
                                 await performTranslation(lastInterimText, decision, true);
