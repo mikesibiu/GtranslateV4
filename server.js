@@ -656,6 +656,7 @@ io.on('connection', (socket) => {
     let isRestarting = false; // Prevent race conditions during auto-restart
     let translationInFlight = false; // Prevent concurrent translations (race condition fix)
     let pendingTranslationQueue = []; // Queue of deferred final translations (replaces single slot — fast speakers fired multiple isFinals while one was in-flight, middle sentences were silently dropped)
+    const MAX_PENDING_QUEUE_DEPTH = 4; // Drop oldest when queue exceeds this depth (prevents flood on network spike)
     let restartTimeout = null; // Track the scheduled restart timeout
     let restartAttempts = 0; // Track restart attempts
     const MAX_RESTART_ATTEMPTS = 10; // Maximum auto-restart attempts
@@ -934,6 +935,7 @@ io.on('connection', (socket) => {
         const newText = (decision.newText || '').trim();
         if (!newText) {
             logger.info('⏭️ Approved but empty newText - skipping emit', { clientId, reason: decision.reason });
+            translationInFlight = false; // Clear flag set by caller (drain) so future translations aren't blocked
             return;
         }
 
@@ -1305,10 +1307,9 @@ io.on('connection', (socket) => {
                                 // For final results, enqueue — don't overwrite (old single-slot approach
                                 // silently dropped every isFinal except the last when speaker talked fast).
                                 if (isFinal) {
-                                    // Cap queue at 4 — if a network spike causes translation to back
-                                    // up beyond this, drop the oldest entry (it's already stale context)
-                                    // rather than accumulating a flood of out-of-sync output.
-                                    const MAX_PENDING_QUEUE_DEPTH = 4;
+                                    // Cap queue at MAX_PENDING_QUEUE_DEPTH — if a network spike causes
+                                    // translation to back up beyond this, drop the oldest entry (it's
+                                    // already stale context) rather than accumulating a flood of out-of-sync output.
                                     if (pendingTranslationQueue.length >= MAX_PENDING_QUEUE_DEPTH) {
                                         const dropped = pendingTranslationQueue.shift();
                                         logger.warn('⚠️ Pending queue at capacity — dropping oldest entry', {
