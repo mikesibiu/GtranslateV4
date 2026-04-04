@@ -334,6 +334,18 @@ async startRecording() {
                     this.micGainSlider.value = Math.min(g, parseFloat(this.micGainSlider.max));
                 }
 
+                // Warn user about audio clipping (quality degradation)
+                if (event.data.clipping) {
+                    const clipPct = Math.round(event.data.clipRatio * 100);
+                    console.warn(`⚠️ Audio clipping detected: ${clipPct}% samples clipped`);
+                    this.updateAudioLevel(level);
+                    // Flash the level text red briefly to alert user
+                    if (this.audioLevelText) {
+                        this.audioLevelText.style.color = '#f44336';
+                        this.audioLevelText.textContent = `${clipPct}% CLIP`;
+                    }
+                }
+
                 // Send audio data to server
                 this.socket.emit('audio-data', audioData);
             };

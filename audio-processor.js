@@ -16,11 +16,13 @@ class AudioProcessor extends AudioWorkletProcessor {
         // Auto-gain control state
         this.autoGain = false;      // AGC disabled by default (Google STT handles audio levels)
         this.targetLevel = 0.35;    // Target peak level (35% of max — ideal for STT)
+        this.baseTargetLevel = 0.35; // Default target before adaptive adjustment
         this.minGain = 1.0;         // Don't make quieter than raw mic
         this.maxGain = 60.0;        // Upper limit to avoid noise amplification
         this.attackCoeff = 0.15;    // Fast attack — reduce gain quickly when too loud
         this.releaseCoeff = 0.005;  // Slow release — increase gain gradually when quiet
         this.levelSmooth = 0.0;     // Smoothed peak level for AGC decisions
+        this.clipCount = 0;         // Clipped samples in current buffer (for detection)
 
         // Listen for messages from main thread
         this.port.onmessage = (event) => {
@@ -77,6 +79,18 @@ class AudioProcessor extends AudioWorkletProcessor {
             // Smooth the peak measurement to avoid reacting to single spikes
             this.levelSmooth = this.levelSmooth * 0.9 + rawPeak * 0.1;
 
+            // Adaptive target: adjust target level based on input characteristics
+            if (this.levelSmooth < 0.05) {
+                // Very quiet input (whispered speech) — raise target for better STT
+                this.targetLevel = Math.min(this.baseTargetLevel + 0.10, 0.50);
+            } else if (this.levelSmooth > 0.50) {
+                // Very loud input — lower target to avoid clipping
+                this.targetLevel = Math.max(this.baseTargetLevel - 0.10, 0.20);
+            } else {
+                // Normal range — use base target
+                this.targetLevel = this.baseTargetLevel;
+            }
+
             // Adjust gain based on smoothed level vs target
             if (this.levelSmooth > 0.001) { // Only adjust if there's actual audio
                 const desiredGain = this.targetLevel / this.levelSmooth;
@@ -98,6 +112,7 @@ class AudioProcessor extends AudioWorkletProcessor {
 
         // Second pass: apply gain, calculate output level, convert to Int16
         let maxLevel = 0;
+        this.clipCount = 0;
         const int16Data = new Int16Array(this.bufferSize);
 
         for (let i = 0; i < this.bufferSize; i++) {
@@ -110,17 +125,31 @@ class AudioProcessor extends AudioWorkletProcessor {
                 maxLevel = absSample;
             }
 
+            // Track clipping (sample exceeds [-1, 1] before clamping)
+            if (absSample > 1.0) {
+                this.clipCount++;
+            }
+
             // Convert to Int16 (clamp inline for performance)
             const clamped = amplifiedSample < -1 ? -1 : (amplifiedSample > 1 ? 1 : amplifiedSample);
             int16Data[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
         }
 
-        // Send audio data, level, and current gain to main thread
-        this.port.postMessage({
+        // Build message with optional clipping warning
+        const message = {
             audioData: int16Data.buffer,
             level: maxLevel,  // 0.0 to 1.0
             currentGain: this.gain  // So UI can show current auto-gain value
-        }, [int16Data.buffer]); // Transfer ownership for performance
+        };
+
+        // Warn if >5% of samples are clipped — audio quality is degrading
+        if (this.clipCount > this.bufferSize * 0.05) {
+            message.clipping = true;
+            message.clipRatio = this.clipCount / this.bufferSize;
+        }
+
+        // Send audio data, level, and current gain to main thread
+        this.port.postMessage(message, [int16Data.buffer]); // Transfer ownership for performance
     }
 }
 

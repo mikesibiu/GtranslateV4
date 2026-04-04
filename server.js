@@ -25,13 +25,22 @@ try {
     // dotenv not installed, use defaults
 }
 
+// Load config.json for tunable parameters (env vars still override)
+let APP_CONFIG = {};
+try {
+    APP_CONFIG = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+} catch (e) {
+    // config.json is optional — defaults below cover all values
+}
+
 const PORT = process.env.PORT || 3003;
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || '50');
-const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || '5');
-const INACTIVITY_TIMEOUT = parseInt(process.env.INACTIVITY_TIMEOUT || String(30 * 60 * 1000));
-const MAX_AUDIO_CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
-const STREAM_DURATION_LIMIT_MS = 290000; // Proactive restart at 290s (Google limit is ~305s)
+const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || String(APP_CONFIG.connection?.maxConnections || 50));
+const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || String(APP_CONFIG.connection?.maxConnectionsPerIp || 5));
+const INACTIVITY_TIMEOUT = parseInt(process.env.INACTIVITY_TIMEOUT || String(APP_CONFIG.connection?.inactivityTimeoutMs || 30 * 60 * 1000));
+const MAX_AUDIO_CHUNK_SIZE = APP_CONFIG.audio?.maxChunkSize || 1024 * 1024; // 1MB per chunk
+const STREAM_DURATION_LIMIT_MS = APP_CONFIG.stream?.durationLimitMs || 290000; // Proactive restart at 290s (Google limit is ~305s)
+const TRANSLATION_TIMEOUT_MS = APP_CONFIG.translation?.timeoutMs || 15000; // Timeout for Google Translate API calls
 
 const APP_PASSWORD = process.env.APP_PASSWORD || null;
 
@@ -943,7 +952,13 @@ io.on('connection', (socket) => {
         // performTranslation must not set it again — the finally block clears it.
         try {
             // ── Step 1: Translate the FULL current transcript for maximum context ──
-            const translatedFull = await translateWithRetry(fullText.trim(), targetLanguage, currentLanguage, clientId);
+            // Race against a timeout to prevent hangs if Google Translate API stalls
+            const translatedFull = await Promise.race([
+                translateWithRetry(fullText.trim(), targetLanguage, currentLanguage, clientId),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error(`Translation timeout after ${TRANSLATION_TIMEOUT_MS}ms`)), TRANSLATION_TIMEOUT_MS)
+                )
+            ]);
 
             logger.debug('🔤 Full-text translation', {
                 clientId,
@@ -990,17 +1005,25 @@ io.on('connection', (socket) => {
             lastFullTranslation = translatedFull;
 
             // ── Step 3: Post-processing ──
-            // Apply domain term mappings using fullText for source-aware fixes
-            emitted = applyTermMappings(emitted, fullText);
+            // Language-aware: applyTermMappings and source-aware fixes assume
+            // Romanian source. Only apply them for ro→* translations.
+            // verifyReligiousTerms has its own internal guard (targetLang === 'ro').
+            // preserveSourceNumbers and preserveDates are language-agnostic.
+            const sourceLangBase = currentLanguage.split('-')[0];
+            if (sourceLangBase === 'ro') {
+                emitted = applyTermMappings(emitted, fullText);
+            }
             emitted = verifyReligiousTerms(emitted, fullText, targetLanguage);
             emitted = preserveSourceNumbers(newText, emitted);
             emitted = preserveDates(newText, emitted);
 
-            // Single-word fallback translation
-            const normalizedSource = newText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-            const normalizedEmitted = emitted.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-            if (normalizedSource === normalizedEmitted && FALLBACK_TRANSLATIONS[normalizedSource]) {
-                emitted = FALLBACK_TRANSLATIONS[normalizedSource];
+            // Single-word fallback translation (Romanian source only — keys are Romanian words)
+            if (sourceLangBase === 'ro') {
+                const normalizedSource = newText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                const normalizedEmitted = emitted.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                if (normalizedSource === normalizedEmitted && FALLBACK_TRANSLATIONS[normalizedSource]) {
+                    emitted = FALLBACK_TRANSLATIONS[normalizedSource];
+                }
             }
 
             // Update source tracking
@@ -1058,7 +1081,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v160'
+                        appVersion: 'v189'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;
@@ -1119,6 +1142,13 @@ io.on('connection', (socket) => {
             committedTranslation = '';
             lastFullTranslation = '';
 
+            // Reset rules engine dedup state on stream restart to prevent
+            // legitimate new-stream phrases from being suppressed as duplicates
+            // of pre-restart content.
+            if (translationRules) {
+                translationRules.resetForNewUtterance();
+            }
+
             sessionActive = true;
             updateActivity(); // Start inactivity timer
 
@@ -1142,12 +1172,15 @@ io.on('connection', (socket) => {
                     enableWordTimeOffsets: false,
                     enableWordConfidence: false,
                     enableSpeakerDiarization: false,
-                    speechContexts: [
+                    // Only send Romanian phrase hints when source language is Romanian.
+                    // For other languages these hints are irrelevant noise that wastes
+                    // the phrase hints budget and could interfere with recognition.
+                    speechContexts: currentLanguage.startsWith('ro') ? [
                         {
                             phrases: STT_PHRASE_HINTS,
                             boost: 10  // 10 = midpoint; 20 (max) explicitly increases false positives per Google docs
                         }
-                    ]
+                    ] : []
                 },
                 interimResults: true,
                 singleUtterance: false
@@ -1495,7 +1528,7 @@ io.on('connection', (socket) => {
     // Rate limiting for audio data
     let audioDataReceived = 0;
     let audioRateLimitWindow = Date.now();
-    const MAX_AUDIO_BYTES_PER_SECOND = 1024 * 1024 * 2; // 2MB/sec max
+    const MAX_AUDIO_BYTES_PER_SECOND = APP_CONFIG.audio?.maxBytesPerSecond || 1024 * 1024 * 2; // 2MB/sec max
 
     // Detect audio format once for efficiency
     let audioDataFormat = null;

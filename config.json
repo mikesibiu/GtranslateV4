@@ -1,0 +1,44 @@
+{
+  "stream": {
+    "durationLimitMs": 290000,
+    "maxRestartAttempts": 10,
+    "maxAudioBufferSize": 50
+  },
+  "translation": {
+    "timeoutMs": 15000,
+    "maxRetries": 3,
+    "model": "advanced"
+  },
+  "modes": {
+    "talks": {
+      "translationInterval": 15000,
+      "pauseDetectionMs": 4000,
+      "minWords": 6,
+      "overlapThreshold": 0.65
+    },
+    "earbuds": {
+      "translationInterval": 15000,
+      "pauseDetectionMs": 4000,
+      "minWords": 6,
+      "overlapThreshold": 0.70
+    }
+  },
+  "audio": {
+    "bufferSize": 4096,
+    "agcTargetLevel": 0.35,
+    "agcMinGain": 1.0,
+    "agcMaxGain": 60.0,
+    "maxChunkSize": 1048576,
+    "maxBytesPerSecond": 2097152
+  },
+  "billing": {
+    "purgeAgeDays": 90,
+    "maxTranslationLogRows": 500,
+    "maxBillingAmount": 50000
+  },
+  "connection": {
+    "maxConnections": 50,
+    "maxConnectionsPerIp": 5,
+    "inactivityTimeoutMs": 1800000
+  }
+}

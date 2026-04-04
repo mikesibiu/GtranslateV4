@@ -609,8 +609,11 @@ class GTranslateV4Client {
     }
 
     sealCurrentParagraph() {
+        if (!this.currentParagraphEl) return; // Already sealed — guard against double-seal
         clearTimeout(this.paragraphSealTimer);
         this.paragraphSealTimer = null;
+        // Mark as sealed in DOM so late-arriving translations can detect it
+        this.currentParagraphEl.classList.add('sealed');
         this.currentParagraphEl = null;
         this.paragraphWordCount = 0;
     }

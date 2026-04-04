@@ -260,7 +260,7 @@ async function purgeOldData(days = 90, logger) {
 
     const query = `
         DELETE FROM billing_usage
-        WHERE created_at < CURRENT_DATE - ($1 * INTERVAL '1 day')
+        WHERE created_at < CURRENT_TIMESTAMP - ($1 * INTERVAL '1 day')
     `;
 
     try {

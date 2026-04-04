@@ -77,6 +77,12 @@ speakTranslation(text, targetLanguage, options = {}) {
         return;
     }
 
+    // Cap queue size to prevent memory bloat on mobile (e.g. if processNextInQueue fails)
+    if (this.ttsQueue.length >= 50) {
+        console.warn(`⚠️ TTS queue exceeded 50 items, dropping oldest 10`);
+        this.ttsQueue.splice(0, 10);
+    }
+
     // Add to queue
     this.ttsQueue.push({ text, targetLanguage });
 
