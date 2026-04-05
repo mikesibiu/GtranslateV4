@@ -4,6 +4,7 @@
  * Stream proactively restarts at 290s (Google Cloud limit is ~305s)
  */
 
+const crypto = require('crypto');
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -464,6 +465,54 @@ app.get('/api/billing/daily', requireAuth, async (req, res) => {
         });
     } catch (error) {
         logger.error('Error getting daily usage:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ===== INTERNAL CAPTURE ENDPOINT =====
+// Called by cron-job.org at scheduled meeting times to snapshot translation_log → meeting_snapshots.
+// Auth: Bearer token via CAPTURE_TOKEN env var (set on Koyeb).
+
+// Simple in-memory rate limiter: max 10 calls per minute
+const _captureCalls = [];
+function _captureRateOk() {
+    const now = Date.now();
+    const cutoff = now - 60000;
+    while (_captureCalls.length && _captureCalls[0] < cutoff) _captureCalls.shift();
+    if (_captureCalls.length >= 10) return false;
+    _captureCalls.push(now);
+    return true;
+}
+
+app.post('/internal/capture-logs', express.json({ limit: '4kb' }), async (req, res) => {
+    if (!_captureRateOk()) {
+        return res.status(429).json({ error: 'Too many requests' });
+    }
+
+    const captureToken = process.env.CAPTURE_TOKEN;
+    if (!captureToken) {
+        return res.status(503).json({ error: 'Capture endpoint not configured' });
+    }
+
+    const authHeader = req.headers['authorization'] || '';
+    const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    // Constant-time comparison to prevent timing attacks
+    const tokensMatch = provided.length === captureToken.length &&
+        crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(captureToken));
+    if (!tokensMatch) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Restrict label to safe characters only
+    const rawLabel = (req.body && req.body.label) ? String(req.body.label) : 'manual';
+    const label = /^[\w-]{1,64}$/.test(rawLabel) ? rawLabel : 'manual';
+
+    try {
+        const count = await billingDb.captureSnapshot(label);
+        logger.info(`📸 Meeting snapshot captured: ${count} rows, label="${label}"`);
+        res.json({ success: true, rows: count, label });
+    } catch (error) {
+        logger.error('Capture snapshot error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

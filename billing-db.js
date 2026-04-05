@@ -84,6 +84,21 @@ async function createSchema(logger) {
 
         CREATE INDEX IF NOT EXISTS idx_tlog_session ON translation_log(session_id);
         CREATE INDEX IF NOT EXISTS idx_tlog_created_at ON translation_log(created_at);
+
+        CREATE TABLE IF NOT EXISTS meeting_snapshots (
+            id SERIAL PRIMARY KEY,
+            snapshot_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            snapshot_label VARCHAR(64) NOT NULL,
+            session_id VARCHAR(64),
+            source_text TEXT NOT NULL,
+            translated_text TEXT NOT NULL,
+            translation_reason VARCHAR(40),
+            source_language VARCHAR(10),
+            original_created_at TIMESTAMP WITH TIME ZONE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_snap_snapshot_at ON meeting_snapshots(snapshot_at);
+        CREATE INDEX IF NOT EXISTS idx_snap_label ON meeting_snapshots(snapshot_label);
     `;
 
     try {
@@ -334,6 +349,34 @@ async function logTranslation(entry) {
 }
 
 /**
+ * Capture a snapshot of the current translation_log into meeting_snapshots.
+ * Called by POST /internal/capture-logs at scheduled meeting times.
+ *
+ * @param {string} label - Human-readable label e.g. 'sun-1350', 'thu-2045'
+ * @returns {Promise<number>} Number of rows inserted
+ */
+async function captureSnapshot(label) {
+    if (!pool) return 0;
+
+    // Purge snapshots older than 365 days (keep one year of meeting history)
+    await pool.query(
+        `DELETE FROM meeting_snapshots WHERE snapshot_at < NOW() - INTERVAL '365 days'`
+    );
+
+    const result = await pool.query(
+        `INSERT INTO meeting_snapshots
+            (snapshot_label, session_id, source_text, translated_text,
+             translation_reason, source_language, original_created_at)
+         SELECT $1, session_id, source_text, translated_text,
+                translation_reason, source_language, created_at
+         FROM translation_log
+         ORDER BY created_at ASC`,
+        [label]
+    );
+    return result.rowCount;
+}
+
+/**
  * Close database connection (for graceful shutdown)
  */
 async function closeDatabase(logger) {
@@ -351,5 +394,6 @@ module.exports = {
     getDailyUsage,
     purgeOldData,
     logTranslation,
+    captureSnapshot,
     closeDatabase
 };
