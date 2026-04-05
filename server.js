@@ -893,6 +893,11 @@ io.on('connection', (socket) => {
                 recognizeStream.removeAllListeners('end');
                 recognizeStream.removeAllListeners('close');
                 recognizeStream.removeAllListeners('data');
+                // After stripping listeners, attach a silent no-op error handler.
+                // Duplexify/_destroy fires a second 'error' event asynchronously during
+                // stream teardown (via process.processTicksAndRejections). Without this,
+                // that deferred error has no listener → uncaught → process crash.
+                recognizeStream.on('error', () => {});
             } catch (e) { /* ignore */ }
         }
         recognizeStream = null;
