@@ -11,3 +11,10 @@ glossary-temp/translate-cache.json
 # Claude KB temp files
 .claude/knowledge.db-wal
 .claude/knowledge.db-shm
+
+# Meeting log captures (local only — not committed)
+meeting-logs/
+
+# Script local env (contains DB credentials)
+scripts/.env.local
+scripts/capture.log
