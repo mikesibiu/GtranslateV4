@@ -5,6 +5,7 @@
  */
 
 const crypto = require('crypto');
+const cron = require('node-cron');
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -1874,6 +1875,30 @@ server.listen(PORT, async () => {
 
         scheduleDailyPurge();
         logger.info('🗑️ Scheduled daily purge of billing data older than 90 days');
+
+        // Schedule meeting log captures (Europe/Bucharest = EET/EEST)
+        // Sun 13:50, Sun 14:40, Thu 19:50, Thu 20:45
+        const meetingSchedules = [
+            { cron: '50 13 * * 0', label: 'sun-1350' },
+            { cron: '40 14 * * 0', label: 'sun-1440' },
+            { cron: '50 19 * * 4', label: 'thu-1950' },
+            { cron: '45 20 * * 4', label: 'thu-2045' },
+        ];
+        for (const { cron: schedule, label } of meetingSchedules) {
+            if (!cron.validate(schedule)) {
+                throw new Error(`Invalid cron expression for label="${label}": "${schedule}"`);
+            }
+            cron.schedule(schedule, async () => {
+                try {
+                    logger.info(`[snapshot] Auto-capturing meeting log: ${label}`);
+                    const count = await billingDb.captureSnapshot(label);
+                    logger.info(`[snapshot] Saved ${count} rows, label="${label}"`);
+                } catch (err) {
+                    logger.error(`[snapshot] Failed for label="${label}": ${err.message}`, { stack: err.stack });
+                }
+            }, { timezone: 'Europe/Bucharest' });
+        }
+        logger.info(`[scheduler] Registered ${meetingSchedules.length} cron jobs for meeting log capture (Europe/Bucharest)`);
     }
 
     logger.info('✅ Ready to receive connections');
