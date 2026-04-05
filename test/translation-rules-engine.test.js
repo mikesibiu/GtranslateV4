@@ -101,17 +101,19 @@ describe('TranslationRulesEngine', () => {
             expect(quality.meetsMinimum).to.be.true;
         });
 
-        it('isFinal=true: single non-filler word "Amin" passes', () => {
+        it('isFinal=true: single non-filler word "Amin" is blocked (threshold raised to 2)', () => {
+            // Single-word isFinal results are almost always STT artifacts ("pian", "laptop").
+            // Threshold raised from 1→2 to suppress them. "Amin" doesn't need translation.
             const quality = engine.checkQuality('Amin', true, false);
-            expect(quality.meetsMinimum).to.be.true;
+            expect(quality.meetsMinimum).to.be.false;
+            expect(quality.reason).to.equal('too_few_words');
         });
 
-        it('isFinal=true: single filler word "da" reaches filler gate (not word-count gate)', () => {
-            // Word-count gate passes (1 >= 1). Filler gate is the backstop.
+        it('isFinal=true: single filler word "da" also blocked at word-count gate (threshold 2)', () => {
+            // Both filler and non-filler single words now fail at the word-count gate (threshold 2).
             const quality = engine.checkQuality('da', true, false);
             expect(quality.meetsMinimum).to.be.false;
-            expect(quality.isFillerOnly).to.be.true;
-            expect(quality.reason).to.equal('filler_words_only');
+            expect(quality.reason).to.equal('too_few_words');
         });
 
         it('isContinuationTail=true: 2-word text passes (threshold 2)', () => {
@@ -273,7 +275,8 @@ describe('TranslationRulesEngine', () => {
             expect(decision.confidence).to.equal(0.8);
         });
 
-        it('should pass final result with single word (isFinal threshold is 1)', () => {
+        it('should block final result with single word (isFinal threshold raised to 2)', () => {
+            // Single-word isFinal results ("pian", "laptop", "torului") are STT artifacts.
             const decision = engine.shouldTranslate({
                 text: 'pair',
                 isFinal: true,
@@ -282,8 +285,7 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            expect(decision.shouldTranslate).to.be.true;
-            expect(decision.reason).to.equal('final_result');
+            expect(decision.shouldTranslate).to.be.false;
         });
 
         it('should reject final result with filler words only', () => {
@@ -312,7 +314,7 @@ describe('TranslationRulesEngine', () => {
             expect(decision.reason).to.equal('final_result');
         });
 
-        it('isFinal 2-word fragment passes (standalone isFinal threshold is 1)', () => {
+        it('isFinal 2-word fragment passes (standalone isFinal threshold is 2)', () => {
             const decision = engine.shouldTranslate({
                 text: 'Amin bine',
                 isFinal: true,
@@ -357,8 +359,8 @@ describe('TranslationRulesEngine', () => {
             expect(decision.reason).to.equal('too_few_words');
         });
 
-        it('continuation tail cap: 6-word remainder not classified as tail (uses isFinal threshold 1, passes)', () => {
-            // newWordCount=6 > 5 cap → isContinuationTail=false → minWords=1 (isFinal) → passes
+        it('continuation tail cap: 6-word remainder not classified as tail (uses isFinal threshold 2, passes)', () => {
+            // newWordCount=6 > 5 cap → isContinuationTail=false → minWords=2 (isFinal) → passes (6 >= 2)
             engine.lastTranslatedText = 'acesta este textul lung';
             const decision = engine.shouldTranslate({
                 text: 'acesta este textul lung cu mare bucurie si pace',
@@ -648,7 +650,7 @@ describe('TranslationRulesEngine', () => {
             expect(decision.reason).to.equal('max_interval');
         });
 
-        it('should handle single word from Google final result', () => {
+        it('should block single word from Google final result (threshold raised to 2)', () => {
             const engine = new TranslationRulesEngine('talks', mockLogger);
 
             const decision = engine.shouldTranslate({
@@ -659,9 +661,8 @@ describe('TranslationRulesEngine', () => {
                 clientId: 'test-123'
             });
 
-            // isFinal confirmed speech — single-word passes (threshold 1)
-            expect(decision.shouldTranslate).to.be.true;
-            expect(decision.reason).to.equal('final_result');
+            // Single-word finals are STT artifacts — blocked at word-count gate (threshold 2).
+            expect(decision.shouldTranslate).to.be.false;
         });
 
         it('should handle EarBuds mode longer intervals', () => {

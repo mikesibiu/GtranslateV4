@@ -738,6 +738,9 @@ io.on('connection', (socket) => {
         'bunătatea',
         'cu bunătate',
         // Biblical people — commonly garbled by STT in JW meeting context
+        // NOTE: Single-token proper nouns are an accepted exception to the multi-word preference.
+        // Biblical names have no adjacent-word ambiguity the decoder can exploit, so early-commit
+        // risk is low. All other hints below remain multi-word.
         'Isaia',       // Isaiah → STT produces "Nisa aia", "zona" etc. for Bible book references
         'Ieremia',     // Jeremiah
         'Ezechiel',    // Ezekiel
@@ -745,6 +748,29 @@ io.on('connection', (socket) => {
         'David',       // King David → STT produced "Daddy" (Yankee) in one session
         'Iacov',       // Jacob → STT produced "Yankee" in one session
         'Moise',       // Moses
+        'Varnava',     // Barnabas → STT produced "banaval" (2026-04-05 session)
+        'Barnaba',     // alternate Romanian form of Barnabas
+        'Galileea',    // Galilee — proper noun, acceptable single-token exception
+        // New Testament locations — multi-word forms for Sea of Galilee
+        'marea Galileii',    // Sea of Galilee
+        'marea Galileei',    // alternate genitive form
+        // Bible books often referenced by short name — use multi-word to avoid false-positives
+        // ('fapte' = "deeds/actions" in ordinary speech — single token would over-commit)
+        'Fapte apostolilor', // Acts of the Apostles
+        'cartea Fapte',      // "the book of Acts" reference form
+        // Motivation vocabulary — prevents STT substitution pură→fură (2026-04-05 session)
+        'motivație pură',    // pure motivation
+        'motivație greșită', // wrong motivation
+        // Demon possession — referenced in Acts/Gospels discussions
+        'posedat de demon',
+        'posedate de demon',
+        'posedat de demoni',
+        // Prostration/bowing — s-au plătit (paid) confused with s-au plecat (bowed)
+        's-au plecat',       // they bowed
+        's-au prosternat',   // they prostrated themselves
+        // Field service/ministry vocabulary
+        'serviciul de predicare',  // preaching service/ministry
+        'serviciul de teren',      // field service
         // Biblical Hebrew words in common Romanian JW use
         'cei răi',     // the wicked ones → STT produced "cei răni" (wounded) — Matthew 5:45
         'cei drepți',  // the righteous ones

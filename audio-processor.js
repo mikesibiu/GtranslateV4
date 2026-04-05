@@ -11,7 +11,9 @@ class AudioProcessor extends AudioWorkletProcessor {
         this.bufferSize = 4096; // Accumulate to 4096 samples before sending
         this.buffer = new Float32Array(this.bufferSize); // Pre-allocated typed array
         this.bufferIndex = 0;
-        this.gain = 10.0; // Current gain (manual or auto-adjusted)
+        this.gain = 3.0;  // Current gain (manual or auto-adjusted). Conservative default:
+                          // 10.0 caused hard clipping before AGC could converge (first ~1s),
+                          // producing random word substitutions in Google STT output.
 
         // Auto-gain control state
         this.autoGain = false;      // AGC disabled by default (Google STT handles audio levels)

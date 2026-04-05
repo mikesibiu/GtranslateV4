@@ -127,6 +127,25 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bgatherings\b/gi, 'congregations');
     }
 
+    // Source-aware fix: "serviciu" in JW context = ministry/field service, not "service" (generic).
+    // "serviciul pe pământ" = "his ministry on earth"; "serviciu de predicare" = "preaching ministry".
+    // Only apply when source contains "serviciu" to avoid over-correcting unrelated "service" uses.
+    if (/serviciu/i.test(sourceText)) {
+        result = result.replace(/\bhis service on earth\b/gi, 'his ministry on earth');
+        result = result.replace(/\bthe service on earth\b/gi, 'the ministry on earth');
+        result = result.replace(/\bpreaching service\b/gi, 'preaching ministry');
+        result = result.replace(/\bfield service\b/gi, 'field ministry');
+    }
+
+    // Source-aware fix: "sportivă/sportiv" in Romanian speech = fair/sportsmanlike (showing
+    // integrity and fair play), not "sporty" (fashion/athletic style).
+    // Seen: "ce este sportivă" → "what is sporty" (2026-04-05 session).
+    if (/sportiv[ăa]?\b/i.test(sourceText)) {
+        result = result.replace(/\bsporty\b/gi, 'fair and upright');
+        // NOTE: bare "sporting" intentionally NOT replaced — too broad ("sporting chance",
+        // "sporting event", "sporting goods"). Only the confirmed bad output "sporty" is fixed.
+    }
+
     // Source-aware fix: "romani" in Romanian = Romani people/language (Roma), not Romans.
     // JW meetings regularly reference "limba romani" (Romani language) and "frații romani"
     // (Romani brothers). Exception: "cartea Romani" = the biblical book of Romans.
