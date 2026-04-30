@@ -855,7 +855,17 @@ io.on('connection', (socket) => {
         'ucenicii',
         'ucenicul',
         // Bible study vocabulary — "studiul" misheard as "soțul" (husband)
-        'studiul'
+        'studiul',
+        // Holy/sacred vocabulary — "sfântă" misheard as "scurtă" (short) during 1 Peter 2:9 reading
+        // (2026-04-30: "o națiune sfântă" → "a short nation")
+        'sfântă',
+        'sfânt',
+        'sfinte',
+        'Duhul Sfânt',    // Holy Spirit — very frequent, never boosted until now
+        // 1 Peter 2:9 vocabulary — the full verse is read regularly; multi-word forms are safer
+        'preoție regală',   // royal priesthood
+        'neam ales',        // chosen race/people
+        'națiune sfântă'    // holy nation (directly prevents "short nation" mishear)
     ];
 
     // Helper function to update last activity time
@@ -1176,7 +1186,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v195'
+                        appVersion: 'v196'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;

@@ -173,6 +173,33 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bRomans\b/g, 'Romani');
     }
 
+    // Source-aware fix: "blestemator" = blasphemer (theological term, 1 Tim 1:13).
+    // Google Translate renders it as "curser" (colloquial) — wrong in a Bible-reading context.
+    // Confirmed: 2026-04-30 session — "a fost blestemator persecutor" → "a curser persecutor".
+    if (/\bblestemator/i.test(sourceText)) {  // matches singular + plural "blestematori"
+        result = result.replace(/\bcurser\b/gi, 'blasphemer');
+        result = result.replace(/\bcursers\b/gi, 'blasphemers');
+    }
+
+    // Source-aware fix: "versuri" in JW context = Bible verses/scriptures, not song lyrics.
+    // Google Translate defaults to "lyrics" because "versuri" is most commonly poetry/songs.
+    // Confirmed: 2026-04-30 session — "organizarea versurilor" → "organization of lyrics".
+    if (/\bversur/i.test(sourceText)) {
+        result = result.replace(/\blyrics\b/gi, 'verses');
+    }
+
+    // Source-aware fix: "sigur" (Romanian adverb = "certainly/sure") capitalized by STT →
+    // Google Translate treats capital "Sigur" as a person's name and adds possessive.
+    // Confirmed: 2026-04-30 — "pe marginea lui Sigur" → "discuss Sigur's side" (should be "certainly").
+    // Note: "Sigur" is a legitimate Romanian given name, so only apply when lowercase "sigur"
+    // is present in source (STT capitalised it but the speaker meant the adverb).
+    if (/\bsigur\b/.test(sourceText)) {
+        // Possessive MUST run before bare form — bare /\bSigur\b/ would otherwise turn
+        // "Sigur's" into "certainly's" (the \b falls before the apostrophe).
+        result = result.replace(/\bSigur's\b/g, 'certainly');
+        result = result.replace(/\bSigur\b/g, 'certainly');
+    }
+
     return result;
 }
 

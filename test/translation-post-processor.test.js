@@ -408,6 +408,63 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('source-aware: blestemator → blasphemer (1 Tim 1:13)', () => {
+        it('curser → blasphemer when source has "blestemator"', () => {
+            expect(applyTermMappings('he was a curser and persecutor', 'a fost blestemator persecutor'))
+                .to.equal('he was a blasphemer and persecutor');
+        });
+
+        it('cursers → blasphemers (plural)', () => {
+            expect(applyTermMappings('they were cursers', 'erau blestematori'))
+                .to.equal('they were blasphemers');
+        });
+
+        it('does NOT replace curser when source has no blestemator', () => {
+            expect(applyTermMappings('he was a curser', 'a fost un om rău'))
+                .to.equal('he was a curser');
+        });
+    });
+
+    describe('source-aware: versuri → verses (not lyrics)', () => {
+        it('lyrics → verses when source has "versuri"', () => {
+            expect(applyTermMappings('organization of lyrics', 'organizarea versurilor'))
+                .to.equal('organization of verses');
+        });
+
+        it('lyrics → verses when source has "versurilor" (genitive form)', () => {
+            expect(applyTermMappings('arrangement of lyrics', 'aranjamentul versurilor'))
+                .to.equal('arrangement of verses');
+        });
+
+        it('does NOT replace lyrics when source has no versur', () => {
+            expect(applyTermMappings('beautiful song lyrics', 'melodie frumoasă'))
+                .to.equal('beautiful song lyrics');
+        });
+    });
+
+    describe('source-aware: sigur → certainly (STT capitalisation fix)', () => {
+        it("Sigur's → certainly when source has lowercase sigur", () => {
+            expect(applyTermMappings("discuss Sigur's side", 'pe marginea lui sigur'))
+                .to.equal('discuss certainly side');
+        });
+
+        it('Sigur → certainly when source has lowercase sigur', () => {
+            expect(applyTermMappings('as Sigur said', 'cum sigur a spus'))
+                .to.equal('as certainly said');
+        });
+
+        it('does NOT replace when source has only uppercase Sigur (proper name)', () => {
+            expect(applyTermMappings('Sigur spoke today', 'Sigur a vorbit'))
+                .to.equal('Sigur spoke today');
+        });
+
+        it("does NOT corrupt Sigur's to certainly's (possessive replaced before bare form)", () => {
+            const result = applyTermMappings("I read Sigur's notes", 'am citit notele lui sigur');
+            expect(result).to.not.include("certainly's");
+            expect(result).to.equal("I read certainly notes");
+        });
+    });
+
     describe('no source changes when no triggers present', () => {
         it('leaves clean English output unchanged', () => {
             const clean = 'Jehovah blesses those who seek righteousness.';
