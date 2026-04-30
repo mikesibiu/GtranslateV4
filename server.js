@@ -841,7 +841,21 @@ io.on('connection', (socket) => {
         'congresul special',
         'adunare de circuit',
         'adunarea de circuit',
-        'adunarea locală'
+        'adunarea locală',
+        // Core religious figures — bare forms needed; "gumă"/"mama" misheard from these
+        // Single-token proper nouns are acceptable (no adjacent-word ambiguity risk)
+        'Iehova',
+        'Isus',
+        'Isus Hristos',
+        'Dumnezeu',
+        // Daniel 12:4 — "sigilează" (seal up) misheard as "frigideaza" (non-word)
+        // Using phrase form only (safer than bare verb — avoids early-commit on the following word)
+        'sigilează cartea',
+        // New Testament disciples — "ucenicii" misheard as "felii" (slices)
+        'ucenicii',
+        'ucenicul',
+        // Bible study vocabulary — "studiul" misheard as "soțul" (husband)
+        'studiul'
     ];
 
     // Helper function to update last activity time
@@ -1162,7 +1176,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v189'
+                        appVersion: 'v195'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;

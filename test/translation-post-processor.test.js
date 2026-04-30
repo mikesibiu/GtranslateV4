@@ -396,6 +396,18 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('source-aware: Hopa → Jehovah (STT prayer mishear)', () => {
+        it('Hopa → Jehovah when source has capitalised "Hopa" (prayer mishear)', () => {
+            expect(applyTermMappings('Hopa, be with us', 'Hopa să fi alături de noi'))
+                .to.equal('Jehovah, be with us');
+        });
+
+        it('does NOT replace lowercase hopa (Romanian exclamation "whoops") — gate is intentionally case-sensitive', () => {
+            expect(applyTermMappings('hopa, am căzut', 'hopa, am căzut'))
+                .to.equal('hopa, am căzut');
+        });
+    });
+
     describe('no source changes when no triggers present', () => {
         it('leaves clean English output unchanged', () => {
             const clean = 'Jehovah blesses those who seek righteousness.';

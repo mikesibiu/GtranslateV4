@@ -58,6 +58,15 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(pattern, replacement);
     }
 
+    // Source-aware fix: "Hopa" (STT mishear of "Iehova" in prayer/vocative context).
+    // Google Translate passes the unknown word through verbatim, so "Hopa" appears in result as-is.
+    // CASE-SENSITIVE GATE — intentional: lowercase "hopa" is the Romanian exclamation "whoops"
+    // and must NOT be corrected. Do not add /i to either regex.
+    // Confirmed failure: 2026-04-30 closing prayer — "Hopa să fi alături de noi" → "Hopa, be with us."
+    if (/\bHopa\b/.test(sourceText)) {
+        result = result.replace(/\bHopa\b/g, 'Jehovah');
+    }
+
     // Source-aware fix: "congregație" → "congregation" (not "church").
     // Google Translate sometimes returns "church" for "congregație" in religious contexts.
     // JW terminology strictly uses "congregation", never "church".
@@ -65,6 +74,17 @@ function applyTermMappings(text, sourceText = '') {
     if (/congregati/i.test(sourceNorm)) {
         result = result.replace(/\bchurch\b/gi, 'congregation');
         result = result.replace(/\bchurches\b/gi, 'congregations');
+    }
+
+    // Source-aware fix: "biserica" (definite singular = "the church") → "the congregation".
+    // In JW meetings, speakers use "biserica" to mean their own congregation/organization,
+    // not the churches of Christendom (for those they use "religiile lumii", "creștinătatea").
+    // Only fires on definite "the church" — "our church"/"his church"/"a church" from
+    // "biserica noastră/lui/o" are not corrected; expand if new patterns emerge in logs.
+    // Note: the trigger word "biserica" contains no Romanian diacritics, so matching
+    // directly against sourceText is sufficient — no need for sourceNorm here.
+    if (/\bbiserica\b/i.test(sourceText)) {
+        result = result.replace(/\bthe church\b/gi, 'the congregation');
     }
 
     // Source-aware fix: STT garbles "congrese speciale" → "congrete fiare" (beasts).
