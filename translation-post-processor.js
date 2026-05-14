@@ -200,6 +200,35 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bSigur\b/g, 'certainly');
     }
 
+    // Source-aware fix: "Popa" (capital) = STT mishear of "Iehova" (same /H/ onset pattern as Hopa).
+    // Lowercase "popa" = Romanian colloquial for "priest" — intentionally excluded by case-sensitive gate.
+    // Confirmed: 2026-05-14 — "gurița sa va trăi de Popa" → "his mouth will live on Popa".
+    if (/\bPopa\b/.test(sourceText)) {
+        result = result.replace(/\bPopa\b/g, 'Jehovah');
+    }
+
+    // Source-aware fix: "franci/francii" = STT mishear of "frați/frații" (brothers/the brothers).
+    // The /ts/ cluster in "frați" causes Google STT to commit to "franci" (francs — French currency).
+    // Confirmed: 2026-05-14 — "450 de franci" → "450 francs" (should be "450 brothers");
+    //            "efectiv am simțit cu francii" → "with the francs" (should be "with the brothers").
+    // Gate uses /\bfrancii?\b/ (not open suffix) to avoid firing on "Francisc" (proper name).
+    // "franci" has no diacritics — sourceText is sufficient (no need for sourceNorm).
+    if (/\bfrancii?\b/i.test(sourceText)) {
+        result = result.replace(/\bthe francs\b/gi, 'the brothers');
+        result = result.replace(/\bfrancs\b/gi, 'brothers');
+    }
+
+    // Grammar fix: "fi prieteni" (be friends) → Google Translate produces "be friendship with".
+    // "be friendship with" is impossible English — safe to fix globally (no source gate needed).
+    // Confirmed: 2026-05-14 — "fi prieteni cu Iehova" → "be friendship with Jehovah".
+    result = result.replace(/\bbe friendship with\b/gi, 'be friends with');
+
+    // Grammar fix: "considera prieteni" → "consider friendship" (wrong noun form).
+    // "consider friendship" IS valid English ("consider friendship important") so source gate required.
+    if (/consider[aă]/i.test(sourceNorm)) {
+        result = result.replace(/\bconsider friendship\b/gi, 'consider friends');
+    }
+
     return result;
 }
 

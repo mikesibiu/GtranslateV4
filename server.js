@@ -865,7 +865,17 @@ io.on('connection', (socket) => {
         // 1 Peter 2:9 vocabulary — the full verse is read regularly; multi-word forms are safer
         'preoție regală',   // royal priesthood
         'neam ales',        // chosen race/people
-        'națiune sfântă'    // holy nation (directly prevents "short nation" mishear)
+        'națiune sfântă',   // holy nation (directly prevents "short nation" mishear)
+        // Apostle names — commonly garbled when reading the list of the 12 (2026-05-14 session)
+        'Alfeu',            // Alphaeus — STT produces "alfel" (non-word)
+        'Iuda Tadeu',       // Judas Thaddaeus — STT produces "Iulian Tadeu" (modern Romanian name)
+        'Tadeu',            // Thaddaeus — standalone form
+        // Brothers — "frați/frații" misheard as "franci/francii" (francs/the francs)
+        // Very common word in JW meetings; the /ts/ cluster triggers the French-currency mishear
+        'frați',
+        'frații',
+        // Gentiles/nations — "neamurilor" misheard as "național" in Matthew 10:5 context
+        'neamurilor'        // of the nations/Gentiles
     ];
 
     // Helper function to update last activity time
@@ -1186,7 +1196,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v196'
+                        appVersion: 'v197'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;

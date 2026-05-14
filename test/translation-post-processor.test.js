@@ -465,6 +465,62 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('source-aware: Popa → Jehovah (STT prayer mishear)', () => {
+        it('Popa → Jehovah when source has capitalised "Popa"', () => {
+            expect(applyTermMappings('his mouth will live on Popa', 'gurița sa va trăi de Popa'))
+                .to.equal('his mouth will live on Jehovah');
+        });
+
+        it('does NOT replace when source has only lowercase popa (Romanian for priest)', () => {
+            expect(applyTermMappings('the priest said', 'popa a spus'))
+                .to.equal('the priest said');
+        });
+    });
+
+    describe('source-aware: franci → brothers (STT mishear of frați)', () => {
+        it('"the francs" → "the brothers" when source has "francii"', () => {
+            expect(applyTermMappings('I felt with the francs around the world', 'am simțit cu francii în întreaga lume'))
+                .to.equal('I felt with the brothers around the world');
+        });
+
+        it('"francs" → "brothers" when source has "franci"', () => {
+            expect(applyTermMappings('over 450 francs were detained', 'peste 450 de franci au fost reținuți'))
+                .to.equal('over 450 brothers were detained');
+        });
+
+        it('does NOT replace when source has no franci trigger', () => {
+            expect(applyTermMappings('the exchange rate for francs', 'cursul de schimb'))
+                .to.equal('the exchange rate for francs');
+        });
+
+        it('does NOT fire when source has "Francisc" (proper name — not frați mishear)', () => {
+            expect(applyTermMappings('the francs changed hands', 'Francisc a schimbat'))
+                .to.equal('the francs changed hands');
+        });
+    });
+
+    describe('grammar fix: be friendship / consider friendship', () => {
+        it('"be friendship with" → "be friends with"', () => {
+            expect(applyTermMappings('be friendship with Jehovah', 'fi prieteni cu Iehova'))
+                .to.equal('be friends with Jehovah');
+        });
+
+        it('"our friendship with" passes through unchanged (valid English, no gate trigger)', () => {
+            expect(applyTermMappings('our friendship with Jehovah grows', 'prietenia noastră cu Iehova'))
+                .to.equal('our friendship with Jehovah grows');
+        });
+
+        it('"consider friendship" → "consider friends" when source has considerăm', () => {
+            expect(applyTermMappings('people who we consider friendship', 'persoane pe care le considerăm prieteni'))
+                .to.equal('people who we consider friends');
+        });
+
+        it('"consider friendship" NOT replaced when no consideră trigger in source', () => {
+            expect(applyTermMappings('we must consider friendship as a priority', 'trebuie să avem prietenie'))
+                .to.equal('we must consider friendship as a priority');
+        });
+    });
+
     describe('no source changes when no triggers present', () => {
         it('leaves clean English output unchanged', () => {
             const clean = 'Jehovah blesses those who seek righteousness.';
