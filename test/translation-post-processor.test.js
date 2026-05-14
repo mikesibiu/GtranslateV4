@@ -521,6 +521,30 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('source-aware: Boga → Jehovah (STT mishear of Iehova)', () => {
+        it('Boga → Jehovah when source has capitalised "Boga"', () => {
+            expect(applyTermMappings('the fact that Boga knows', 'faptul că îl cunoaște pe Boga'))
+                .to.equal('the fact that Jehovah knows');
+        });
+
+        it('does NOT fire when source has only lowercase boga', () => {
+            expect(applyTermMappings('Boga spoke', 'boga a vorbit'))
+                .to.equal('Boga spoke');
+        });
+    });
+
+    describe('source-aware: pulberabilă → vulnerable (STT mishear of vulnerabilă)', () => {
+        it('"pulverizable" → "vulnerable" when source has "pulberabilă"', () => {
+            expect(applyTermMappings('a pulverizable religious minority', 'o minoritate religioasă pulberabilă'))
+                .to.equal('a vulnerable religious minority');
+        });
+
+        it('"pulverizable" passes through unchanged without pulberabil trigger', () => {
+            expect(applyTermMappings('a pulverizable material', 'un material rezistent'))
+                .to.equal('a pulverizable material');
+        });
+    });
+
     describe('no source changes when no triggers present', () => {
         it('leaves clean English output unchanged', () => {
             const clean = 'Jehovah blesses those who seek righteousness.';

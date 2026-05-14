@@ -875,7 +875,14 @@ io.on('connection', (socket) => {
         'frați',
         'frații',
         // Gentiles/nations — "neamurilor" misheard as "național" in Matthew 10:5 context
-        'neamurilor'        // of the nations/Gentiles
+        'neamurilor',       // of the nations/Gentiles
+        // Vulnerable — "vulnerabilă" misheard as "pulberabilă" (non-word from "pulbere" = powder)
+        // (2026-05-14: "o minoritate religioasă pulberabilă" → "a pulverizable religious minority")
+        // Bare adjective form included alongside phrase form: unlike bare verb/noun hints,
+        // "vulnerabilă" has a sufficiently distinct phoneme cluster that early-commit risk is low.
+        // Remove the bare form if a future session shows adjacent-word garbling from the boost.
+        'vulnerabilă',
+        'minoritate vulnerabilă',
     ];
 
     // Helper function to update last activity time
@@ -1196,7 +1203,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v197'
+                        appVersion: 'v198'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;

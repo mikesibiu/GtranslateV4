@@ -229,6 +229,22 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bconsider friendship\b/gi, 'consider friends');
     }
 
+    // Source-aware fix: "Boga" (capital) = STT mishear of "Iehova" — same /H/ onset mishear
+    // family as Hopa and Popa. Lowercase "boga" is not a standard Romanian word but excluded
+    // by case-sensitive gate for safety. Confirmed: 2026-05-14 — "îl cunoaște pe Boga" →
+    // "knows Boga" (should be "knows Jehovah"); preposition "pe" confirms it is a proper noun.
+    if (/\bBoga\b/.test(sourceText)) {
+        result = result.replace(/\bBoga\b/g, 'Jehovah');
+    }
+
+    // Source-aware fix: "pulberabilă" = STT mishear of "vulnerabilă" (vulnerable).
+    // The /vl/ → /pb/ shift produces a non-word that Google Translate renders as "pulverizable".
+    // "pulberabilă" never appears in real Romanian — safe to fix without false-positive risk.
+    // Confirmed: 2026-05-14 — "o minoritate religioasă pulberabilă" → "a pulverizable religious minority".
+    if (/pulberabil/i.test(sourceText)) {
+        result = result.replace(/\bpulverizable\b/gi, 'vulnerable');
+    }
+
     return result;
 }
 
