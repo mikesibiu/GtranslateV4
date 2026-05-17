@@ -883,6 +883,10 @@ io.on('connection', (socket) => {
         // Remove the bare form if a future session shows adjacent-word garbling from the boost.
         'vulnerabilă',
         'minoritate vulnerabilă',
+        // Branch Committee — "Ramură" misheard causing Google Translate to output "psychiatric"
+        // (2026-05-17 live: "John Preda pentru Comitetul de Ramură" → "Psychiatric committee")
+        'Comitetul de Ramură',
+        'Ramură',
     ];
 
     // Helper function to update last activity time
@@ -1203,7 +1207,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v199'
+                        appVersion: 'v200'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;

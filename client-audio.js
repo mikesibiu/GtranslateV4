@@ -165,6 +165,39 @@ async startRecording() {
                     }
                 });
                 console.log('🎤 Microphone access granted');
+
+                // Permission is now granted — device labels are visible.
+                // Switch to phone's internal mic if Chrome auto-routed to Bluetooth HFP
+                // (Bluetooth HFP is capped at 8–16kHz, degrading STT quality).
+                // Note: there is an inherent race window between enumerateDevices and the
+                // second getUserMedia call — Bluetooth routing events can fire in between.
+                // The try/catch below ensures the original stream is preserved on any failure.
+                const internalDeviceId = await this.findInternalMicDevice();
+                if (internalDeviceId) {
+                    const tracks = this.mediaStream.getAudioTracks();
+                    const currentDeviceId = tracks.length > 0 ? tracks[0].getSettings()?.deviceId : null;
+                    if (currentDeviceId && currentDeviceId !== internalDeviceId) {
+                        try {
+                            const newStream = await navigator.mediaDevices.getUserMedia({
+                                audio: {
+                                    deviceId: { exact: internalDeviceId },
+                                    echoCancellation: false,
+                                    noiseSuppression: false,
+                                    autoGainControl: false,
+                                    channelCount: 1
+                                }
+                            });
+                            // Stop old tracks only after new stream is confirmed
+                            this.mediaStream.getTracks().forEach(t => t.stop());
+                            this.mediaStream = newStream;
+                            console.log('🎤 Switched to internal mic (Bluetooth HFP avoided)');
+                        } catch (switchErr) {
+                            console.warn('⚠️ Could not switch to internal mic, keeping current stream:', switchErr.message);
+                        }
+                    } else {
+                        console.log('🎤 Already on internal mic');
+                    }
+                }
             } catch (micError) {
                 // Handle specific permission errors
                 if (micError.name === 'NotAllowedError') {
@@ -503,6 +536,43 @@ updateAudioLevel(level) {
         this.audioLevelText.style.color = '#ff9800'; // Weak
     } else {
         this.audioLevelText.style.color = '#4caf50'; // Good
+    }
+},
+
+async findInternalMicDevice() {
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(d => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default');
+
+        const internalKeywords = ['internal', 'built-in', 'builtin'];
+        // "hands-free" / "handsfree" = standard Android label for HFP profile mic
+        const bluetoothKeywords = ['bluetooth', 'wireless', 'buds', 'airpods', 'headset', 'headphone', 'hands-free', 'handsfree', 'hfp'];
+
+        // First pass: device explicitly labelled as internal/built-in
+        const explicit = audioInputs.find(d => {
+            const label = d.label.toLowerCase();
+            return internalKeywords.some(k => label.includes(k)) &&
+                   !bluetoothKeywords.some(k => label.includes(k));
+        });
+        if (explicit) {
+            console.log('🎤 Internal mic identified:', explicit.label);
+            return explicit.deviceId;
+        }
+
+        // Second pass: first non-Bluetooth device
+        const nonBT = audioInputs.find(d =>
+            !bluetoothKeywords.some(k => d.label.toLowerCase().includes(k))
+        );
+        if (nonBT) {
+            console.log('🎤 Using non-Bluetooth mic:', nonBT.label);
+            return nonBT.deviceId;
+        }
+
+        console.log('ℹ️ Could not identify internal mic, using browser default');
+        return null;
+    } catch (err) {
+        console.warn('⚠️ Device enumeration failed:', err);
+        return null;
     }
 }
 });

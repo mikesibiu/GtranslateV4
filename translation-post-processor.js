@@ -272,6 +272,15 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bdioxive\b/gi, 'difficult');
     }
 
+    // Source-aware fix: "Comitetul de Ramură" (Branch Committee) — STT mishears "Ramură"
+    // (branch) as something that Google Translate renders as "psychiatric" or similar.
+    // Confirmed: 2026-05-17 live — "John Preda pentru Comitetul de Ramură" →
+    // "John Preda for the Psychiatric committee" (should be "Branch Committee").
+    if (/ramur/i.test(sourceText)) {
+        result = result.replace(/\bpsychiatric\b/gi, 'Branch');
+        result = result.replace(/\bpsychiatry\b/gi, 'Branch');
+    }
+
     return result;
 }
 

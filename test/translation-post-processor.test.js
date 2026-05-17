@@ -591,6 +591,29 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('source-aware: Ramură → Branch Committee (STT mishear)', () => {
+        it('"Psychiatric committee" → "Branch committee" when source has "Ramură"', () => {
+            expect(applyTermMappings(
+                'John Preda for the Psychiatric committee',
+                'John Preda pentru Comitetul de Ramură'
+            )).to.equal('John Preda for the Branch committee');
+        });
+
+        it('"psychiatry" → "Branch" when source has "ramură" (lowercase)', () => {
+            expect(applyTermMappings(
+                'the psychiatry committee',
+                'comitetul de ramură'
+            )).to.equal('the Branch committee');
+        });
+
+        it('does NOT replace when source has no ramur trigger', () => {
+            expect(applyTermMappings(
+                'the psychiatric ward',
+                'secția de psihiatrie'
+            )).to.equal('the psychiatric ward');
+        });
+    });
+
     describe('no source changes when no triggers present', () => {
         it('leaves clean English output unchanged', () => {
             const clean = 'Jehovah blesses those who seek righteousness.';
