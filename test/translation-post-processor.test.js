@@ -614,6 +614,43 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('source-aware: prevăzător → discreet (Matthew 24:45)', () => {
+        it('"cautious slave" → "discreet slave" when source has "prevăzător"', () => {
+            expect(applyTermMappings(
+                'the faithfully and cautious slave',
+                'sclavul fidel și prevăzător'
+            )).to.equal('the faithful and discreet slave');
+        });
+
+        it('"cautiously" → "discreet" when source has "prevăzător"', () => {
+            expect(applyTermMappings(
+                'cautiously provide food',
+                'prevăzător să ofere hrană'
+            )).to.equal('discreet provide food');
+        });
+
+        it('does NOT replace when source has no prevăzător trigger', () => {
+            expect(applyTermMappings(
+                'be cautious in all things',
+                'fii atent în toate lucrurile'
+            )).to.equal('be cautious in all things');
+        });
+
+        it('"faithfully slave" → "faithful slave" when source has "fidel" and output has "slave"', () => {
+            expect(applyTermMappings(
+                'the faithfully slave',
+                'sclavul fidel'
+            )).to.equal('the faithful slave');
+        });
+
+        it('does NOT change "faithfully" when output has no "slave"', () => {
+            expect(applyTermMappings(
+                'serve faithfully',
+                'slujește fidel'
+            )).to.equal('serve faithfully');
+        });
+    });
+
     describe('no source changes when no triggers present', () => {
         it('leaves clean English output unchanged', () => {
             const clean = 'Jehovah blesses those who seek righteousness.';

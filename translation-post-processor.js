@@ -281,6 +281,18 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bpsychiatry\b/gi, 'Branch');
     }
 
+    // "sclavul fidel și prevăzător" = "the faithful and discreet slave" (Matthew 24:45)
+    // "prevăzător" (foresighted) → Google Translate: "cautious"; JW canonical term: "discreet"
+    // "fidel" (faithful adjective) → sometimes rendered "faithfully" (adverb) by Google in context
+    // Confirmed: 2026-05-17 live — "sclavul fidel și prevăzător" → "faithfully and cautious slave"
+    if (/prevăzător/i.test(sourceText)) {
+        result = result.replace(/\bcautious\b/gi, 'discreet');
+        result = result.replace(/\bcautiously\b/gi, 'discreet');
+    }
+    if (/\bfidel\b/i.test(sourceText) && /\bslave\b/i.test(result)) {
+        result = result.replace(/\bfaithfully\b/gi, 'faithful');
+    }
+
     return result;
 }
 

@@ -889,6 +889,8 @@ io.on('connection', (socket) => {
         'Ramură',
         // Proper names — merged into single token by STT when speaker has Romanian accent
         'Jesse Morries',    // (2026-05-17: "Jesse Morries" → "Jessimoores")
+        // Matthew 24:45 — "faithful and discreet slave"
+        'sclavul fidel și prevăzător',
     ];
 
     // Helper function to update last activity time
@@ -1209,7 +1211,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v201'
+                        appVersion: 'v202'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;
