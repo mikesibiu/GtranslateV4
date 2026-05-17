@@ -1918,10 +1918,12 @@ server.listen(PORT, async () => {
         logger.info('🗑️ Scheduled daily purge of billing data older than 90 days');
 
         // Schedule meeting log captures (Europe/Bucharest = EET/EEST)
-        // Sun 13:50, Sun 14:40, Thu 19:50, Thu 20:45
+        // Sun 15:30, Sun 16:40 — adjusted 2026-05-17 (meeting moved to 14:00 start, 2.5h)
+        // Revert to: { cron: '50 13 * * 0', label: 'sun-1350' }, { cron: '40 14 * * 0', label: 'sun-1440' }
+        // Thu 19:50, Thu 20:45
         const meetingSchedules = [
-            { cron: '50 13 * * 0', label: 'sun-1350' },
-            { cron: '40 14 * * 0', label: 'sun-1440' },
+            { cron: '30 15 * * 0', label: 'sun-1530' },
+            { cron: '40 16 * * 0', label: 'sun-1640' },
             { cron: '50 19 * * 4', label: 'thu-1950' },
             { cron: '45 20 * * 4', label: 'thu-2045' },
         ];
