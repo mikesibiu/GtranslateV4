@@ -887,6 +887,8 @@ io.on('connection', (socket) => {
         // (2026-05-17 live: "John Preda pentru Comitetul de Ramură" → "Psychiatric committee")
         'Comitetul de Ramură',
         'Ramură',
+        // Proper names — merged into single token by STT when speaker has Romanian accent
+        'Jesse Morries',    // (2026-05-17: "Jesse Morries" → "Jessimoores")
     ];
 
     // Helper function to update last activity time
@@ -1207,7 +1209,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v200'
+                        appVersion: 'v201'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;
