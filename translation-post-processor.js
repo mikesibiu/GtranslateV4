@@ -245,6 +245,33 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bpulverizable\b/gi, 'vulnerable');
     }
 
+    // Source-aware fix: "iertova" = STT mishear of "Iehova" — non-word produced by blending
+    // "ierta" (to forgive) with "Iehova". Google Translate maps it to "Forgiveness".
+    // "iertova" is never a real Romanian word — safe gate with no false-positive risk.
+    // Confirmed: 2026-05-17 live — Psalm 83:18 "iertova numai tu ești cel preaînalt" →
+    // "Forgiveness, you alone are the Most High" (should be "Jehovah").
+    if (/iertova/i.test(sourceText)) {
+        result = result.replace(/\bForgiveness\b/g, 'Jehovah');
+        result = result.replace(/\bforgiveness\b/g, 'Jehovah');
+    }
+
+    // Source-aware fix: "prieteni" (friends, plural) → Google Translate renders as "friendship"
+    // (abstract noun) in some constructions. Confirmed: 2026-05-17 live — "Trei prieteni" →
+    // "three friendship" (should be "three friends").
+    // Gate: only apply when source has "prieteni" (plural) — "prietenie/prietenia" = friendship
+    // (abstract) is legitimate and excluded by the \bprieteni\b word boundary.
+    if (/\bprietenii?\b/i.test(sourceText)) {  // matches both prieteni and prietenii (definite form)
+        result = result.replace(/\bfriendship\b/gi, 'friends');
+    }
+
+    // Source-aware fix: "dioxive" = STT garble, likely of "dificile" (difficult).
+    // "dioxyves" is not an English word — safe to replace with "difficult".
+    // Confirmed: 2026-05-17 live — "încercări sunt dioxive" → "trials are dioxyves".
+    if (/dioxiv/i.test(sourceText)) {
+        result = result.replace(/\bdioxyves\b/gi, 'difficult');
+        result = result.replace(/\bdioxive\b/gi, 'difficult');
+    }
+
     return result;
 }
 

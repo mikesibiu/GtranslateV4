@@ -1203,7 +1203,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v198'
+                        appVersion: 'v199'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;

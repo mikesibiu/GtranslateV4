@@ -545,6 +545,52 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('source-aware: iertova → Jehovah (STT mishear of Iehova)', () => {
+        it('"Forgiveness" → "Jehovah" when source has "iertova"', () => {
+            expect(applyTermMappings('Forgiveness, you alone are the Most High', 'iertova numai tu ești cel preaînalt'))
+                .to.equal('Jehovah, you alone are the Most High');
+        });
+
+        it('"forgiveness" (lowercase) → "Jehovah" when source has "iertova"', () => {
+            expect(applyTermMappings('whose name is forgiveness', 'al cărui Nume este iertova'))
+                .to.equal('whose name is Jehovah');
+        });
+
+        it('does NOT replace when source has no iertova trigger', () => {
+            expect(applyTermMappings('he showed forgiveness', 'el a arătat iertare'))
+                .to.equal('he showed forgiveness');
+        });
+    });
+
+    describe('source-aware: prieteni → friends (not friendship)', () => {
+        it('"three friendship" → "three friends" when source has "prieteni"', () => {
+            expect(applyTermMappings('three friendship came to him', 'Trei prieteni au venit la el'))
+                .to.equal('three friends came to him');
+        });
+
+        it('"friendship" → "friends" when source has "prieteni"', () => {
+            expect(applyTermMappings('his friendship helped him', 'prietenii lui l-au ajutat'))
+                .to.equal('his friends helped him');
+        });
+
+        it('does NOT replace when source has no prieteni trigger', () => {
+            expect(applyTermMappings('our friendship with Jehovah grows', 'prietenia noastră cu Iehova crește'))
+                .to.equal('our friendship with Jehovah grows');
+        });
+    });
+
+    describe('source-aware: dioxive → difficult (STT garble)', () => {
+        it('"dioxyves" → "difficult" when source has "dioxive"', () => {
+            expect(applyTermMappings('trials are dioxyves', 'încercări sunt dioxive'))
+                .to.equal('trials are difficult');
+        });
+
+        it('does NOT replace when source has no dioxive trigger', () => {
+            expect(applyTermMappings('trials are dioxyves', 'încercări sunt grele'))
+                .to.equal('trials are dioxyves');
+        });
+    });
+
     describe('no source changes when no triggers present', () => {
         it('leaves clean English output unchanged', () => {
             const clean = 'Jehovah blesses those who seek righteousness.';
