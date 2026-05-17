@@ -891,6 +891,21 @@ io.on('connection', (socket) => {
         'Jesse Morries',    // (2026-05-17: "Jesse Morries" → "Jessimoores")
         // Matthew 24:45 — "faithful and discreet slave"
         'sclavul fidel și prevăzător',
+        // Branch office committee — STT garbles to "Psychiatric committee"
+        'Comitetul Filialei',
+        'Comitetul de Filială',
+        // Isaiah — STT produces "SAE" (2026-05-17: "SAE iată mă trimite mă" for Isa 6:8)
+        'Isaia',
+        // Theocratic — STT splits to "de ocratică", Google Translate outputs "democratic"
+        'teocratică',
+        'istoria noastră teocratică',
+        // Most High — "Iehova cel preaînalt" misheard as "Ilfov" (Romanian county name)
+        'cel preaînalt',
+        'Iehova cel preaînalt',
+        // Convention delegates — STT produces "congressmen"
+        'congresiști',
+        // JW book title — "Bucurați-vă pentru totdeauna de viață!"
+        'Bucurați-vă pentru totdeauna de viață',
     ];
 
     // Helper function to update last activity time
@@ -1211,7 +1226,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v202'
+                        appVersion: 'v203'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;
@@ -1926,12 +1941,11 @@ server.listen(PORT, async () => {
         logger.info('🗑️ Scheduled daily purge of billing data older than 90 days');
 
         // Schedule meeting log captures (Europe/Bucharest = EET/EEST)
-        // Sun 15:30, Sun 16:40 — adjusted 2026-05-17 (meeting moved to 14:00 start, 2.5h)
-        // Revert to: { cron: '50 13 * * 0', label: 'sun-1350' }, { cron: '40 14 * * 0', label: 'sun-1440' }
+        // Sun 13:50, Sun 14:40 — normal Sunday meeting times
         // Thu 19:50, Thu 20:45
         const meetingSchedules = [
-            { cron: '30 15 * * 0', label: 'sun-1530' },
-            { cron: '40 16 * * 0', label: 'sun-1640' },
+            { cron: '50 13 * * 0', label: 'sun-1350' },
+            { cron: '40 14 * * 0', label: 'sun-1440' },
             { cron: '50 19 * * 4', label: 'thu-1950' },
             { cron: '45 20 * * 4', label: 'thu-2045' },
         ];

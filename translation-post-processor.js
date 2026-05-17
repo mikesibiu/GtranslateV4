@@ -293,6 +293,51 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bfaithfully\b/gi, 'faithful');
     }
 
+    // "rugăm" (we pray) → Google Translate sometimes renders as "Please" (confuses with "vă rugăm" = please)
+    // Gate: source contains "rugăm" (first-person plural prayer form)
+    // Confirmed: 2026-05-17 — "continuăm să ne rugăm pentru voi" → "we continue to Please for you"
+    if (/rugăm/i.test(sourceText)) {
+        result = result.replace(/\bPlease for\b/g, 'pray for');
+        result = result.replace(/\bto Please\b/g, 'to pray');
+    }
+
+    // "mă bucură" / "bucur" → Google Translate renders as "joy" (noun) instead of "glad/happy"
+    // Confirmed: 2026-05-17 — "Mă bucură și pe mine" → "I'm joy too"
+    if (/bucur/i.test(sourceText)) {
+        result = result.replace(/\bI'm joy\b/gi, "I'm glad");
+        result = result.replace(/\bI am joy\b/gi, 'I am glad');
+        result = result.replace(/\bmakes me joy\b/gi, 'makes me happy');
+    }
+
+    // "suplinitori" (servants/publishers of Jehovah) → Google Translate: "substitutes"
+    // Confirmed: 2026-05-17 — "2 milioane de suplinitori ai lui Iehova" → "2 million substitutes of Jehovah"
+    if (/suplinitor/i.test(sourceText)) {
+        result = result.replace(/\bsubstitutes\b/gi, 'servants');
+    }
+
+    // "teocratică" (theocratic) → STT splits to "de ocratică", Google Translate outputs "democratic"
+    // Gate catches both the correct form AND the STT-garbled split "de ocratică"
+    // Cannot use /ocratic/ alone — "democratic" in source also contains it
+    // Confirmed: 2026-05-17 — "istoria noastră de ocratică" → "our democratic history"
+    if (/(teocratic|de ocratic)/i.test(sourceText)) {
+        result = result.replace(/\bdemocratic\b/gi, 'theocratic');
+    }
+
+    // "integri" (maintaining integrity) → Google Translate: "intact"
+    // JW context: "a rămâne integri" = to maintain integrity (spiritual steadfastness)
+    // Confirmed: 2026-05-17 — "să rămână integri" → "to stay intact"
+    if (/\bintegr/i.test(sourceText)) {
+        result = result.replace(/\bstay intact\b/gi, 'maintain their integrity');
+        result = result.replace(/\bremain intact\b/gi, 'remain faithful');
+    }
+
+    // "școala pentru evanghelizatori ai regatului" = "Kingdom Evangelizers' School" (official JW programme name)
+    // Confirmed: 2026-05-17 — output "the school for evangelizers of the kingdom"
+    if (/evanghelizatori/i.test(sourceText)) {
+        result = result.replace(/\bthe school for evangelizers of the kingdom\b/gi, "Kingdom Evangelizers' School");
+        result = result.replace(/\bschool for evangelizers of the kingdom\b/gi, "Kingdom Evangelizers' School");
+    }
+
     return result;
 }
 

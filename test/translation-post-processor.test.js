@@ -651,6 +651,88 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('source-aware: rugăm → pray (not Please)', () => {
+        it('"Please for" → "pray for" when source has "rugăm"', () => {
+            expect(applyTermMappings('we continue to Please for you', 'continuăm să ne rugăm pentru voi'))
+                .to.equal('we continue to pray for you');
+        });
+        it('"to Please" → "to pray" when source has "rugăm"', () => {
+            expect(applyTermMappings('and Please for his help', 'și să ne rugăm să ne ajute'))
+                .to.equal('and pray for his help');
+        });
+        it('does NOT replace when source has no rugăm trigger', () => {
+            expect(applyTermMappings('Please be seated', 'vă rugați să vă așezați'))
+                .to.equal('Please be seated');
+        });
+    });
+
+    describe('source-aware: bucur → glad/happy (not joy)', () => {
+        it('"I\'m joy" → "I\'m glad" when source has "bucură"', () => {
+            expect(applyTermMappings("I'm joy too", 'Mă bucură și pe mine'))
+                .to.equal("I'm glad too");
+        });
+        it('"makes me joy" → "makes me happy" when source has "bucur"', () => {
+            expect(applyTermMappings('that makes me joy', 'asta mă bucură'))
+                .to.equal('that makes me happy');
+        });
+        it('does NOT replace when source has no bucur trigger', () => {
+            expect(applyTermMappings("I'm joy", 'sunt fericit'))
+                .to.equal("I'm joy");
+        });
+    });
+
+    describe('source-aware: suplinitori → servants (not substitutes)', () => {
+        it('"substitutes of Jehovah" → "servants of Jehovah" when source has "suplinitori"', () => {
+            expect(applyTermMappings('2 million substitutes of Jehovah', '2 milioane de suplinitori ai lui Iehova'))
+                .to.equal('2 million servants of Jehovah');
+        });
+        it('does NOT replace when source has no suplinitori trigger', () => {
+            expect(applyTermMappings('his substitutes arrived', 'înlocuitorii lui au sosit'))
+                .to.equal('his substitutes arrived');
+        });
+    });
+
+    describe('source-aware: teocratică → theocratic (not democratic)', () => {
+        it('"democratic history" → "theocratic history" when source has "teocratică"', () => {
+            expect(applyTermMappings('our democratic history', 'istoria noastră de ocratică'))
+                .to.equal('our theocratic history');
+        });
+        it('does NOT replace when source has no teocratic trigger', () => {
+            expect(applyTermMappings('our democratic system', 'sistemul nostru democratic'))
+                .to.equal('our democratic system');
+        });
+    });
+
+    describe('source-aware: integri → integrity (not intact)', () => {
+        it('"stay intact" → "maintain their integrity" when source has "integri"', () => {
+            expect(applyTermMappings('wanted to stay intact', 'au dorit să rămână integri'))
+                .to.equal('wanted to maintain their integrity');
+        });
+        it('"remain intact" → "remain faithful" when source has "integri"', () => {
+            expect(applyTermMappings('chose to remain intact', 'au ales să rămână integri'))
+                .to.equal('chose to remain faithful');
+        });
+        it('does NOT replace when source has no integr trigger', () => {
+            expect(applyTermMappings('the seal remains intact', 'sigiliul rămâne intact'))
+                .to.equal('the seal remains intact');
+        });
+    });
+
+    describe('source-aware: evanghelizatori → Kingdom Evangelizers\' School', () => {
+        it('replaces full school phrase when source has "evanghelizatori"', () => {
+            expect(applyTermMappings(
+                'the school for evangelizers of the kingdom',
+                'școala pentru evanghelizatori ai regatului'
+            )).to.equal("Kingdom Evangelizers' School");
+        });
+        it('does NOT replace when source has no evanghelizatori trigger', () => {
+            expect(applyTermMappings(
+                'the school for evangelizers of the kingdom',
+                'școala misionarilor'
+            )).to.equal('the school for evangelizers of the kingdom');
+        });
+    });
+
     describe('no source changes when no triggers present', () => {
         it('leaves clean English output unchanged', () => {
             const clean = 'Jehovah blesses those who seek righteousness.';
