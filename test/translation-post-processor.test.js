@@ -739,6 +739,66 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings(clean)).to.equal(clean);
         });
     });
+
+    describe('source-aware: evoMAG → Jehovah', () => {
+        it('replaces evoMAG with Jehovah when source has "evoMAG"', () => {
+            expect(applyTermMappings(
+                'people who love evoMAG',
+                'oameni care îl iubesc pe evoMAG'
+            )).to.equal('people who love Jehovah');
+        });
+        it('does NOT replace evoMAG when source has no evoMAG trigger', () => {
+            expect(applyTermMappings(
+                'people who love evoMAG',
+                'oameni care îl iubesc pe Iehova'
+            )).to.equal('people who love evoMAG');
+        });
+        it('does NOT replace when source has lowercase evomag (case-sensitive gate)', () => {
+            expect(applyTermMappings(
+                'love evomag',
+                'evomag electronics'
+            )).to.equal('love evomag');
+        });
+    });
+
+    describe('source-aware: omul de ordine → attendant', () => {
+        it('replaces "law enforcement officer" when source has "omul de ordine"', () => {
+            expect(applyTermMappings(
+                'the law enforcement officer directs those present',
+                'omul de ordine îi îndrumă pe cei prezenți'
+            )).to.equal('the attendant directs those present');
+        });
+        it('replaces "law enforcement officers" (plural) when source has "oamenii de ordine"', () => {
+            expect(applyTermMappings(
+                'law enforcement officers coordinate the evacuation',
+                'oamenii de ordine coordonează evacuarea'
+            )).to.equal('attendants coordinate the evacuation');
+        });
+        it('replaces "law enforcement people" when source has "oamenii de ordine"', () => {
+            expect(applyTermMappings(
+                'law enforcement people coordinate the evacuation',
+                'oamenii de ordine coordonează evacuarea'
+            )).to.equal('attendants coordinate the evacuation');
+        });
+        it('replaces bare "law enforcement" when source has "omul de ordine"', () => {
+            expect(applyTermMappings(
+                'law enforcement is responsible',
+                'omul de ordine este responsabil'
+            )).to.equal('attendant is responsible');
+        });
+        it('gate covers oblique form "oamenilor de ordine"', () => {
+            expect(applyTermMappings(
+                'the law enforcement officer',
+                'instrucțiunile oamenilor de ordine'
+            )).to.equal('the attendant');
+        });
+        it('does NOT replace when source has no ordine trigger', () => {
+            expect(applyTermMappings(
+                'the law enforcement officer arrived',
+                'polițistul a sosit'
+            )).to.equal('the law enforcement officer arrived');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

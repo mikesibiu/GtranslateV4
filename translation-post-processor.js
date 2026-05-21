@@ -338,6 +338,29 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bschool for evangelizers of the kingdom\b/gi, "Kingdom Evangelizers' School");
     }
 
+    // Source-aware fix: "evoMAG" = STT mishear of "Iehova" — evoMAG is a Romanian electronics
+    // retailer; the /jɛ/ onset of "Iehova" phonetically resembles "evo-".
+    // CASE-SENSITIVE GATE — intentional: "evoMAG" only appears capitalised as a brand name;
+    // lowercase "evomag" is a different error pattern and not in scope.
+    // Confirmed: 2026-05-21 — "oameni care îl iubesc pe evoMAG" → "people who love evoMAG"
+    if (/\bevoMAG\b/.test(sourceText)) {
+        result = result.replace(/\bevoMAG\b/g, 'Jehovah');
+    }
+
+    // Source-aware fix: "omul de ordine" / "oamenii de ordine" = JW meeting attendant/floor steward.
+    // Google Translate renders this as "law enforcement officer/people" because the phrase is also
+    // used for police/security in Romanian. In a Kingdom Hall, these are volunteer attendants.
+    // Gate: /de ordine\b/i covers all inflections (omul/omului/oamenii/oamenilor de ordine).
+    // Specific compound forms first (prevents "law enforcement officers" → "attendant officers").
+    // Confirmed: 2026-05-21 — "omul de ordine îi îndrumă pe cei prezenți" →
+    // "the law enforcement officer directs those present"
+    if (/de ordine\b/i.test(sourceText)) {
+        result = result.replace(/\blaw enforcement officers\b/gi, 'attendants');
+        result = result.replace(/\blaw enforcement officer\b/gi, 'attendant');
+        result = result.replace(/\blaw enforcement people\b/gi, 'attendants');
+        result = result.replace(/\blaw enforcement\b/gi, 'attendant');
+    }
+
     return result;
 }
 

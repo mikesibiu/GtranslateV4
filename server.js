@@ -906,6 +906,20 @@ io.on('connection', (socket) => {
         'congresiști',
         // JW book title — "Bucurați-vă pentru totdeauna de viață!"
         'Bucurați-vă pentru totdeauna de viață',
+        // "în curând" (soon) — STT truncates to "în cur" (vulgar); boosting full form prevents this.
+        // Multi-word hint is safe: "în" alone would be toxic (high-frequency preposition) but
+        // the two-token sequence only boosts "în" when immediately followed by "curând". Do NOT
+        // split into bare 'curând'. Confirmed: 2026-05-21 — "în cur" → "in the ass".
+        'în curând',
+        // "încurajare" (encouragement) — STT splits to "în curajare" → Google Translate: "in courage".
+        // Common noun (not proper), but 5-syllable distinctive phoneme cluster means early-commit
+        // risk is low. Remove if adjacent-word garbling is observed in a future session.
+        // Confirmed: 2026-05-21 — "primesc în curajare" → "I receive in courage"
+        'încurajare',
+        // Evacuation vocabulary — "calea de evacuare" (evacuation route) misheard as "câine de evacuare"
+        // (evacuation dog) → Google Translate: "rescue dog"; fire safety talk (2026-05-21 session)
+        'calea de evacuare',
+        'căile de evacuare',
     ];
 
     // Helper function to update last activity time
@@ -1226,7 +1240,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v203'
+                        appVersion: 'v204'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;
