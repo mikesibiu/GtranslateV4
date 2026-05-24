@@ -928,6 +928,22 @@ io.on('connection', (socket) => {
         'starea morților',
         // Kingdom Hall fire safety — "casa de cult" (house of worship) garbled to "cașul de Cult"
         'casa de cult',
+        // "în pofida" (despite) — STT garbles to "profita"/"împofiza" (2026-05-24 WT audio test)
+        'în pofida',
+        // "meditând" (meditating) — STT garbles to "medicând" (consulting/medicating)
+        'meditând',
+        // Recreational activities — STT drops "re" prefix: "recreative" → "creative"
+        'activități recreative',
+        'recreative',
+        // Relaxation — STT garbles "destindere" → "distingere" (discernment)
+        'destindere',
+        'destinderii',
+        // Fully/completely — STT garbles "deplin" → "de pâine" (of bread!)
+        'deplin',
+        'în mod deplin',
+        // Immoral — STT drops 'i': "imorale" → "morale"
+        'scene imorale',
+        'imorale',
     ];
 
     // Helper function to update last activity time

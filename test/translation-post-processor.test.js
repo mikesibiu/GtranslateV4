@@ -976,6 +976,57 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings('the holy city', '')).to.equal('the holy city');
         });
     });
+
+    describe('grammar fix: "exist are" → "there are"', () => {
+        it('fixes ungrammatical "exist are"', () => {
+            expect(applyTermMappings('exist are many distractions', '')).to.equal('there are many distractions');
+        });
+        it('is case-insensitive', () => {
+            expect(applyTermMappings('Exist Are opportunities', '')).to.equal('there are opportunities');
+        });
+        it('does not affect "there are"', () => {
+            expect(applyTermMappings('there are many things', '')).to.equal('there are many things');
+        });
+    });
+
+    describe('grammar fix: "pleasant Jehovah" → "pleasing to Jehovah"', () => {
+        it('fixes adjective used where verb needed', () => {
+            expect(applyTermMappings('this is pleasant Jehovah', '')).to.equal('this is pleasing to Jehovah');
+        });
+        it('does not affect "pleasing to Jehovah"', () => {
+            expect(applyTermMappings('pleasing to Jehovah', '')).to.equal('pleasing to Jehovah');
+        });
+    });
+
+    describe('source-gated fix: "social networks" → "social media" when source has socializare', () => {
+        it('replaces when source contains socializare', () => {
+            expect(applyTermMappings('use social networks wisely', 'rețelele de socializare')).to.equal('use social media wisely');
+        });
+        it('leaves unchanged when source lacks socializare', () => {
+            expect(applyTermMappings('social networks exist', 'rețele de comunicare')).to.equal('social networks exist');
+        });
+    });
+
+    describe('source-gated fix: "common sense" → "good judgment" when source has judecată sănătoasă', () => {
+        it('replaces when source contains judecată sănătoasă', () => {
+            expect(applyTermMappings('use common sense', 'judecată sănătoasă')).to.equal('use good judgment');
+        });
+        it('leaves unchanged when source lacks judecată sănătoasă', () => {
+            expect(applyTermMappings('common sense matters', 'înțelepciune practică')).to.equal('common sense matters');
+        });
+        it('leaves unchanged when source has judecată alone (two-word gate required)', () => {
+            expect(applyTermMappings('common sense matters', 'judecată dreaptă')).to.equal('common sense matters');
+        });
+    });
+
+    describe('grammar fix: "continue pressure" → "continuous pressure"', () => {
+        it('fixes Romanian adjective form mistaken for verb', () => {
+            expect(applyTermMappings('we face continue pressure from the world', '')).to.equal('we face continuous pressure from the world');
+        });
+        it('does not affect "continuous pressure"', () => {
+            expect(applyTermMappings('continuous pressure is difficult', '')).to.equal('continuous pressure is difficult');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

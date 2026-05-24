@@ -437,6 +437,27 @@ function applyTermMappings(text, sourceText = '') {
     // but the adjective "holy" sits between possessive and "the"). Fix the "holy the spirit" fragment.
     result = result.replace(/\bholy the spirit\b/gi, 'Holy Spirit');
 
+    // "există" → "exist are" (ungrammatical) — never valid English
+    result = result.replace(/\bexist are\b/gi, 'there are');
+
+    // "plăcut lui Iehova" → "pleasant Jehovah" — adjective used where verb needed
+    result = result.replace(/\bpleasant Jehovah\b/gi, 'pleasing to Jehovah');
+
+    // "rețelele de socializare" → "social networks" — correct to "social media"
+    // "socializare" has no diacritics, so sourceText is sufficient (no need for sourceNorm)
+    if (/socializare/i.test(sourceText)) {
+        result = result.replace(/\bsocial networks\b/gi, 'social media');
+    }
+
+    // "judecată sănătoasă" → "common sense" — article uses "good judgment"
+    // Confirmed: 2026-05-24 WT audio test (w_M_202603_03 paragraph 15/18)
+    if (/judecata sanatoasa/i.test(sourceNorm)) {
+        result = result.replace(/\bcommon sense\b/gi, 'good judgment');
+    }
+
+    // "o presiune continuă" → "continue pressure" — Romanian adjective form mistaken for verb
+    result = result.replace(/\bcontinue pressure\b/gi, 'continuous pressure');
+
     return result;
 }
 
