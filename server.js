@@ -944,6 +944,24 @@ io.on('connection', (socket) => {
         // Immoral — STT drops 'i': "imorale" → "morale"
         'scene imorale',
         'imorale',
+        // Crisis vs socket — STT confuses "criză" (crisis) with "priză" (socket) (2026-05-24 Awake audio test)
+        'criză',
+        'în criză',
+        // "evitați" (avoid) → STT hears "elitele" (the elites) (2026-05-24 Awake audio test)
+        'evitați',
+        // James 1:19 "fii prompt la ascultare" → STT produces "fibrom la ascultare" (fibroid!)
+        'fii prompt',
+        'prompt la ascultare',
+        // "ostili" (hostile) → STT produces "osiri" (nonsense) (2026-05-24 Awake audio test)
+        'ostili',
+        // "pripiți" (hasty/rash) → STT produces "pitiți" (crouching) (2026-05-24 Awake audio test)
+        'pripiți',
+        // "șomajului" (unemployment) — STT truncates mid-word (2026-05-24 Awake audio test)
+        'șomajului',
+        'rata șomajului',
+        // Section title "De ce are importanță" — STT: "are" → "ai" (1 letter diff): "it matters" → "you matter"
+        'are importanță',
+        'De ce are importanță',
     ];
 
     // Helper function to update last activity time

@@ -1027,6 +1027,81 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings('continuous pressure is difficult', '')).to.equal('continuous pressure is difficult');
         });
     });
+
+    describe('"materials resources" → "material resources"', () => {
+        it('fixes noun-as-adjective error', () => {
+            expect(applyTermMappings('protect your materials resources', '')).to.equal('protect your material resources');
+        });
+        it('is case-insensitive', () => {
+            expect(applyTermMappings('Materials Resources are limited', '')).to.equal('material resources are limited');
+        });
+        it('does not affect already-correct form', () => {
+            expect(applyTermMappings('material resources', '')).to.equal('material resources');
+        });
+    });
+
+    describe('"the Bible say" → "the Bible says"', () => {
+        it('adds missing third-person s', () => {
+            expect(applyTermMappings('the Bible say we should pray', '')).to.equal('the Bible says we should pray');
+        });
+        it('handles sentence-initial capital "The Bible say"', () => {
+            expect(applyTermMappings('The Bible say to love others', '')).to.equal('The Bible says to love others');
+        });
+        it('does not affect already-correct "the Bible says"', () => {
+            expect(applyTermMappings('the Bible says to love others', '')).to.equal('the Bible says to love others');
+        });
+    });
+
+    describe('source-gated: "tips" → "advice" when source has sfaturi', () => {
+        it('replaces tips with advice when source has sfaturi', () => {
+            expect(applyTermMappings('good tips for daily life', 'sfaturi bune')).to.equal('good advice for daily life');
+        });
+        it('leaves tips unchanged when source lacks sfaturi', () => {
+            expect(applyTermMappings('practical tips for cooking', 'rețete practice')).to.equal('practical tips for cooking');
+        });
+    });
+
+    describe('"find out many"/"learn many" → "find out more"', () => {
+        it('fixes "find out many"', () => {
+            expect(applyTermMappings('find out many at jw.org', '')).to.equal('find out more at jw.org');
+        });
+        it('fixes "learn many"', () => {
+            expect(applyTermMappings('learn many at jw.org', '')).to.equal('find out more at jw.org');
+        });
+        it('does not affect "find out more"', () => {
+            expect(applyTermMappings('find out more details', '')).to.equal('find out more details');
+        });
+    });
+
+    describe('"physician resources" → "medical resources"', () => {
+        it('corrects mistranslation of resursele medicale', () => {
+            expect(applyTermMappings('limit access to physician resources', '')).to.equal('limit access to medical resources');
+        });
+        it('does not affect "medical resources"', () => {
+            expect(applyTermMappings('medical resources are scarce', '')).to.equal('medical resources are scarce');
+        });
+    });
+
+    describe('"no longer deserve living" → "no longer worth living"', () => {
+        it('fixes grammatically broken hopelessness phrase', () => {
+            expect(applyTermMappings('life is no longer deserve living', '')).to.equal('life is no longer worth living');
+        });
+        it('does not affect already-correct form', () => {
+            expect(applyTermMappings('no longer worth living', '')).to.equal('no longer worth living');
+        });
+    });
+
+    describe('"Romani" (Bible book) → "Romans" when source has "romani \d"', () => {
+        it('converts Romani to Romans when source shows Bible book pattern', () => {
+            expect(applyTermMappings('Romani 5 through 12', 'romani 5 cu 12')).to.equal('Romans 5 through 12');
+        });
+        it('does not fire when source has ethnic group context (no digit after romani)', () => {
+            expect(applyTermMappings('the Romani people', 'frații romani')).to.equal('the Romani people');
+        });
+        it('does not fire when source has no romani at all', () => {
+            expect(applyTermMappings('Romani 5', 'alte cuvinte')).to.equal('Romani 5');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

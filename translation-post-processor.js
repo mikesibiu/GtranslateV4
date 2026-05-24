@@ -458,6 +458,35 @@ function applyTermMappings(text, sourceText = '') {
     // "o presiune continuă" → "continue pressure" — Romanian adjective form mistaken for verb
     result = result.replace(/\bcontinue pressure\b/gi, 'continuous pressure');
 
+    // "resursele materiale" → "materials resources" (noun used as adj) — Confirmed: 2026-05-24 Awake audio test
+    result = result.replace(/\bmaterials resources\b/gi, 'material resources');
+
+    // "the Bible say" — missing 3rd-person 's' — recurring across all Awake/WT articles
+    // Replacer preserves original capitalisation ("The" at sentence start vs "the" mid-sentence)
+    result = result.replace(/\bthe Bible say\b/gi, (m) => (m[0] === 'T' ? 'The' : 'the') + ' Bible says');
+
+    // "sfaturi" → "tips" — too casual; correct to "advice" — Confirmed: 2026-05-24 Awake audio test
+    if (/sfaturi/i.test(sourceText)) {
+        result = result.replace(/\btips\b/gi, 'advice');
+    }
+
+    // "află mai multe" → "find out many"/"learn many" — "many" vs "more" — Confirmed: 2026-05-24 Awake audio test
+    result = result.replace(/\bfind out many\b/gi, 'find out more');
+    result = result.replace(/\blearn many\b/gi, 'find out more');
+
+    // "resursele medicale" → "physician resources" — should be "medical resources"
+    result = result.replace(/\bphysician resources\b/gi, 'medical resources');
+
+    // "nu mai merită să trăiești" → "no longer deserve living" — should be "no longer worth living"
+    result = result.replace(/\bno longer deserve living\b/gi, 'no longer worth living');
+
+    // "Romani" (Bible book) not converted by glossary when source was lowercase.
+    // Gate on source having "romani \d" (Bible book always has chapter number; ethnic group never does).
+    // This avoids conflicting with the ethnic-group protection at line 172.
+    if (/romani\s+\d/i.test(sourceText)) {
+        result = result.replace(/\bRomani\b(?=\s+\d)/g, 'Romans');
+    }
+
     return result;
 }
 
