@@ -910,6 +910,72 @@ describe('applyTermMappings', () => {
             )).to.equal('chosen by lot');
         });
     });
+
+    describe('source-aware: Turnul de Vegan → Watchtower', () => {
+        it('replaces "tower de Vegan" when source has "Turnul de Vegan"', () => {
+            expect(applyTermMappings(
+                'the study of the magazine The tower de Vegan',
+                'studiul revistei Turnul de Vegan'
+            )).to.equal('the study of the magazine The Watchtower');
+        });
+        it('does NOT replace when source has no Vegan trigger', () => {
+            expect(applyTermMappings(
+                'the tower de Vegan',
+                'studiul revistei Turnul de Veghe'
+            )).to.equal('the tower de Vegan');
+        });
+    });
+
+    describe('source-aware: conferința publică → public talk', () => {
+        it('replaces "public conference" when source has "conferința publică"', () => {
+            expect(applyTermMappings(
+                "today's public conference will begin",
+                'conferința publică de astăzi va începe'
+            )).to.equal("today's public talk will begin");
+        });
+        it('does NOT replace when source has no conferinta trigger', () => {
+            expect(applyTermMappings(
+                'the public conference is held annually',
+                'conferința anuală are loc'
+            )).to.equal('the public conference is held annually');
+        });
+    });
+
+    describe('source-aware: rugăm → We pray (extension)', () => {
+        it('replaces "We Please" when source has "rugăm"', () => {
+            expect(applyTermMappings(
+                'We Please to Jehovah in these moments',
+                'te rugăm Iehova și în aceste clipe'
+            )).to.equal('We pray to Jehovah in these moments');
+        });
+        it('does NOT replace when source has no rugăm trigger', () => {
+            expect(applyTermMappings(
+                'We Please to help',
+                'dorim să ajutăm'
+            )).to.equal('We Please to help');
+        });
+    });
+
+    describe('grammar fix: "your the X" → "your X" (possessive double article)', () => {
+        it('removes spurious "the" after possessive "your"', () => {
+            expect(applyTermMappings('your the help', '')).to.equal('your help');
+        });
+        it('fixes "your the word"', () => {
+            expect(applyTermMappings('your the word the Bible', '')).to.equal('your word the Bible');
+        });
+        it('handles mixed-case "the" (e.g. "your The")', () => {
+            expect(applyTermMappings('guide by your The spirit', '')).to.equal('guide by your spirit');
+        });
+    });
+
+    describe('grammar fix: "holy the spirit" → "Holy Spirit"', () => {
+        it('corrects the split possessive+article form', () => {
+            expect(applyTermMappings('guide us by your holy the spirit', '')).to.equal('guide us by your Holy Spirit');
+        });
+        it('does not affect unrelated uses', () => {
+            expect(applyTermMappings('the holy city', '')).to.equal('the holy city');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -404,6 +404,39 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bby lot\b/gi, 'Lot');
     }
 
+    // Source-aware fix: "Turnul de Vegan" = STT garble of "Turnul de Veghe" (The Watchtower).
+    // STT commits "Vegan" (the diet) over "Veghe" (watchfulness) despite phrase hint.
+    // Post-processor is the fallback when the STT hint fails.
+    // Confirmed: 2026-05-24 — "revista Turnul de Vegan" → "The tower de Vegan"
+    if (/Turnul de Vegan/i.test(sourceText)) {
+        result = result.replace(/\btower\s+(?:de|of)\s+Vegan\b/gi, 'Watchtower');
+        result = result.replace(/\b(?:de|of)\s+Vegan\b/gi, 'Watchtower');
+    }
+
+    // Source-aware fix: "conferința publică" = JW public talk (a single discourse), not a "conference"
+    // (which implies a multi-session event). Google Translate consistently produces "public conference".
+    // Confirmed: 2026-05-24 — "conferința publică de astăzi" → "today's public conference"
+    if (/conferinta publica/i.test(sourceNorm)) {
+        result = result.replace(/\bpublic conference\b/gi, 'public talk');
+    }
+
+    // Source-aware fix: "rugăm" rule extension — "We Please to" pattern not caught by v203 rule.
+    // v203 catches "Please for" and "to Please" but misses sentence-initial "We Please to/towards".
+    // Confirmed: 2026-05-24 — "te rugăm Iehova și în aceste clipe" → "We Please to Jehovah"
+    if (/rugăm|rugam/i.test(sourceNorm)) {
+        result = result.replace(/\bWe [Pp]lease\b/g, 'We pray');
+        result = result.replace(/\bwe [Pp]lease\b/g, 'we pray');
+    }
+
+    // Grammar fix: Romanian possessive + definite article suffix on noun → "your the X" double article.
+    // "ajutorul tău" → "your the help"; "cuvântul tău" → "your the word". No source gate needed —
+    // "your the" is never correct English regardless of context.
+    result = result.replace(/\byour the\b/gi, 'your');
+
+    // Grammar fix: "spiritul tău cel sfânt" → "your holy the spirit" (same possessive/article issue
+    // but the adjective "holy" sits between possessive and "the"). Fix the "holy the spirit" fragment.
+    result = result.replace(/\bholy the spirit\b/gi, 'Holy Spirit');
+
     return result;
 }
 

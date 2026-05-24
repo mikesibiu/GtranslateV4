@@ -1248,7 +1248,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v205'
+                        appVersion: 'v206'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;
