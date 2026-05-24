@@ -361,6 +361,49 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\blaw enforcement\b/gi, 'attendant');
     }
 
+    // Source-aware fix: "primul ajutor" (first aid) → Google Translate: "first help"
+    // "First help" is not a recognised English compound noun; "first aid" is the correct medical term.
+    // Confirmed: 2026-05-21 fire safety talk — "acordarea primului ajutor" → "providing first help" (×5)
+    if (/prim(?:ul|ului)?\s+ajutor/i.test(sourceNorm)) {
+        result = result.replace(/\bfirst help\b/gi, 'first aid');
+    }
+
+    // Source-aware fix: "apărarea împotriva incendiilor" (fire protection/fire safety) →
+    // Google Translate: "against protection" (structural inversion confuses the parser).
+    // Confirmed: 2026-05-21 — "regulamentul privind apărarea împotriva incendiilor" →
+    // "against protection regulation" (should be "fire protection regulation")
+    if (/apararea impotriva incendiilor/i.test(sourceNorm)) {
+        result = result.replace(/\bagainst protection\b/gi, 'fire protection');
+    }
+
+    // Source-aware fix: "starea morților" (condition of the dead) — JW theological topic.
+    // STT garbles "morților" (of the dead) to "morală" (moral) → Google Translate: "Moral State".
+    // "Starea morților" is a core JW doctrine about what happens after death; "Moral State" is
+    // completely wrong. Confirmed: 2026-05-21 — "adevărul cu privire la Starea morală" →
+    // "the truth about the Moral State"
+    // ONLY replace the title-cased "Moral State" (Google Translate output for the garble).
+    // Lowercase "moral state" is legitimate English output when a speaker genuinely discusses
+    // the moral condition of the world — replacing it would cause doctrine confusion.
+    if (/starea moral/i.test(sourceText)) {
+        result = result.replace(/\bMoral State\b/g, 'condition of the dead');
+    }
+
+    // Source-aware fix: "cașul de Cult" = STT garble of "casa de cult" (house of worship /
+    // Kingdom Hall). "Worship hut" is degrading and wrong; "Kingdom Hall" is the correct JW term.
+    // Confirmed: 2026-05-21 — "să evacueze la cașul de Cult" → "to evacuate to the Worship hut"
+    if (/cașul de Cult|casei de cult|casa de cult/i.test(sourceText)) {
+        result = result.replace(/\bWorship hut\b/gi, 'Kingdom Hall');
+    }
+
+    // Source-aware fix: "pe Lot" = biblical Lot (nephew of Abraham), not "by lot" (drawing of lots).
+    // Romanian direct-object marker "pe" + name "Lot" → Google Translate interprets "lot" as idiom.
+    // Gate: source has "pe Noe" AND "pe lot" (both often cited together as faithful servants saved
+    // by Jehovah — Gen 7, Gen 19). The pairing "Noe...Lot" uniquely identifies the biblical context.
+    // Confirmed: 2026-05-21 — "Biblia nu l-a salvat pe Noe pe lot" → "did not save Noah by lot"
+    if (/pe Noe/i.test(sourceText) && /\bpe [Ll]ot\b/.test(sourceText)) {
+        result = result.replace(/\bby lot\b/gi, 'Lot');
+    }
+
     return result;
 }
 

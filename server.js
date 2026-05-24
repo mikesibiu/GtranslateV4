@@ -920,6 +920,14 @@ io.on('connection', (socket) => {
         // (evacuation dog) → Google Translate: "rescue dog"; fire safety talk (2026-05-21 session)
         'calea de evacuare',
         'căile de evacuare',
+        // New Testament names — commonly garbled in Lazarus story discussions (John 11, 2026-05-21)
+        'Lazăr',            // Lazarus → STT produced "laser" (English tech word)
+        'Marta',            // Martha → STT produced "Balta" (swamp/pond)
+        // Fire safety vocabulary — "starea morților" (condition of the dead) garbled to "starea morală"
+        // in the same meeting where fire safety was discussed; multi-word form is safe
+        'starea morților',
+        // Kingdom Hall fire safety — "casa de cult" (house of worship) garbled to "cașul de Cult"
+        'casa de cult',
     ];
 
     // Helper function to update last activity time
@@ -1240,7 +1248,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v204'
+                        appVersion: 'v205'
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;

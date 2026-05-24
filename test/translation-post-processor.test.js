@@ -799,6 +799,117 @@ describe('applyTermMappings', () => {
             )).to.equal('the law enforcement officer arrived');
         });
     });
+
+    describe('source-aware: primul ajutor → first aid', () => {
+        it('replaces "first help" with "first aid" when source has "primului ajutor" (genitive)', () => {
+            expect(applyTermMappings(
+                'providing first help to those who need it',
+                'acordarea primului ajutor celor care au nevoie'
+            )).to.equal('providing first aid to those who need it');
+        });
+        it('replaces "first help" when source has "primul ajutor" (nominative)', () => {
+            expect(applyTermMappings(
+                'give first help immediately',
+                'dați primul ajutor imediat'
+            )).to.equal('give first aid immediately');
+        });
+        it('replaces "first help" when source has "prim ajutor" (indefinite form)', () => {
+            expect(applyTermMappings(
+                'courses of first help',
+                'cursuri de prim ajutor'
+            )).to.equal('courses of first aid');
+        });
+        it('does NOT replace when source has no ajutor trigger', () => {
+            expect(applyTermMappings(
+                'first help was appreciated',
+                'primul sprijin a fost apreciat'
+            )).to.equal('first help was appreciated');
+        });
+    });
+
+    describe('source-aware: apărarea împotriva incendiilor → fire protection', () => {
+        it('replaces "against protection" when source has fire protection phrase', () => {
+            expect(applyTermMappings(
+                'the against protection regulation',
+                'regulamentul privind apărarea împotriva incendiilor'
+            )).to.equal('the fire protection regulation');
+        });
+        it('does NOT replace when source has no fire protection phrase', () => {
+            expect(applyTermMappings(
+                'the against protection clause',
+                'clauza de protecție'
+            )).to.equal('the against protection clause');
+        });
+    });
+
+    describe('source-aware: starea morală → condition of the dead', () => {
+        it('replaces "Moral State" when source has "starea morală" (STT garble)', () => {
+            expect(applyTermMappings(
+                'the truth about the Moral State',
+                'adevărul cu privire la Starea morală'
+            )).to.equal('the truth about the condition of the dead');
+        });
+        it('does NOT replace lowercase "moral state" (legitimate output when speaker discusses morality)', () => {
+            expect(applyTermMappings(
+                'the moral state of the world is declining',
+                'starea morală a lumii este în declin'
+            )).to.equal('the moral state of the world is declining');
+        });
+        it('does NOT replace when source has no starea morală trigger', () => {
+            expect(applyTermMappings(
+                'the moral state of the nation',
+                'starea economică a națiunii'
+            )).to.equal('the moral state of the nation');
+        });
+    });
+
+    describe('source-aware: cașul de Cult → Kingdom Hall', () => {
+        it('replaces "Worship hut" when source has garbled casa de cult form', () => {
+            expect(applyTermMappings(
+                'evacuate to the Worship hut',
+                'să evacueze la cașul de Cult'
+            )).to.equal('evacuate to the Kingdom Hall');
+        });
+        it('also fires on ungarbled "casa de cult"', () => {
+            expect(applyTermMappings(
+                'we meet at the Worship hut',
+                'ne întâlnim la casa de cult'
+            )).to.equal('we meet at the Kingdom Hall');
+        });
+        it('does NOT replace when source has no cult trigger', () => {
+            expect(applyTermMappings(
+                'evacuate to the Worship hut',
+                'evacuați clădirea'
+            )).to.equal('evacuate to the Worship hut');
+        });
+    });
+
+    describe('source-aware: pe Lot → Lot (not "by lot")', () => {
+        it('replaces "by lot" with "Lot" when source has pe Noe + pe Lot (biblical pair)', () => {
+            expect(applyTermMappings(
+                'did not save Noah by lot the people chosen from Egypt',
+                'nu l-a salvat pe Noe pe Lot poporul ales din Egipt'
+            )).to.equal('did not save Noah Lot the people chosen from Egypt');
+        });
+        it('also fires when STT lowercases "lot" (pe Noe + pe lot)', () => {
+            expect(applyTermMappings(
+                'did not save Noah by lot',
+                'nu l-a salvat pe Noe pe lot'
+            )).to.equal('did not save Noah Lot');
+        });
+        it('does NOT replace when source has "lot" without "pe" marker (drawing-of-lots context)', () => {
+            expect(applyTermMappings(
+                'chosen by lot',
+                'ales prin tragere la sorți lot Noe'
+            )).to.equal('chosen by lot');
+        });
+        it('does NOT replace when source has lot without Noe', () => {
+            expect(applyTermMappings(
+                'chosen by lot',
+                'ales prin tragere la sorți'
+            )).to.equal('chosen by lot');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
