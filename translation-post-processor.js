@@ -169,7 +169,7 @@ function applyTermMappings(text, sourceText = '') {
     // Source-aware fix: "romani" in Romanian = Romani people/language (Roma), not Romans.
     // JW meetings regularly reference "limba romani" (Romani language) and "frații romani"
     // (Romani brothers). Exception: "cartea Romani" = the biblical book of Romans.
-    if (/\bromani\b/i.test(sourceText) && !/cart(?:ea)?\s+romani\b/i.test(sourceText)) {
+    if (/\bromani\b/i.test(sourceText) && !/cart(?:ea)?\s+romani\b/i.test(sourceText) && !/romani\s+\d/i.test(sourceText)) {
         result = result.replace(/\bRomans\b/g, 'Romani');
     }
 
@@ -480,9 +480,54 @@ function applyTermMappings(text, sourceText = '') {
     // "nu mai merită să trăiești" → "no longer deserve living" — should be "no longer worth living"
     result = result.replace(/\bno longer deserve living\b/gi, 'no longer worth living');
 
+    // --- 2026-06-14 Sunday meeting fixes ---
+
+    // "cei care iubesc" → "who I love" (Google MT picks 1sg form of "iubesc" when context is clipped)
+    // Affects: "those who I love the truth", "people who I love", "all who I love God", etc.
+    // Gated on "iubesc" in source: "who I love" is valid English in testimonial/prayer sentences,
+    // so we only correct it when the Romanian source confirms the 3pl relative-clause pattern.
+    if (/\biubesc\b/i.test(sourceNorm)) {
+        result = result.replace(/\bwho I love\b/g, 'who love');
+    }
+
+    // "a început" (he started) → uninflected "start" when partial context arrives
+    result = result.replace(/\bJesus start\b/gi, 'Jesus started');
+    result = result.replace(/\bhe start\b/gi, (m) => (m[0] === 'H' ? 'He' : 'he') + ' started');
+
+    // "a creat" (he created) → uninflected "creator" in translation output; gated on "creat" in source
+    if (/\bcreat\b/i.test(sourceNorm)) {
+        result = result.replace(/\bhe creator\b/gi, 'he created');
+    }
+
+    // "cum anume" → "what certain" / "how certain" (recurring mistranslation of Romanian emphatic "anume")
+    result = result.replace(/\bwhat certain\b/gi, 'what exactly');
+    result = result.replace(/\bhow certain\b/gi, 'exactly how');
+
+    // "vărul de minciuni" → "cousin of lies" ("vărul" = veil/cousin homograph; context is always veil)
+    result = result.replace(/\bthe cousin of lies\b/gi, 'the veil of lies');
+
+    // "combinația creștină" (STT for "congregația creștină") → "Christian combination"
+    result = result.replace(/\bChristian combination\b/gi, 'Christian congregation');
+
+    // "Satanei" STT-garbled to "Safari" → "Safari's lies/deceptions" in translation output
+    result = result.replace(/\bSafari's (lies|deceptions|falsehoods)\b/gi, "Satan's $1");
+
+    // "exprimată" STT-garbled to "estimată" → "conviction estimated by the apostle Paul"
+    result = result.replace(/\bconviction estimated by\b/gi, 'conviction expressed by');
+
+    // "numit Armageddon" STT-garbled to "neumit Armageddon" (non-word) → "appointed/unending Armageddon"
+    result = result.replace(/\bwar appointed Armageddon\b/gi, 'war called Armageddon');
+    result = result.replace(/\bunending war of Armageddon\b/gi, 'war called Armageddon');
+
+    // "paragraful N" STT-garbled to "graful N" → "graph N" in translation output
+    // Gated on "paragraful" in source to avoid touching legitimate "graph N" references.
+    if (/\bparagraful\b/i.test(sourceNorm)) {
+        result = result.replace(/\bgraph (\d+)\b/gi, 'paragraph $1');
+    }
+
     // "Romani" (Bible book) not converted by glossary when source was lowercase.
     // Gate on source having "romani \d" (Bible book always has chapter number; ethnic group never does).
-    // This avoids conflicting with the ethnic-group protection at line 172.
+    // Line 172 above is also updated to exclude this case, so the two rules are logically independent.
     if (/romani\s+\d/i.test(sourceText)) {
         result = result.replace(/\bRomani\b(?=\s+\d)/g, 'Romans');
     }

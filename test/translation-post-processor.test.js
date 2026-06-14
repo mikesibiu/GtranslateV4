@@ -1102,6 +1102,101 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings('Romani 5', 'alte cuvinte')).to.equal('Romani 5');
         });
     });
+
+    // --- 2026-06-14 Sunday meeting rules ---
+
+    describe('"who I love" → "who love" (cei care iubesc — source-gated)', () => {
+        it('fixes relative clause when source confirms iubesc', () => {
+            expect(applyTermMappings('those who I love the truth', 'cei care iubesc adevărul')).to.equal('those who love the truth');
+        });
+        it('fixes multiple occurrences', () => {
+            expect(applyTermMappings('people who I love God and who I love truth', 'care iubesc')).to.equal('people who love God and who love truth');
+        });
+        it('does NOT fire without iubesc in source (false-positive guard)', () => {
+            expect(applyTermMappings('the sister who I love', 'sora pe care o prețuiesc')).to.equal('the sister who I love');
+        });
+    });
+
+    describe('"Jesus/he start" → "started" (uninflected verb)', () => {
+        it('fixes Jesus start', () => {
+            expect(applyTermMappings('Jesus start the work on earth', '')).to.equal('Jesus started the work on earth');
+        });
+        it('fixes he start', () => {
+            expect(applyTermMappings('he start preaching in Galilee', '')).to.equal('he started preaching in Galilee');
+        });
+        it('fixes sentence-initial He start', () => {
+            expect(applyTermMappings('He start the war in 1914', '')).to.equal('He started the war in 1914');
+        });
+        it('does not affect already-correct "started"', () => {
+            expect(applyTermMappings('Jesus started the work', '')).to.equal('Jesus started the work');
+        });
+    });
+
+    describe('"he creator" → "he created" (source-gated)', () => {
+        it('fixes when source contains creat', () => {
+            expect(applyTermMappings('everything he creator for us', 'tot ce a creat')).to.equal('everything he created for us');
+        });
+        it('does NOT fire without creat in source (false-positive guard)', () => {
+            expect(applyTermMappings('he creator of all things', 'Iehova este puternic')).to.equal('he creator of all things');
+        });
+    });
+
+    describe('"what/how certain" → "what/how exactly" (cum anume)', () => {
+        it('fixes what certain', () => {
+            expect(applyTermMappings('what certain Jehovah predicted', '')).to.equal('what exactly Jehovah predicted');
+        });
+        it('fixes how certain', () => {
+            expect(applyTermMappings('how certain he helps us', '')).to.equal('exactly how he helps us');
+        });
+    });
+
+    describe('"cousin of lies" → "veil of lies"', () => {
+        it('fixes the cousin of lies', () => {
+            expect(applyTermMappings('remove the cousin of lies that Satan spread', '')).to.equal('remove the veil of lies that Satan spread');
+        });
+    });
+
+    describe('"Christian combination" → "Christian congregation"', () => {
+        it('fixes Christian combination', () => {
+            expect(applyTermMappings('angels help the Christian combination', '')).to.equal('angels help the Christian congregation');
+        });
+        it('fixes with article', () => {
+            expect(applyTermMappings('the Christian combination is gathering', '')).to.equal('the Christian congregation is gathering');
+        });
+    });
+
+    describe('"Safari\'s lies" → "Satan\'s lies"', () => {
+        it('fixes Safari\'s lies', () => {
+            expect(applyTermMappings("Safari's lies deceive many", '')).to.equal("Satan's lies deceive many");
+        });
+        it('fixes Safari\'s deceptions', () => {
+            expect(applyTermMappings("Safari's deceptions", '')).to.equal("Satan's deceptions");
+        });
+    });
+
+    describe('"conviction estimated by" → "conviction expressed by"', () => {
+        it('fixes the apostle Paul citation', () => {
+            expect(applyTermMappings('the conviction estimated by the apostle Paul', '')).to.equal('the conviction expressed by the apostle Paul');
+        });
+    });
+
+    describe('Armageddon name fixes', () => {
+        it('fixes "war appointed Armageddon"', () => {
+            expect(applyTermMappings('the war appointed Armageddon will begin', '')).to.equal('the war called Armageddon will begin');
+        });
+        it('fixes "unending war of Armageddon"', () => {
+            expect(applyTermMappings('the unending war of Armageddon', '')).to.equal('the war called Armageddon');
+        });
+    });
+
+    describe('"graph N" → "paragraph N" (source-gated on paragraful)', () => {
+        it('fixes graph N when source has paragraful', () => {
+            expect(applyTermMappings('as we read in graph 7', 'paragraful 7')).to.equal('as we read in paragraph 7');
+        });
+        it('does NOT fire without paragraful in source', () => {
+            expect(applyTermMappings('see graph 3 for data', 'vedeți graficul 3')).to.equal('see graph 3 for data');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

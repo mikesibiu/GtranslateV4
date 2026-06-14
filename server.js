@@ -962,6 +962,23 @@ io.on('connection', (socket) => {
         // Section title "De ce are importanță" — STT: "are" → "ai" (1 letter diff): "it matters" → "you matter"
         'are importanță',
         'De ce are importanță',
+        // 2026-06-14 Sunday meeting fixes
+        // "Satanei" (of Satan) → STT produces "Safari" → Google outputs "Safari's lies"
+        'Satanei',
+        // "paragraful" → STT produces "graful" → Google outputs "graph N" instead of "paragraph N"
+        'paragraful',
+        // "congregația creștină" → STT produces "combinația creștină" → "Christian combination"
+        'congregația creștină',
+        // "cei unși" (the anointed ones) → STT produces "cei învinși" (the defeated) — total meaning reversal
+        'cei unși',
+        // "exprimată" (expressed) → STT produces "estimată" (estimated) in Scripture citation context
+        'exprimată',
+        // "numit" (called/named) → STT produces "neumit" (non-word) before "Armageddon"
+        'numit Armageddon',
+        // Brother's name — STT adds spurious 't': "Norbi" → "Norbit"
+        'Norbi',
+        // "vărul de minciuni" (veil of lies) — "vărul" alone sounds like "cousin"; phrase form is safer
+        'vărul de minciuni',
     ];
 
     // Helper function to update last activity time
