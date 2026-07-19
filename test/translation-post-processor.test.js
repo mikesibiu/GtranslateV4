@@ -1197,6 +1197,74 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings('see graph 3 for data', 'vedeți graficul 3')).to.equal('see graph 3 for data');
         });
     });
+
+    // --- 2026-07-19 Sunday meeting rules ---
+
+    describe('"holy shit" → "Holy Spirit" (lui sfânt fragment garbled by MT)', () => {
+        it('fixes "holy shit" to "Holy Spirit"', () => {
+            expect(applyTermMappings('holy shit if I don\'t apply them', 'lui sfânt dacă nu le aplic')).to.equal('Holy Spirit if I don\'t apply them');
+        });
+        it('fixes lowercase "holy shit"', () => {
+            expect(applyTermMappings('the holy shit will guide us', 'spiritul sfânt ne va ghida')).to.equal('the Holy Spirit will guide us');
+        });
+        it('does NOT corrupt "Holy Spirit" already correct', () => {
+            expect(applyTermMappings('the Holy Spirit will help us', 'spiritul sfânt ne va ajuta')).to.equal('the Holy Spirit will help us');
+        });
+    });
+
+    describe('"true sexy" / "search for sex" → meaning (sens misheard as sex, gated on source)', () => {
+        it('fixes "true sexy" to "true meaning" when source has sens', () => {
+            expect(applyTermMappings('will have true sexy and purpose', 'va avea cu adevărat sens')).to.equal('will have true meaning and purpose');
+        });
+        it('fixes "search for sex" to "search for meaning" when source has sens', () => {
+            expect(applyTermMappings('people search for sex in life', 'oamenii caută sens în viață')).to.equal('people search for meaning in life');
+        });
+        it('fixes "looking for sex" to "looking for meaning" when source has sens', () => {
+            expect(applyTermMappings('people are looking for sex', 'oamenii caută sens')).to.equal('people are looking for meaning');
+        });
+        it('does NOT corrupt "search for sex" when source contains sex (speaker discussing immorality)', () => {
+            expect(applyTermMappings('young people search for sex outside marriage', 'tinerii caută sex în afara căsătoriei')).to.equal('young people search for sex outside marriage');
+        });
+    });
+
+    describe('"exist is a/no" → "there is a/no" (există rendered literally, gated on source)', () => {
+        it('fixes "exist is a creator" when source has există', () => {
+            expect(applyTermMappings('exist is a creator who made everything', 'există un creator care a creat totul')).to.equal('there is a creator who made everything');
+        });
+        it('fixes "exist is an answer" (preserves "an") when source has există', () => {
+            expect(applyTermMappings('exist is an answer to this question', 'există un răspuns la această întrebare')).to.equal('there is an answer to this question');
+        });
+        it('fixes "exist is no law" when source has există', () => {
+            expect(applyTermMappings('exist is no law against love', 'există nicio lege împotriva iubirii')).to.equal('there is no law against love');
+        });
+        it('fixes "exist was no limit" when source has exista', () => {
+            expect(applyTermMappings('exist was no limit to his power', 'nu exista nicio limită pentru puterea sa')).to.equal('there was no limit to his power');
+        });
+        it('does NOT alter "exist" in other contexts', () => {
+            expect(applyTermMappings('these problems still exist today', 'aceste probleme există și astăzi')).to.equal('these problems still exist today');
+        });
+        it('does NOT alter "exist" mid-sentence when no există in source', () => {
+            expect(applyTermMappings('these problems still exist today', 'aceste probleme persistă astăzi')).to.equal('these problems still exist today');
+        });
+    });
+
+    describe('"must Please to Jehovah" → "must pray to Jehovah" (gated on rugăm source)', () => {
+        it('fixes "must Please to Jehovah" when source has rugăm', () => {
+            expect(applyTermMappings('we must Please to Jehovah each day', 'trebuie să ne rugăm lui Iehova zilnic')).to.equal('we must pray to Jehovah each day');
+        });
+        it('does NOT alter "please" in other contexts (no rugăm gate)', () => {
+            expect(applyTermMappings('we aim to please God', 'vrem să-i plăcem lui Dumnezeu')).to.equal('we aim to please God');
+        });
+    });
+
+    describe('"God creator man" → "God created man"', () => {
+        it('fixes "God creator man"', () => {
+            expect(applyTermMappings('a very simple explanation God creator man a', '')).to.equal('a very simple explanation God created man a');
+        });
+        it('does NOT alter "God created man" already correct', () => {
+            expect(applyTermMappings('God created man in his image', '')).to.equal('God created man in his image');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

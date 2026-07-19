@@ -426,6 +426,9 @@ function applyTermMappings(text, sourceText = '') {
     if (/rugăm|rugam/i.test(sourceNorm)) {
         result = result.replace(/\bWe [Pp]lease\b/g, 'We pray');
         result = result.replace(/\bwe [Pp]lease\b/g, 'we pray');
+        // "ne rugăm" (we pray) → MT outputs "Please" when fragments arrive without subject
+        // "must Please to Jehovah" pattern from 2026-07-19 Sunday meeting
+        result = result.replace(/\bmust Please to Jehovah\b/gi, 'must pray to Jehovah');
     }
 
     // Grammar fix: Romanian possessive + definite article suffix on noun → "your the X" double article.
@@ -531,6 +534,31 @@ function applyTermMappings(text, sourceText = '') {
     if (/romani\s+\d/i.test(sourceText)) {
         result = result.replace(/\bRomani\b(?=\s+\d)/g, 'Romans');
     }
+
+    // 2026-07-19 Sunday meeting fixes:
+
+    // "lui sfânt" fragment without "spiritul" context → MT produces "holy shit"
+    // In a JW meeting this can only ever mean Holy Spirit. Ungated — never valid in this context.
+    result = result.replace(/\bholy shit\b/gi, 'Holy Spirit');
+
+    // "sens" (meaning/purpose) → STT mishears as "sexi"/"sex" → MT outputs "sexy"/"sex"
+    // Gated on source containing "sens" — speakers may legitimately discuss sexual immorality.
+    if (/\bsens(ul)?\b/i.test(sourceNorm)) {
+        result = result.replace(/\btrue sexy\b/gi, 'true meaning');
+        result = result.replace(/\bsearch for sex\b/gi, 'search for meaning');
+        result = result.replace(/\blooking for sex\b/gi, 'looking for meaning');
+    }
+
+    // "există" (there is/exists) → MT renders "exist is" or "exist was" (literal transliteration)
+    // Gated on source containing "există"/"exista" — "exist is a/no" can appear in valid English otherwise.
+    if (/\bexist[aă]\b/i.test(sourceNorm)) {
+        result = result.replace(/\b(exist) is (an?)\b/gi, (m, w, art) => (w[0] === 'E' ? 'There' : 'there') + ' is ' + art);
+        result = result.replace(/\b(exist) is no\b/gi, (m, w) => (w[0] === 'E' ? 'There' : 'there') + ' is no');
+        result = result.replace(/\b(exist) was no\b/gi, (m, w) => (w[0] === 'E' ? 'There' : 'there') + ' was no');
+    }
+
+    // "a creat" (created) → MT outputs "creator" for short fragments — Confirmed: 2026-07-19
+    result = result.replace(/\bGod (creator) man\b/gi, (m, w) => 'God ' + (w[0] === 'C' ? 'Created' : 'created') + ' man');
 
     return result;
 }

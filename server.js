@@ -979,6 +979,18 @@ io.on('connection', (socket) => {
         'Norbi',
         // "vărul de minciuni" (veil of lies) — "vărul" alone sounds like "cousin"; phrase form is safer
         'vărul de minciuni',
+        // 2026-07-19 Sunday meeting fixes
+        // "sens"/"sensul" (meaning/purpose) → STT mishears as "sexi"/"sex" when isolated
+        'sens',
+        'sensul',
+        // "mediteze" (to meditate) → STT produces "editeze" (to edit)
+        'mediteze',
+        'medităm',
+        // "fierul roșu" (red-hot iron, biblical branding idiom) → STT produces "eroul roșu" (red hero)
+        'fierul roșu',
+        // "spiritul sfânt" — phrase form guards against "lui sfânt" fragment producing "holy shit"
+        'spiritul sfânt',
+        'spiritului sfânt',
     ];
 
     // Helper function to update last activity time
