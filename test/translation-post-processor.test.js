@@ -1265,6 +1265,36 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings('God created man in his image', '')).to.equal('God created man in his image');
         });
     });
+
+    describe('"image of 69" → "image of God" (chipul lui Dumnezeu, Dumnezeu garbled to number)', () => {
+        it('fixes "image of 69" when source has chipul', () => {
+            expect(applyTermMappings('and was created in the image of 69', 'a fost creat după chipul lui Dumnezeu')).to.equal('and was created in the image of God');
+        });
+        it('fixes other garbled numbers (image of 3)', () => {
+            expect(applyTermMappings('created in the image of 3', 'creat după chipul său')).to.equal('created in the image of God');
+        });
+        it('does NOT fire without chipul in source', () => {
+            expect(applyTermMappings('she was one of the image of 7 women', 'ea era una din cele 7 femei')).to.equal('she was one of the image of 7 women');
+        });
+    });
+
+    describe('"granddaughter" → "young man" when source has nepoate (masculine vocative)', () => {
+        it('fixes "Jehovah granddaughter" to "Jehovah young man"', () => {
+            expect(applyTermMappings('Jehovah granddaughter Therefore although smoking', 'Iehova nepoate Așadar deși fumatul')).to.equal('Jehovah young man Therefore although smoking');
+        });
+        it('does NOT fire without nepoate in source', () => {
+            expect(applyTermMappings('he has a beautiful granddaughter', 'el are o nepoată frumoasă')).to.equal('he has a beautiful granddaughter');
+        });
+    });
+
+    describe('"is hot" → "is being proclaimed" when source has vestește (se vestește garbled)', () => {
+        it('fixes "is hot" when source has vesteste', () => {
+            expect(applyTermMappings('something that you know is hot', 'ceva ce știți că se vestește')).to.equal('something that you know is being proclaimed');
+        });
+        it('does NOT fire without vesteste in source', () => {
+            expect(applyTermMappings('the iron is hot right now', 'fierul este fierbinte acum')).to.equal('the iron is hot right now');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

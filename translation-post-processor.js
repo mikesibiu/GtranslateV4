@@ -560,6 +560,25 @@ function applyTermMappings(text, sourceText = '') {
     // "a creat" (created) → MT outputs "creator" for short fragments — Confirmed: 2026-07-19
     result = result.replace(/\bGod (creator) man\b/gi, (m, w) => 'God ' + (w[0] === 'C' ? 'Created' : 'created') + ' man');
 
+    // "chipul lui Dumnezeu" → STT garbles "Dumnezeu" to a number → "image of 69" etc.
+    // Gated on "chipul" in source — "image of [number]" is never valid in this context.
+    if (/\bchipul\b/i.test(sourceNorm)) {
+        result = result.replace(/\bimage of \d+\b/gi, 'image of God');
+    }
+
+    // "nepoate" (masculine vocative: young man/son, term of affection) → MT outputs "granddaughter" (wrong gender).
+    // The conductor says "Iehova, nepoate!" as an affirmation after a student answers.
+    // Gated on "nepoate" in source to avoid touching unrelated "granddaughter" references.
+    if (/\bnepoate\b/i.test(sourceText)) {
+        result = result.replace(/\bgranddaughter\b/gi, 'young man');
+    }
+
+    // "se vestește" (is announced/proclaimed) → MT outputs "is hot" for short fragments.
+    // Gated on "vesteste"/"vestește" in source.
+    if (/\bvesteste\b/i.test(sourceNorm)) {
+        result = result.replace(/\bis hot\b/gi, 'is being proclaimed');
+    }
+
     return result;
 }
 

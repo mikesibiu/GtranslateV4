@@ -991,6 +991,10 @@ io.on('connection', (socket) => {
         // "spiritul sfânt" — phrase form guards against "lui sfânt" fragment producing "holy shit"
         'spiritul sfânt',
         'spiritului sfânt',
+        // "Cântarea N" — song/hymn number announcements; STT garbles to unrelated words
+        'Cântarea',
+        // "neînțelept" (unwisely) — STT drops "ne-" prefix, producing "wisely" (opposite meaning)
+        'neînțelept',
     ];
 
     // Helper function to update last activity time
