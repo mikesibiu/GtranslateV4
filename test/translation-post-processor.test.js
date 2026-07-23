@@ -1295,6 +1295,101 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings('the iron is hot right now', 'fierul este fierbinte acum')).to.equal('the iron is hot right now');
         });
     });
+
+    // --- 2026-07-23 Thursday meeting rules ---
+
+    describe('"54 horses" → "54 chapters" (capitolele misheard as cai)', () => {
+        it('fixes "54 horses"', () => {
+            expect(applyTermMappings('The 54 horses will show you how Jehovah helped', '')).to.equal('The 54 chapters will show you how Jehovah helped');
+        });
+    });
+
+    describe('"stubbornness led to the exit" → "exile" (exil misheard as exit)', () => {
+        it('fixes "stubbornness led to the exit"', () => {
+            expect(applyTermMappings('their stubbornness led to the exit from the land', '')).to.equal('their stubbornness led to exile from the land');
+        });
+    });
+
+    describe('"kindness and composer" → "compassion" (compasiune misheard as compozitor)', () => {
+        it('fixes "kindness and composer"', () => {
+            expect(applyTermMappings('show kindness and composer to others', '')).to.equal('show kindness and compassion to others');
+        });
+        it('does NOT alter "kindness and compassion" already correct', () => {
+            expect(applyTermMappings('showing kindness and compassion', '')).to.equal('showing kindness and compassion');
+        });
+    });
+
+    describe('"balls that inspire us" → "examples" (memorabile chunk-split artifact)', () => {
+        it('fixes "balls that inspire us"', () => {
+            expect(applyTermMappings('balls that inspire us and together', '')).to.equal('examples that inspire us and together');
+        });
+    });
+
+    describe('"brave and insensitive" / "unfeeling faith" → steadfast/unwavering (gated on nesimtit)', () => {
+        it('fixes "brave and insensitive" when source has nesimtit', () => {
+            expect(applyTermMappings('remain brave and insensitive in the face of trials', 'rămân curajos și nesimțit')).to.equal('remain brave and steadfast in the face of trials');
+        });
+        it('fixes "unfeeling faith" when source has nesimtit', () => {
+            expect(applyTermMappings('unfeeling faith I like this idea', 'credința nesimțită îmi place această idee')).to.equal('unwavering faith I like this idea');
+        });
+        it('does NOT fire without nesimtit in source (could describe a legitimate antagonist)', () => {
+            expect(applyTermMappings('Pharaoh was brave and insensitive to suffering', 'Faraon era curajos și indiferent la suferință')).to.equal('Pharaoh was brave and insensitive to suffering');
+        });
+    });
+
+    describe('"sell the world" → "overcome the world" (biruit misheard as vinzi, John 16:33)', () => {
+        it('fixes "sell the world"', () => {
+            expect(applyTermMappings('courage, he can sell the world', '')).to.equal('courage, he can overcome the world');
+        });
+        it('"overcome" is tense-neutral and works after modal verbs', () => {
+            expect(applyTermMappings('I have sell the world', '')).to.equal('I have overcome the world');
+        });
+    });
+
+    describe('"laying a railway" → "planning" (pun la cale + STT inserts ferată, source-gated)', () => {
+        it('fixes "laying a railway" when source has ferata', () => {
+            expect(applyTermMappings('a calamity and laying a railway and correcting', 'pun la cale ferată și îndreptați')).to.equal('a calamity and planning and correcting');
+        });
+        it('does NOT fire without ferata in source', () => {
+            expect(applyTermMappings('they were laying a railway through the mountains', 'construiau o linie prin munți')).to.equal('they were laying a railway through the mountains');
+        });
+    });
+
+    describe('"the Jehovah" → "Jehovah" (article wrongly inserted before proper name)', () => {
+        it('removes spurious "the" before Jehovah', () => {
+            expect(applyTermMappings('Thus say the Jehovah of armies', '')).to.equal('Thus say Jehovah of armies');
+        });
+        it('does NOT alter "Jehovah" already without article', () => {
+            expect(applyTermMappings('Jehovah is the God of love', '')).to.equal('Jehovah is the God of love');
+        });
+    });
+
+    describe('"Please you to help us" → "we ask you to help us" (prayer fragment garble)', () => {
+        it('fixes "Please you to help us"', () => {
+            expect(applyTermMappings('Please you to help us to focus', '')).to.equal('we ask you to help us to focus');
+        });
+    });
+
+    describe('"the molar" → "the potter" when source has molarul (olarul misheard)', () => {
+        it('fixes "with the molar" when source has molarul', () => {
+            expect(applyTermMappings('we see with the molar the vessel', 'vedem cu molarul vasul')).to.equal('we see with the potter the vessel');
+        });
+        it('fixes "the molar" when source has molarul', () => {
+            expect(applyTermMappings('the molar does not throw away the vessel', 'molarul nu aruncă vasul')).to.equal('the potter does not throw away the vessel');
+        });
+        it('does NOT fire without molarul in source', () => {
+            expect(applyTermMappings('the molar is the strongest tooth', 'cel mai puternic dinte')).to.equal('the molar is the strongest tooth');
+        });
+    });
+
+    describe('"potter\'s voice breaks" → "potter\'s vessel breaks" (glasul/vasul confusion, Jer 19:11)', () => {
+        it('fixes "potter\'s voice breaks" when source has olar and glasul', () => {
+            expect(applyTermMappings("as a potter's voice breaks without being restored", 'cum se sfărâmă glasul unui olar')).to.equal("as a potter's vessel breaks without being restored");
+        });
+        it('does NOT fire without both olar and glasul in source', () => {
+            expect(applyTermMappings("a potter's voice breaks through", 'vocea unui artist se remarcă')).to.equal("a potter's voice breaks through");
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

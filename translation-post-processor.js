@@ -579,6 +579,60 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bis hot\b/gi, 'is being proclaimed');
     }
 
+    // 2026-07-23 Thursday meeting fixes:
+
+    // "cele 54 de capitole" → STT hears "cai" (horses) → "54 horses" in translation
+    result = result.replace(/\b54 horses\b/gi, '54 chapters');
+
+    // "stubbornness led to exile" → STT produced English "exit" for Romanian "exil"
+    result = result.replace(/\bstubbornness led to the exit\b/gi, 'stubbornness led to exile');
+
+    // "compasiune" (compassion) → STT produced "compozitor" (composer/music writer)
+    result = result.replace(/\bkindness and composer\b/gi, 'kindness and compassion');
+
+    // "memorabile" split across chunks: "memora-" + "-bile" → MT outputs "balls that inspire"
+    result = result.replace(/\bballs that inspire us\b/gi, 'examples that inspire us');
+
+    // "nesimțit" used to mean fearless/unflinching → MT outputs negative "insensitive"
+    // Gated on source containing "nesimtit" — "brave and insensitive" can be legitimate for antagonists.
+    if (/nesimtit/i.test(sourceNorm)) {
+        result = result.replace(/\bbrave and insensitive\b/gi, 'brave and steadfast');
+        result = result.replace(/\bunfeeling faith\b/gi, 'unwavering faith');
+    }
+
+    // "meditând" (meditating) → STT heard "medicina" (medicine)
+    result = result.replace(/\bstudying medicine and the examples from the Bible\b/gi, 'meditating on the examples from the Bible');
+
+    // "te rugăm să ne ajuți" (we ask you to help us) → MT fragment: "Please you to help us"
+    result = result.replace(/\bPlease you to help us\b/gi, 'we ask you to help us');
+
+    // "the Jehovah" — article wrongly inserted before proper name Jehovah by MT
+    result = result.replace(/\bthe Jehovah\b/gi, 'Jehovah');
+
+    // "biruit lumea" (overcome the world, John 16:33) → STT heard "vinzi" (sell) → "sell the world"
+    // "overcome" is tense-neutral (works with has/have/will/can); "conquered" breaks after modal verbs.
+    result = result.replace(/\bsell the world\b/gi, 'overcome the world');
+
+    // "pun la cale" (plotting/planning) + STT inserts "ferată" → "cale ferată" (railway) → "laying a railway"
+    // Gated on "ferat" in source (the STT error word ferată) — "laying a railway" is valid English otherwise.
+    if (/ferat/i.test(sourceText)) {
+        result = result.replace(/\blaying a railway\b/gi, 'planning');
+    }
+
+    // "olarul" (the potter, Jeremiah/Isaiah imagery) → STT hears "molarul" (the molar tooth)
+    // Gated on "molarul" in source — prevents false positives if a speaker discusses dentistry.
+    if (/\bmolarul\b/i.test(sourceNorm)) {
+        result = result.replace(/\bwith the molar\b/gi, 'with the potter');
+        result = result.replace(/\bthe molar\b/gi, 'the potter');
+    }
+
+    // "glasul unui Olar" → STT heard "glasul" (voice) instead of "vasul" (vessel)
+    // "potter's voice breaks" should be "potter's vessel breaks" (Jeremiah 19:11 imagery)
+    // Gated on both "olar" (potter talk) and "glasul" (the STT error word) in source.
+    if (/\bolar\b/i.test(sourceNorm) && /\bglas/i.test(sourceNorm)) {
+        result = result.replace(/\bpotter's voice breaks\b/gi, "potter's vessel breaks");
+    }
+
     return result;
 }
 

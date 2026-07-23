@@ -995,6 +995,17 @@ io.on('connection', (socket) => {
         'Cântarea',
         // "neînțelept" (unwisely) — STT drops "ne-" prefix, producing "wisely" (opposite meaning)
         'neînțelept',
+        // 2026-07-23 Thursday meeting fixes
+        // "idolatrie" (idolatry) → STT hears "izolație" (isolation) — completely different meaning
+        'idolatrie',
+        // "olarul" (the potter, Jer 18/19 imagery) → STT hears "molarul" (the molar tooth)
+        'olarul',
+        // "compasiune" (compassion) → STT hears "compozitor" (composer)
+        'compasiune',
+        // "biruit lumea" (conquered the world, John 16:33) → STT hears "vinzi" (sell)
+        'biruit lumea',
+        // "capitolele" (chapters) → STT hears "cai" (horses) → "54 horses"
+        'capitolele',
     ];
 
     // Helper function to update last activity time
