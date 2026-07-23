@@ -1390,6 +1390,41 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings("a potter's voice breaks through", 'vocea unui artist se remarcă')).to.equal("a potter's voice breaks through");
         });
     });
+
+    // --- 2026-07-24 deep-dive fixes ---
+
+    describe('"indifferent of/how/what" → "regardless of / no matter" (indiferent literal translation)', () => {
+        it('fixes "indifferent of whether"', () => {
+            expect(applyTermMappings('to act indifferent of whether we are together', '')).to.equal('to act regardless of whether we are together');
+        });
+        it('fixes "indifferent of" (without whether)', () => {
+            expect(applyTermMappings('indifferent of the problems we face', '')).to.equal('regardless of the problems we face');
+        });
+        it('fixes "indifferent how"', () => {
+            expect(applyTermMappings('indifferent how difficult or scary it may be', '')).to.equal('no matter how difficult or scary it may be');
+        });
+        it('fixes "indifferent what"', () => {
+            expect(applyTermMappings('indifferent what we go through', '')).to.equal('no matter what we go through');
+        });
+        it('does NOT alter "indifferent" used correctly as an adjective', () => {
+            expect(applyTermMappings('he was completely indifferent to her suffering', '')).to.equal('he was completely indifferent to her suffering');
+        });
+    });
+
+    describe('"con regulation" → "congregation" (congregației garbled)', () => {
+        it('fixes "con regulation"', () => {
+            expect(applyTermMappings('of this con regulation Do not be afraid', '')).to.equal('of this congregation Do not be afraid');
+        });
+    });
+
+    describe('"my the help" → "my help" (stray article from Romanian possessive)', () => {
+        it('fixes "my the help"', () => {
+            expect(applyTermMappings('Jehovah is my the help and my shield', '')).to.equal('Jehovah is my help and my shield');
+        });
+        it('does NOT alter "my help" already correct', () => {
+            expect(applyTermMappings('Jehovah is my help', '')).to.equal('Jehovah is my help');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

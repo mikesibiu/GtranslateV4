@@ -1006,6 +1006,15 @@ io.on('connection', (socket) => {
         'biruit lumea',
         // "capitolele" (chapters) → STT hears "cai" (horses) → "54 horses"
         'capitolele',
+        // 2026-07-24 deep-dive fixes
+        // Biblical names in the Shadrach/Meshach/Abednego account — STT hears "Mihail" for "Mișael"
+        'Mișael',
+        'Hanania',
+        'Azaria',
+        // "să imităm" (to imitate) → STT hears "să emităm" (to broadcast/emit)
+        'să imităm',
+        // "neclintiți" (steadfast/unwavering) → STT garbles to "neplinind" (unfulfilled)
+        'neclintiți',
     ];
 
     // Helper function to update last activity time

@@ -633,6 +633,23 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bpotter's voice breaks\b/gi, "potter's vessel breaks");
     }
 
+    // 2026-07-24 deep-dive fixes (thu-2045):
+
+    // "indiferent de/că/cât" (regardless of / no matter) → MT renders literally as "indifferent"
+    // "indifferent of/how/what" is not natural English; "regardless of" / "no matter" is correct.
+    // Ordered most-specific first to avoid overlapping replacements.
+    result = result.replace(/\bindifferent of whether\b/gi, 'regardless of whether');
+    result = result.replace(/\bindifferent of\b/gi, 'regardless of');
+    result = result.replace(/\bindifferent (how)\b/gi, 'no matter $1');
+    result = result.replace(/\bindifferent (what)\b/gi, 'no matter $1');
+    result = result.replace(/\bindifferent (that)\b/gi, 'regardless of the fact $1');
+
+    // "con reglației/con regulation" → STT garbles "congregației" (of the congregation)
+    result = result.replace(/\bcon regulation\b/gi, 'congregation');
+
+    // "Jehovah is my the help" → stray article inserted between possessive and noun
+    result = result.replace(/\bmy the help\b/gi, 'my help');
+
     return result;
 }
 
