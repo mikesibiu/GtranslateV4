@@ -1357,7 +1357,7 @@ describe('applyTermMappings', () => {
 
     describe('"the Jehovah" → "Jehovah" (article wrongly inserted before proper name)', () => {
         it('removes spurious "the" before Jehovah', () => {
-            expect(applyTermMappings('Thus say the Jehovah of armies', '')).to.equal('Thus say Jehovah of armies');
+            expect(applyTermMappings('Thus say the Jehovah of armies', '')).to.equal('Thus says Jehovah of armies');
         });
         it('does NOT alter "Jehovah" already without article', () => {
             expect(applyTermMappings('Jehovah is the God of love', '')).to.equal('Jehovah is the God of love');
@@ -1423,6 +1423,71 @@ describe('applyTermMappings', () => {
         });
         it('does NOT alter "my help" already correct', () => {
             expect(applyTermMappings('Jehovah is my help', '')).to.equal('Jehovah is my help');
+        });
+    });
+
+    // --- 2026-07-24 deep-dive fixes (thu-1950) ---
+
+    describe('third-person verb agreement (he say / it say / he know — systematic MT error)', () => {
+        it('fixes "he say" mid-sentence', () => {
+            expect(applyTermMappings('here he say to them', '')).to.equal('here he says to them');
+        });
+        it('fixes "He say" sentence-initial (preserves capitalisation)', () => {
+            expect(applyTermMappings('He say that we must serve Jehovah', '')).to.equal('He says that we must serve Jehovah');
+        });
+        it('fixes "it say" mid-sentence', () => {
+            expect(applyTermMappings('it say that they offer sacrifices', '')).to.equal('it says that they offer sacrifices');
+        });
+        it('fixes "It say" sentence-initial (preserves capitalisation)', () => {
+            expect(applyTermMappings('It say in the Bible', '')).to.equal('It says in the Bible');
+        });
+        it('fixes "he know" mid-sentence', () => {
+            expect(applyTermMappings('he know our past and our heart', '')).to.equal('he knows our past and our heart');
+        });
+        it('fixes "He know" sentence-initial (preserves capitalisation)', () => {
+            expect(applyTermMappings('He know the needs of each one', '')).to.equal('He knows the needs of each one');
+        });
+        it('fixes "Thus say Jehovah"', () => {
+            expect(applyTermMappings('Thus say Jehovah of armies', '')).to.equal('Thus says Jehovah of armies');
+        });
+        it('does NOT alter "he says" already correct', () => {
+            expect(applyTermMappings('he says what he means', '')).to.equal('he says what he means');
+        });
+    });
+
+    describe('double-marked negatives (doesn\'t loves / do not allows / we seen)', () => {
+        it('fixes "doesn\'t loves"', () => {
+            expect(applyTermMappings("she doesn't loves someone", '')).to.equal("she doesn't love someone");
+        });
+        it('fixes "do not allows"', () => {
+            expect(applyTermMappings('do not allows your actions to hurt others', '')).to.equal('do not allow your actions to hurt others');
+        });
+        it('fixes "we seen"', () => {
+            expect(applyTermMappings('we seen that he was going there', '')).to.equal('we saw that he was going there');
+        });
+        it('does NOT alter "we have seen" already correct', () => {
+            expect(applyTermMappings('we have seen his faithfulness', '')).to.equal('we have seen his faithfulness');
+        });
+    });
+
+    describe('"Mulțumim" (Romanian "thank you") left untranslated in English output', () => {
+        it('replaces untranslated Mulțumim with Thank you', () => {
+            expect(applyTermMappings('an insult to Mulțumim', '')).to.equal('an insult to Thank you');
+        });
+    });
+
+    describe('"world translation" → "New World Translation" (JW Bible, source-gated)', () => {
+        it('fixes "world translation" when source has traducerii lumii', () => {
+            expect(applyTermMappings('older editions of the world translation', 'ediții mai vechi ale traducerii lumii noi')).to.equal('older editions of the New World Translation');
+        });
+        it('does NOT fire without traducerii/lumii in source', () => {
+            expect(applyTermMappings('this is a world translation effort', 'acesta este un efort de traducere mondială')).to.equal('this is a world translation effort');
+        });
+    });
+
+    describe('"to joy the" → "to enjoy the" (bucura stripped of prefix by MT)', () => {
+        it('fixes "to joy the"', () => {
+            expect(applyTermMappings('we will be able to joy the spiritual Paradise', '')).to.equal('we will be able to enjoy the spiritual Paradise');
         });
     });
 });

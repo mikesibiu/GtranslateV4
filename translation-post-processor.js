@@ -633,6 +633,35 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bpotter's voice breaks\b/gi, "potter's vessel breaks");
     }
 
+    // 2026-07-24 deep-dive fixes (thu-1950):
+
+    // Third-person verb agreement — MT drops -s on short fragments (systematic, recurring)
+    result = result.replace(/\bhe say\b/gi, (m) => (m[0] === 'H' ? 'He' : 'he') + ' says');
+    result = result.replace(/\bit say\b/gi, (m) => (m[0] === 'I' ? 'It' : 'it') + ' says');
+    result = result.replace(/\bhe know\b/gi, (m) => (m[0] === 'H' ? 'He' : 'he') + ' knows');
+    // "Așa spune Iehova" → "Thus say Jehovah" ("the Jehovah" already cleaned upstream)
+    result = result.replace(/\bThus say Jehovah\b/gi, 'Thus says Jehovah');
+    result = result.replace(/\bThus say the Lord\b/gi, 'Thus says the Lord');
+
+    // Double-marked negatives — MT inflects the verb after "don't/do not" (grammatically impossible)
+    result = result.replace(/\bdoesn't loves\b/gi, "doesn't love");
+    result = result.replace(/\bdo not allows\b/gi, 'do not allow');
+    // "am văzut" → "we seen" (past participle without auxiliary — regional but wrong in translation)
+    result = result.replace(/\bwe seen\b/gi, 'we saw');
+
+    // Untranslated Romanian leaking into English output — MT failed to translate the word
+    // "Mulțumim" (Thank you) appears verbatim in output when MT drops it
+    result = result.replace(/\bMulțumim\b/g, 'Thank you');
+
+    // "traducerea/traducerii lumii" (the world translation) → should be "New World Translation" (JW Bible)
+    // Source gate: only fires when "traduc" + "lumii" appear together in source
+    if (/traduc\w*\s+\w*\s*lumii|lumii\s+\w*\s*traduc/i.test(sourceNorm)) {
+        result = result.replace(/\bworld translation\b/gi, 'New World Translation');
+    }
+
+    // "bucura" (to enjoy/rejoice) → MT strips prefix → "to joy the" instead of "to enjoy the"
+    result = result.replace(/\bto joy the\b/gi, 'to enjoy the');
+
     // 2026-07-24 deep-dive fixes (thu-2045):
 
     // "indiferent de/că/cât" (regardless of / no matter) → MT renders literally as "indifferent"
