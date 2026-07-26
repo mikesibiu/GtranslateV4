@@ -13,10 +13,10 @@ cat > "$CLAUDE_DIR/kb.py" << 'PYTHON_EOF'
 #!/usr/bin/env python3
 """
 Usage:
-  python3 .claude/kb.py search <query>
-  python3 .claude/kb.py learn  <topic> | <content> [| tags]
-  python3 .claude/kb.py failed <topic> | <what was tried> | <why it failed> [| tags]
-  python3 .claude/kb.py list
+  python3 .kb/kb.py search <query>
+  python3 .kb/kb.py learn  <topic> | <content> [| tags]
+  python3 .kb/kb.py failed <topic> | <what was tried> | <why it failed> [| tags]
+  python3 .kb/kb.py list
 """
 import sqlite3, sys, datetime
 from pathlib import Path
@@ -164,7 +164,7 @@ if [ ! -f "$CLAUDE_MD" ]; then
 Before answering, suggesting an approach, writing code, or making changes:
 
 ```bash
-python3 .claude/kb.py search <keywords relevant to the task>
+python3 .kb/kb.py search <keywords relevant to the task>
 ```
 
 Read the results and act on them:
@@ -184,12 +184,12 @@ After any non-trivial interaction, save durable knowledge. Ask yourself:
 
 **Save a learned fact:**
 ```bash
-python3 .claude/kb.py learn <topic> | <what is true / what works> | <tags>
+python3 .kb/kb.py learn <topic> | <what is true / what works> | <tags>
 ```
 
 **Save a failed attempt:**
 ```bash
-python3 .claude/kb.py failed <topic> | <what was tried> | <why it failed> | <tags>
+python3 .kb/kb.py failed <topic> | <what was tried> | <why it failed> | <tags>
 ```
 
 ### What is worth saving
@@ -231,12 +231,12 @@ echo "✅ .gitignore updated"
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "Files created:"
-echo "  .claude/kb.py          ← search / learn / failed / list"
+echo "  .kb/kb.py          ← search / learn / failed / list"
 echo "  .claude/knowledge.db   ← SQLite (commit this to git)"
 echo "  CLAUDE.md              ← workflow rules Claude reads every session"
 echo ""
 echo "Commands:"
-echo "  python3 .claude/kb.py search <query>"
-echo "  python3 .claude/kb.py learn  <topic> | <what works> | <tags>"
-echo "  python3 .claude/kb.py failed <topic> | <what was tried> | <why it failed> | <tags>"
-echo "  python3 .claude/kb.py list"
+echo "  python3 .kb/kb.py search <query>"
+echo "  python3 .kb/kb.py learn  <topic> | <what works> | <tags>"
+echo "  python3 .kb/kb.py failed <topic> | <what was tried> | <why it failed> | <tags>"
+echo "  python3 .kb/kb.py list"

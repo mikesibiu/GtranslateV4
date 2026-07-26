@@ -8,9 +8,9 @@ credentials.json
 glossary-temp/node_modules/
 glossary-temp/translate-cache.json
 
-# Claude KB temp files
-.claude/knowledge.db-wal
-.claude/knowledge.db-shm
+# Claude KB temp files (SQLite WAL/SHM — the .kb/knowledge.db itself IS tracked)
+.kb/knowledge.db-wal
+.kb/knowledge.db-shm
 
 # Meeting log captures (local only — not committed)
 meeting-logs/

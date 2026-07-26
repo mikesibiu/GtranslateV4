@@ -41,24 +41,24 @@ The `kb.py` commands use `|` as a delimiter between topic, content, and tags.
 
 ### WRONG (shell interprets | as pipe — command fails):
 ```bash
-python3 .claude/kb.py learn chicken breed | ISA Brown chosen for eggs | livestock
+python3 .kb/kb.py learn chicken breed | ISA Brown chosen for eggs | livestock
 ```
 
 ### CORRECT — wrap the whole thing in a quoted string:
 ```bash
-python3 .claude/kb.py learn "chicken breed | ISA Brown chosen for eggs | livestock"
+python3 .kb/kb.py learn "chicken breed | ISA Brown chosen for eggs | livestock"
 ```
 
 ### Also correct — escape each pipe:
 ```bash
-python3 .claude/kb.py learn chicken breed \| ISA Brown chosen for eggs \| livestock
+python3 .kb/kb.py learn chicken breed \| ISA Brown chosen for eggs \| livestock
 ```
 
 **Always use the quoted string form.** It's the simplest and most readable.
 
 The same applies to `failed` entries:
 ```bash
-python3 .claude/kb.py failed "3D model east-west orientation | camera looking in +z puts east on LEFT | use n2z = D-N and camera south of property looking in -z | 3d,coordinates"
+python3 .kb/kb.py failed "3D model east-west orientation | camera looking in +z puts east on LEFT | use n2z = D-N and camera south of property looking in -z | 3d,coordinates"
 ```
 
 ---
@@ -150,8 +150,8 @@ Claude follows this on every interaction, without being asked:
 
 1. **Session start** — broad orientation search:
    ```bash
-   python3 .claude/kb.py search project overview
-   python3 .claude/kb.py search file index
+   python3 .kb/kb.py search project overview
+   python3 .kb/kb.py search file index
    ```
 
 2. **Before responding** — searches the KB for anything relevant to the current task
@@ -171,7 +171,7 @@ Claude follows this on every interaction, without being asked:
 For projects with many files, add a "file index" entry (or several, by topic) so Claude knows exactly which file to read for each kind of question. This dramatically reduces time spent searching:
 
 ```bash
-python3 .claude/kb.py learn "file index - planning files | master_plan.txt: THE master document. timeline.txt: year by year. MONTHLY_CHECKLIST.md: monthly tasks. | files,planning"
+python3 .kb/kb.py learn "file index - planning files | master_plan.txt: THE master document. timeline.txt: year by year. MONTHLY_CHECKLIST.md: monthly tasks. | files,planning"
 ```
 
 Then add a rule to your `CLAUDE.md` and `MASTER_FILE_INDEX.md` (or equivalent) requiring the index to be updated in the same commit whenever a new file is created.
@@ -184,16 +184,16 @@ You won't normally need these, but they're there if you want to inspect or manua
 
 ```bash
 # See everything in the KB
-python3 .claude/kb.py list
+python3 .kb/kb.py list
 
 # Search manually
-python3 .claude/kb.py search <query>
+python3 .kb/kb.py search <query>
 
 # Add a learned fact (use quoted string for | delimiter)
-python3 .claude/kb.py learn "topic | what is true / what works | tags"
+python3 .kb/kb.py learn "topic | what is true / what works | tags"
 
 # Record a failed attempt
-python3 .claude/kb.py failed "topic | what was tried | why it failed | tags"
+python3 .kb/kb.py failed "topic | what was tried | why it failed | tags"
 ```
 
 ---

@@ -36,7 +36,7 @@ When the user asks "any recent errors?" or similar:
 Before answering, suggesting an approach, writing code, or making changes:
 
 ```bash
-python3 .claude/kb.py search <keywords relevant to the task>
+python3 .kb/kb.py search <keywords relevant to the task>
 ```
 
 Read the results and act on them:
@@ -56,12 +56,12 @@ After any non-trivial interaction, save durable knowledge. Ask yourself:
 
 **Save a learned fact (always use quoted string — unquoted | breaks in shell):**
 ```bash
-python3 .claude/kb.py learn "topic | what is true / what works | tags"
+python3 .kb/kb.py learn "topic | what is true / what works | tags"
 ```
 
 **Save a failed attempt:**
 ```bash
-python3 .claude/kb.py failed "topic | what was tried | why it failed | tags"
+python3 .kb/kb.py failed "topic | what was tried | why it failed | tags"
 ```
 
 ### What is worth saving

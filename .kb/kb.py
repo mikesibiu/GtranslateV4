@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Usage:
-  python3 .claude/kb.py search <query>
-  python3 .claude/kb.py learn  <topic> | <content> [| tags]
-  python3 .claude/kb.py failed <topic> | <what was tried> | <why it failed> [| tags]
-  python3 .claude/kb.py list
+  python3 .kb/kb.py search <query>
+  python3 .kb/kb.py learn  <topic> | <content> [| tags]
+  python3 .kb/kb.py failed <topic> | <what was tried> | <why it failed> [| tags]
+  python3 .kb/kb.py list
 """
 import sqlite3, sys, datetime
 from pathlib import Path
