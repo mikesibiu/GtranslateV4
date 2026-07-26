@@ -1808,3 +1808,180 @@ describe('preserveDates', () => {
         expect(result).to.equal('the meeting on 3 septembrie 2025');
     });
 });
+
+// ─── v217: 2026-07-26 deep-dive second-pass fixes ─────────────────────────
+
+describe('applyTermMappings — v217 fixes', () => {
+    const T = (text, src = '') => applyTermMappings(text, src);
+
+    // Homa → Jehovah
+    it('replaces "Homa" with "Jehovah" when source contains "Homa"', () => {
+        expect(T("Homa's thoughts can become our thoughts", 'gândurile lui Homa pot deveni')).to.equal("Jehovah's thoughts can become our thoughts");
+    });
+    it('replaces bare "Homa" in output', () => {
+        expect(T('we thank Homa for his care', 'mulțumim lui Homa')).to.equal('we thank Jehovah for his care');
+    });
+    it('does not touch "Homa" when source does not contain it', () => {
+        expect(T('we thank Homa', 'mulțumim')).to.equal('we thank Homa');
+    });
+
+    // Hopa → Oops catch
+    it('replaces "Oops" with "Jehovah" when source contains "Hopa"', () => {
+        expect(T('How does he offer us comfort Oops', 'Cum ne oferă Hopa mângâiere')).to.equal('How does he offer us comfort Jehovah');
+    });
+
+    // P4: differently → different before nouns
+    it('replaces "differently" with "different" before a noun', () => {
+        expect(T('we have differently situations', '')).to.equal('we have different situations');
+    });
+    it('replaces "differently" before adjective+noun', () => {
+        expect(T('differently biblical characters', '')).to.equal('different biblical characters');
+    });
+    it('replaces "differently" before "ages"', () => {
+        expect(T('friends of differently ages', '')).to.equal('friends of different ages');
+    });
+    it('does NOT replace "differently" before "from"', () => {
+        expect(T('done differently from before', '')).to.equal('done differently from before');
+    });
+    it('does NOT replace "differently" before a past participle', () => {
+        expect(T('done differently situated', '')).to.equal('done differently situated');
+    });
+    it('does NOT replace "differently" before "to"', () => {
+        expect(T('respond differently to stress', '')).to.equal('respond differently to stress');
+    });
+
+    // Scripture citation "N with M" → "N:M"
+    it('converts "Psalm 94 with 19" to "Psalm 94:19" when source has cu pattern', () => {
+        expect(T('Psalm 94 with 19', 'Psalmul 94 cu 19')).to.equal('Psalm 94:19');
+    });
+    it('converts "Galatians 6 with 5" to "Galatians 6:5" when source has cu pattern', () => {
+        expect(T('Galatians 6 with 5', 'Galateni 6 cu 5')).to.equal('Galatians 6:5');
+    });
+    it('converts "Isaiah 41 with 10" to "Isaiah 41:10" when source has cu pattern', () => {
+        expect(T('in Isaiah 41 with 10 we read', 'Isaia 41 cu 10')).to.equal('in Isaiah 41:10 we read');
+    });
+    it('leaves already-formatted citation unchanged', () => {
+        expect(T('Psalm 94:19', 'Psalmul 94 cu 19')).to.equal('Psalm 94:19');
+    });
+    it('does NOT convert "N with M" when source has no "digit cu digit" pattern', () => {
+        expect(T('he divided it into 2 with 3 equal parts', 'l-a împărțit în 2 și 3 egale')).to.equal('he divided it into 2 with 3 equal parts');
+    });
+
+    // "second cold" → "2 Kings"
+    it('replaces "second cold" with "2 Kings"', () => {
+        expect(T('we read the second cold 19:35', '')).to.equal('we read the 2 Kings 19:35');
+    });
+    it('combines "second cold" and citation rules: "second cold 19 with 35"', () => {
+        expect(T('we read the second cold 19 with 35', 'a doua reci 19 cu 35')).to.equal('we read the 2 Kings 19:35');
+    });
+
+    // Verb agreement: Promise/promises
+    it('fixes "Jehovah Promise" to "Jehovah promises"', () => {
+        expect(T('Jehovah Promise us that he cares', '')).to.equal('Jehovah promises us that he cares');
+    });
+    it('fixes "He promise" to "He promises"', () => {
+        expect(T('He promise to continue to sustain us', '')).to.equal('He promises to continue to sustain us');
+    });
+    it('does NOT change "He promised" (already past tense)', () => {
+        expect(T('He promised us', '')).to.equal('He promised us');
+    });
+    it('does NOT change "He promises" (already correct)', () => {
+        expect(T('He promises us', '')).to.equal('He promises us');
+    });
+
+    // Verb agreement: Jehovah support/supports
+    it('fixes "Jehovah support" to "Jehovah supports"', () => {
+        expect(T('Jehovah support us through our friends', '')).to.equal('Jehovah supports us through our friends');
+    });
+    it('does NOT change "Jehovah supported"', () => {
+        expect(T('Jehovah supported us', '')).to.equal('Jehovah supported us');
+    });
+
+    // "who care of us" → "who cares for us"
+    it('fixes "who care of us"', () => {
+        expect(T('We thank Jehovah who care of us', '')).to.equal('We thank Jehovah who cares for us');
+    });
+
+    // Missing possessive: "Jehovah servants"
+    it('fixes "Jehovah servants" to "Jehovah\'s servants"', () => {
+        expect(T("Jehovah servants can feel overwhelmed", '')).to.equal("Jehovah's servants can feel overwhelmed");
+    });
+    it('fixes "Jehovah servant" singular', () => {
+        expect(T("Jehovah servant Hannah", '')).to.equal("Jehovah's servant Hannah");
+    });
+    it('does NOT modify "Jehovah\'s servants" (already correct)', () => {
+        expect(T("Jehovah's servants", '')).to.equal("Jehovah's servants");
+    });
+
+    // "was full with" → "was filled with"
+    it('fixes "was full with bitterness"', () => {
+        expect(T('Hannah was full with bitterness', '')).to.equal('Hannah was filled with bitterness');
+    });
+
+    // "Will We Ever Joy" → "Will We Ever Enjoy"
+    it('fixes "Will We Ever Joy True Justice?"', () => {
+        expect(T('Will We Ever Joy True Justice?', '')).to.equal('Will We Ever Enjoy True Justice?');
+    });
+
+    // "are happen" → "are happening"
+    it('fixes "are happen" to "are happening"', () => {
+        expect(T('How many good things are happen in our life', '')).to.equal('How many good things are happening in our life');
+    });
+
+    // Mid-sentence "Decision" → "decision"
+    it('lowercases "the Decision" mid-sentence', () => {
+        expect(T('the Decision to pursue additional training', '')).to.equal('the decision to pursue additional training');
+    });
+    it('lowercases "a Decision"', () => {
+        expect(T('making a Decision is personal', '')).to.equal('making a decision is personal');
+    });
+    it('does NOT lowercase "The Decision" at sentence start (capital The not matched)', () => {
+        // The regex pattern only matches lowercase article forms: the|a|this|that|an
+        // "The Decision" starts with capital "The" which is not in the alternation (no /i flag)
+        expect(T('The Decision was made by the elders', '')).to.equal('The Decision was made by the elders');
+    });
+    it('does NOT change modal + Decision (handled by earlier rule)', () => {
+        // "will Decision" → "will decide" (existing rule on line 141)
+        expect(T('they will Decision', '')).to.equal('they will decide');
+    });
+
+    // P6: Jesus learned → taught
+    it('fixes "Jesus also learned his listeners"', () => {
+        expect(T('Jesus also learned his listeners not to worry', '')).to.equal('Jesus also taught his listeners not to worry');
+    });
+    it('fixes "Jesus learned his listeners" without "also"', () => {
+        expect(T('Jesus learned his listeners in Galilee', '')).to.equal('Jesus taught his listeners in Galilee');
+    });
+
+    // "the verse say" → "the verse says"
+    it('fixes "as the verse say"', () => {
+        expect(T('as the verse say', '')).to.equal('as the verse says');
+    });
+
+    // "and start to pray" → "and started to pray"
+    it('fixes "and start to pray" in past narrative', () => {
+        expect(T('Hannah was full with bitterness and started to pray', '')).to.equal('Hannah was filled with bitterness and started to pray');
+    });
+    it('fixes "and start to pray" → "and started to pray"', () => {
+        expect(T('she wept and start to pray', '')).to.equal('she wept and started to pray');
+    });
+
+    // instruire: or skating
+    it('fixes "additional training or skating" when source has instruire', () => {
+        expect(T('additional training or skating', 'instruire suplimentară')).to.equal('additional training');
+    });
+    it('fixes "additional education or skating" when source has instruire', () => {
+        expect(T('additional education or skating', 'instruire suplimentară')).to.equal('additional training');
+    });
+    it('does NOT change "or skating" without instruire in source', () => {
+        expect(T('additional training or skating', '')).to.equal('additional training or skating');
+    });
+
+    // instruire: inspired by a higher power
+    it('fixes "inspired by a higher power" when source has instruire', () => {
+        expect(T('whether they might be inspired by a higher power', 'instruire superioară')).to.equal('whether they might be higher education');
+    });
+    it('does NOT change "inspired by a higher power" without instruire in source', () => {
+        expect(T('inspired by a higher power', '')).to.equal('inspired by a higher power');
+    });
+});

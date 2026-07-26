@@ -63,8 +63,19 @@ function applyTermMappings(text, sourceText = '') {
     // CASE-SENSITIVE GATE — intentional: lowercase "hopa" is the Romanian exclamation "whoops"
     // and must NOT be corrected. Do not add /i to either regex.
     // Confirmed failure: 2026-04-30 closing prayer — "Hopa să fi alături de noi" → "Hopa, be with us."
+    // MT sometimes translates "Hopa" as "Oops" — catch both outputs.
     if (/\bHopa\b/.test(sourceText)) {
         result = result.replace(/\bHopa\b/g, 'Jehovah');
+        result = result.replace(/\bOops\b/g, 'Jehovah');
+    }
+
+    // Source-aware fix: "Homa" (STT mishear of "Iehova" — same /H/ onset family as Hopa/Popa/Boga).
+    // CASE-SENSITIVE GATE — intentional: lowercase "homa" excluded for safety.
+    // Do not add /i to either regex. Possessive form must run before bare form.
+    // Confirmed: 2026-07-26 — "gândurile lui Homa pot deveni" → "Homa's thoughts can become"
+    if (/\bHoma\b/.test(sourceText)) {
+        result = result.replace(/\bHoma's\b/g, "Jehovah's");
+        result = result.replace(/\bHoma\b/g, 'Jehovah');
     }
 
     // Source-aware fix: "congregație" → "congregation" (not "church").
@@ -714,6 +725,10 @@ function applyTermMappings(text, sourceText = '') {
     if (/instruir/i.test(sourceNorm)) {
         result = result.replace(/\badditional inspiration\b/gi, 'additional training');
         result = result.replace(/\bit inspires you\b/gi, 'it trains you');
+        // STT garble: "instruire" → "distruge suplimentară" → "additional education or skating"
+        result = result.replace(/\badditional (?:education|training) or skating\b/gi, 'additional training');
+        // STT garble: "instruire superioară" → "o inspire superioară" → MT: "inspired by a higher power"
+        result = result.replace(/\binspired by a higher power\b/gi, 'higher education');
     }
 
     // "Jehovah 's" → "Jehovah's" (spacing artifact from MT tokenisation)
@@ -767,6 +782,64 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bPlease don't\.\b/gi, 'Go ahead, please.');
         result = result.replace(/\bPlease don't\b/gi, 'Go ahead, please');
     }
+
+    // 2026-07-26 deep-dive second-pass fixes (v217):
+
+    // P4: "differently" before noun → "different" (Romanian adj "diferit" mismapped to adverb by MT)
+    // Excludes prepositions and past participles (-ed forms) to avoid false positives.
+    result = result.replace(/\bdifferently\s+(?!from\b|than\b|to\b|by\b|in\b|of\b|with\b|on\b|at\b|for\b|about\b|\w*ed\b)/gi, 'different ');
+
+    // Scripture citation: "N with M" → "N:M" — MT translates Romanian chapter-verse separator
+    // "cu" as "with". Gate: source must contain "digit cu digit" (the Romanian citation pattern).
+    // Confirmed source patterns: "Psalm 94 cu 19", "Galateni 6 cu 5", "Isaia 41 cu 10".
+    if (/\b\d+\s+cu\s+\d+\b/.test(sourceText)) {
+        result = result.replace(/\b(\d+)\s+with\s+(\d+)\b/g, '$1:$2');
+    }
+
+    // "second cold" — STT mishears "regi" (Kings) as "reci" (cold) → "second cold 19 with 35"
+    // "second cold" is never valid English; safe to fix without source gate.
+    result = result.replace(/\bsecond cold\b/gi, '2 Kings');
+
+    // Verb agreement: subject + bare "Promise" → "promises" (missing 3rd-person -s)
+    // Confirmed: "Jehovah Promise us", "He promise us", "He promise to continue" (3 instances)
+    result = result.replace(/\b(Jehovah|He|She|God|Jesus)\s+[Pp]romise\b(?![sd]\b)/g, '$1 promises');
+
+    // Verb agreement: "Jehovah support" → "Jehovah supports"
+    result = result.replace(/\bJehovah\s+support\b(?!s\b|ed\b|ing\b)/g, 'Jehovah supports');
+
+    // "who care of us" → "who cares for us" ("care grijă de noi" → wrong preposition + missing -s)
+    result = result.replace(/\bwho care of us\b/gi, 'who cares for us');
+
+    // Missing possessive: "Jehovah servants/servant" (MT drops apostrophe-s)
+    // Safe: "Jehovah's servants" won't match \bJehovah\s+ (no whitespace between Jehovah and ')
+    result = result.replace(/\bJehovah\s+(servants?)\b/g, "Jehovah's $1");
+
+    // "was full with" → "was filled with" ("plină de" = filled with, not full with)
+    result = result.replace(/\bwas full with\b/gi, 'was filled with');
+
+    // P7: "Joy" as verb — "se vor bucura vreodată de adevărata dreptate" (will they ever enjoy)
+    // MT strips prefix → "joy" (noun) instead of "enjoy" (verb). Confirmed: next-week talk title.
+    // Case-preserving: title-case input ("Will We Ever Joy") keeps title case in output.
+    result = result.replace(/\bwill we ever joy\b/gi, (m) =>
+        m[0] === 'W' ? 'Will We Ever Enjoy' : 'will we ever enjoy'
+    );
+
+    // "are happen" → "are happening" (same pattern as "what is happen" fixed in v215)
+    result = result.replace(/\bare happen\b/gi, 'are happening');
+
+    // Mid-sentence "Decision" → "decision" (MT over-capitalises "decizia" with definite article)
+    // Only fires when preceded by article/demonstrative — never at sentence start.
+    result = result.replace(/\b(the|a|this|that|an)\s+Decision\b/g, '$1 decision');
+
+    // P6: "Jesus learned his listeners" → "taught" ("a învăța pe cineva" = to teach someone)
+    // Covers "Jesus also learned" variant.
+    result = result.replace(/\b(Jesus(?:\s+also)?)\s+learned\s+(his\s+listeners?)\b/gi, '$1 taught $2');
+
+    // "the verse say" → "the verse says" (3rd-person -s missing, same pattern as "the Bible say")
+    result = result.replace(/\bthe verse say\b/gi, 'the verse says');
+
+    // "and start to pray" → "and started to pray" in past narrative ("a început să se roage")
+    result = result.replace(/\band start to pray\b/gi, 'and started to pray');
 
     return result;
 }
