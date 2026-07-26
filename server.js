@@ -332,9 +332,41 @@ app.get('/login', (req, res) => {
     res.sendFile(path.join(__dirname, 'login.html'));
 });
 
+// Per-IP login rate limiter: max 10 attempts/min. APP_PASSWORD is the only gate
+// on a paid API surface, so throttle brute-force attempts. Map is opportunistically
+// pruned to bound memory under distributed attempts.
+const _loginAttempts = new Map(); // ip -> [timestamps within the 60s window]
+function _loginRateOk(ip) {
+    const now = Date.now();
+    const cutoff = now - 60000;
+    if (_loginAttempts.size > 5000) {
+        for (const [k, times] of _loginAttempts) {
+            const kept = times.filter(t => t >= cutoff);
+            if (kept.length) _loginAttempts.set(k, kept); else _loginAttempts.delete(k);
+        }
+    }
+    const arr = (_loginAttempts.get(ip) || []).filter(t => t >= cutoff);
+    if (arr.length >= 10) { _loginAttempts.set(ip, arr); return false; }
+    arr.push(now);
+    _loginAttempts.set(ip, arr);
+    return true;
+}
+
+// Constant-time password comparison. Hashing both sides to a fixed 32 bytes keeps
+// timingSafeEqual's inputs equal-length and avoids leaking the password length.
+function _passwordMatches(provided, expected) {
+    if (!expected) return false;
+    const a = crypto.createHash('sha256').update(String(provided)).digest();
+    const b = crypto.createHash('sha256').update(String(expected)).digest();
+    return crypto.timingSafeEqual(a, b);
+}
+
 app.post('/login', express.urlencoded({ extended: false }), (req, res) => {
+    if (!_loginRateOk(req.ip)) {
+        return res.redirect('/login?error=1');
+    }
     const password = (req.body && req.body.password) || '';
-    if (APP_PASSWORD && password === APP_PASSWORD) {
+    if (APP_PASSWORD && _passwordMatches(password, APP_PASSWORD)) {
         req.session.authenticated = true;
         return res.redirect('/');
     }
