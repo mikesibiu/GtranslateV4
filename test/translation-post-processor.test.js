@@ -649,6 +649,15 @@ describe('applyTermMappings', () => {
                 'slujește fidel'
             )).to.equal('serve faithfully');
         });
+
+        it('only converts the adjectival "faithfully" governing "slave", not an adverb elsewhere', () => {
+            // Regression: an unrelated adverbial "faithfully" earlier in a longer
+            // utterance must survive even when "slave" appears later.
+            expect(applyTermMappings(
+                'serving faithfully, we imitate the faithfully and discreet slave',
+                'sclavul fidel'
+            )).to.equal('serving faithfully, we imitate the faithful and discreet slave');
+        });
     });
 
     describe('source-aware: rugăm → pray (not Please)', () => {
@@ -1770,6 +1779,18 @@ describe('preserveSourceNumbers', () => {
     it('preserves year numbers (non-thousands)', () => {
         const result = preserveSourceNumbers('în 2024', 'in 2025');
         expect(result).to.equal('in 2024');
+    });
+
+    it('restores numbers positionally when a value repeats in the translation', () => {
+        // Regression: source [3,5] vs translation [3,3]. The 2nd source number (5)
+        // must land on the 2nd translated number, not clobber the first "3".
+        expect(preserveSourceNumbers('3 versete și 5 capitole', '3 verses and 3 chapters'))
+            .to.equal('3 verses and 5 chapters');
+    });
+
+    it('restores two distinct numbers in order', () => {
+        expect(preserveSourceNumbers('psalm 23 și 24', 'psalm 25 and 26'))
+            .to.equal('psalm 23 and 24');
     });
 });
 

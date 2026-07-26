@@ -300,8 +300,11 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bcautious\b/gi, 'discreet');
         result = result.replace(/\bcautiously\b/gi, 'discreet');
     }
-    if (/\bfidel\b/i.test(sourceText) && /\bslave\b/i.test(result)) {
-        result = result.replace(/\bfaithfully\b/gi, 'faithful');
+    if (/\bfidel\b/i.test(sourceText)) {
+        // Only the adjectival "faithfully" that governs "slave" (the "faithful and
+        // discreet slave" phrase) — never a standalone adverb elsewhere in a longer
+        // utterance. Lookahead allows an optional "and <word>" connector.
+        result = result.replace(/\bfaithfully\b(?=\s+(?:and\s+\w+\s+)?slave\b)/gi, 'faithful');
     }
 
     // "rugăm" (we pray) → Google Translate sometimes renders as "Please" (confuses with "vă rugăm" = please)
@@ -928,12 +931,15 @@ function preserveSourceNumbers(sourceText, translatedText) {
     const translatedNumbers = translatedText.match(numberRegex) || [];
 
     if (translatedNumbers.length === sourceNumbers.length) {
-        sourceNumbers.forEach((srcNum, idx) => {
-            if (isRomanianThousands(srcNum)) return;
-            const targetNum = translatedNumbers[idx];
-            if (targetNum) {
-                result = result.replace(targetNum, srcNum);
-            }
+        // Positional restore: rewrite the i-th number in the translation to the
+        // i-th source number. Using a replace-callback walks matches in order so
+        // repeated values (e.g. "3 ... 3") map to the correct position — a plain
+        // string .replace() would always hit the first occurrence and corrupt it.
+        let i = 0;
+        result = result.replace(numberRegex, (match) => {
+            const srcNum = sourceNumbers[i++];
+            if (!srcNum || isRomanianThousands(srcNum)) return match;
+            return srcNum;
         });
         return result;
     }
@@ -947,7 +953,9 @@ function preserveSourceNumbers(sourceText, translatedText) {
             const candidate = m[0];
             const candidateDigits = candidate.replace(/[\s.,]/g, '');
             if (candidateDigits === digits) {
-                result = result.replace(candidate, srcNum);
+                // Splice at the matched position rather than replacing the first
+                // occurrence of the candidate substring, which may appear earlier.
+                result = result.slice(0, m.index) + srcNum + result.slice(m.index + candidate.length);
                 break;
             }
         }
