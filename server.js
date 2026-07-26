@@ -82,7 +82,14 @@ const logger = winston.createLogger({
     ),
     transports: [
         new winston.transports.Console(),
-        new winston.transports.File({ filename: LOG_FILE })
+        // Rotate to prevent unbounded disk growth on long-running Koyeb instances.
+        // 10 MB per file, keep 5 files (~50 MB ceiling), oldest overwritten.
+        new winston.transports.File({
+            filename: LOG_FILE,
+            maxsize: 10 * 1024 * 1024,
+            maxFiles: 5,
+            tailable: true
+        })
     ]
 });
 
@@ -275,7 +282,6 @@ app.use((req, res, next) => {
 const _allowedOriginsSet = new Set([
     'http://localhost:3003',
     'http://127.0.0.1:3003',
-    'https://gtranslate-v4-96dfeefd9842.herokuapp.com',
     'https://gtranslate.farace.net',
     'https://translate.farace.net',
     'https://gtranslate-mysysadmin-aa6fe3a2.koyeb.app'
@@ -1533,18 +1539,21 @@ io.on('connection', (socket) => {
                 })
                 .on('data', async (data) => {
                     consecutiveAudioTimeouts = 0; // Real data received — silence storm ended
-                    logger.info('📥 GOOGLE CLOUD DATA EVENT!', {
-                        clientId,
-                        hasResults: !!data.results,
-                        resultsLength: data.results?.length,
-                        rawData: JSON.stringify(data).substring(0, 200)
-                    });
 
                     const result = data.results[0];
                     if (!result) return;
 
                     const alternative = result.alternatives[0];
                     const transcript = alternative.transcript || '';
+
+                    // Hot path: fires several times/sec during speech. Keep at debug and
+                    // avoid JSON.stringify of the whole result object (CPU + log-size cost).
+                    logger.debug('📥 GOOGLE CLOUD DATA EVENT', {
+                        clientId,
+                        resultsLength: data.results?.length,
+                        isFinal: result.isFinal,
+                        transcript: transcript.substring(0, 200)
+                    });
                     const isFinal = result.isFinal || false;
 
                     // Skip empty transcripts but don't block the flow
@@ -2101,28 +2110,53 @@ server.listen(PORT, async () => {
 });
 
 // ===== GRACEFUL SHUTDOWN =====
-process.on('SIGINT', async () => {
-    logger.info('Shutting down gracefully...');
-    await billingDb.closeDatabase(logger);
-    server.close(() => {
-        logger.info('Server closed');
-        process.exit(0);
-    });
-});
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+    if (shuttingDown) return; // ignore repeated signals
+    shuttingDown = true;
+    logger.info(`Shutting down gracefully (${signal})...`);
 
-process.on('SIGTERM', async () => {
-    logger.info('Shutting down gracefully (SIGTERM)...');
-    await billingDb.closeDatabase(logger);
+    // Hard deadline: if server.close() never fires its callback (e.g. a hung
+    // Socket.IO connection keeps the server open), exit anyway so the platform
+    // doesn't have to SIGKILL us after its grace window.
+    const forceExit = setTimeout(() => {
+        logger.warn('Graceful shutdown timed out — forcing exit');
+        process.exit(0);
+    }, 10000);
+    forceExit.unref();
+
+    try {
+        await billingDb.closeDatabase(logger);
+    } catch (err) {
+        logger.error('Error closing database during shutdown', { error: err.message });
+    }
     server.close(() => {
         logger.info('Server closed');
+        clearTimeout(forceExit);
         process.exit(0);
     });
-});
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 // Safety net: log unhandled rejections without crashing.
 process.on('unhandledRejection', (reason) => {
     logger.error('Unhandled promise rejection (non-fatal):', {
         reason: reason instanceof Error ? reason.message : String(reason),
         stack: reason instanceof Error ? reason.stack : undefined
+    });
+});
+
+// Safety net: log uncaught exceptions without crashing the process.
+// Deliberate availability-over-strict-correctness tradeoff for LIVE meetings:
+// a deferred stream error (see the v190 Duplexify fix) or similar late throw
+// should not take the whole translation service down mid-meeting. Node's default
+// would exit; we log and keep serving. Truly fatal conditions (OOM) still exit
+// on their own and Koyeb restarts the instance.
+process.on('uncaughtException', (err) => {
+    logger.error('Uncaught exception (non-fatal — kept alive for live meeting):', {
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined
     });
 });
