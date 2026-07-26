@@ -1613,6 +1613,36 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('past-narrative "and say" → "and said" (Romanian historical present)', () => {
+        it('fixes regular past "-ed and say"', () => {
+            expect(applyTermMappings('my father kissed me and say "it will pass"', '')).to.equal('my father kissed me and said "it will pass"');
+        });
+        it('fixes irregular past "took and say"', () => {
+            expect(applyTermMappings('he took me in his arms and say let it go', '')).to.equal('he took me in his arms and said let it go');
+        });
+        it('does NOT alter "come and say" (non-past modal)', () => {
+            expect(applyTermMappings('you should come and say hello', '')).to.equal('you should come and say hello');
+        });
+        it('does NOT alter "-ed to V and say" (infinitive chain)', () => {
+            expect(applyTermMappings('he loved to come and say a few words', '')).to.equal('he loved to come and say a few words');
+        });
+        it('does NOT alter "asked person to V and say" (would invert semantics)', () => {
+            expect(applyTermMappings('he asked the brother to stand and say something', '')).to.equal('he asked the brother to stand and say something');
+        });
+    });
+
+    describe('"everything/something that happen" → "happens" (singular subject agreement)', () => {
+        it('fixes "everything that happen"', () => {
+            expect(applyTermMappings('everything that happen in your life has to do with me', '')).to.equal('everything that happens in your life has to do with me');
+        });
+        it('fixes "something that happen"', () => {
+            expect(applyTermMappings('something that happen to us', '')).to.equal('something that happens to us');
+        });
+        it('does NOT alter "things that happen" (plural subject)', () => {
+            expect(applyTermMappings('things that happen in life', '')).to.equal('things that happen in life');
+        });
+    });
+
     describe('"Na te rog" → "Please don\'t" meaning inversion fix', () => {
         it('fixes "Please don\'t" when source has na as standalone word', () => {
             expect(applyTermMappings("Please don't.", 'Na te rog')).to.equal('Go ahead, please.');

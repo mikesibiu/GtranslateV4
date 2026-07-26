@@ -752,6 +752,15 @@ function applyTermMappings(text, sourceText = '') {
     result = result.replace(/\bwhat is happen\b/gi, 'what is happening');
     result = result.replace(/\bwhat was happen\b/gi, 'what was happening');
 
+    // Romanian historical present "spune" in past narrative → MT outputs "say" after past-tense verb
+    // Allow up to 3 intervening words between past verb and "and say"
+    // Negative lookahead (?!to\b) prevents "loved to come and say" / "asked him to stand and say"
+    result = result.replace(/\b(\w+ed(?:\s+(?!to\b)\w+){0,3})\s+and\s+say\b/gi, '$1 and said');
+    result = result.replace(/\b((?:took|came|gave|held|stood|sat|ran|went|brought|put|told|asked|called|made|kept|left|met)(?:\s+(?!to\b)\w+){0,5})\s+and\s+say\b/gi, '$1 and said');
+
+    // "everything/something/anything that happen" → singular subject requires "happens"
+    result = result.replace(/\b(everything|something|anything|nothing)\s+that\s+happen\b/gi, '$1 that happens');
+
     // "Na te rog" → "Please don't." — "Na" = "here you go / go ahead"; MT reads "Na" as negation
     // Gate: source must contain "na" as standalone word (imperative particle, not the syllable)
     if (/\bna\b/i.test(sourceText)) {
