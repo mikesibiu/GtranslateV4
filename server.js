@@ -1015,6 +1015,28 @@ io.on('connection', (socket) => {
         'să imităm',
         // "neclintiți" (steadfast/unwavering) → STT garbles to "neplinind" (unfulfilled)
         'neclintiți',
+        // 2026-07-26 Sunday meeting fixes
+        // "instruire suplimentară" (additional training/education) → STT hears "insulina" → "insulin"
+        // or "Insula iubirii" (Love Island TV show) — multi-word phrases required per hint policy
+        'instruire suplimentară',
+        'instruire superioară',
+        'studii superioare',
+        'cursuri de formare profesională',
+        'instruire vocațională',
+        // "îngrijorări" (worries/anxieties) → STT hears "înjurări" (swearing/profanity)
+        'îngrijorări',
+        'îngrijorare',
+        // "pacea lui Dumnezeu" (peace of God, Phil 4:7) → STT hears "fața lui Dumnezeu" (face of God)
+        'pacea lui Dumnezeu',
+        // "a doua Regi" (2 Kings) → STT hears "a doua reci" (second cold)
+        'a doua Regi',
+        // "Regatul" (the Kingdom) → STT drops capital/context; multi-word form safer
+        'Regatul lui Dumnezeu',
+        'Regatul cerurilor',
+        // "pionierat" (pioneering/full-time ministry) → STT garbles to unrelated words
+        'pionierat',
+        'pionieră',
+        'serviciul cu timp integral',
     ];
 
     // Helper function to update last activity time

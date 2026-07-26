@@ -1490,6 +1490,137 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings('we will be able to joy the spiritual Paradise', '')).to.equal('we will be able to enjoy the spiritual Paradise');
         });
     });
+
+    // --- 2026-07-26 Sunday meeting deep-dive fixes ---
+
+    describe('pray→Please fix (rugăm/roagă parsed as politeness marker by MT)', () => {
+        it('fixes "let\'s Please" when source has rugăm', () => {
+            expect(applyTermMappings("let's Please for Jehovah's guidance", 'să ne rugăm pentru îndrumarea lui Iehova')).to.equal("let us pray for Jehovah's guidance");
+        });
+        it('fixes "we Please" when source has rugăm', () => {
+            expect(applyTermMappings('we Please with thankful hearts', 'ne rugăm cu inimi recunoscătoare')).to.equal('we pray with thankful hearts');
+        });
+        it('fixes "should Please to God"', () => {
+            expect(applyTermMappings('we should Please to God about this decision', 'ar trebui să ne rugăm lui Dumnezeu')).to.equal('we should pray to God about this decision');
+        });
+        it('fixes "Please to God"', () => {
+            expect(applyTermMappings('Please to God about this decision', 'Roagă-te lui Dumnezeu pentru această decizie')).to.equal('pray to God about this decision');
+        });
+        it('does NOT fire without rug in source', () => {
+            expect(applyTermMappings("let's Please consider this point", 'să luăm în considerare acest punct')).to.equal("let's Please consider this point");
+        });
+    });
+
+    describe('Iehova mishearing fixes (Moldova, export, sheep)', () => {
+        it('fixes "trust in Moldova" when source has Iehova', () => {
+            expect(applyTermMappings('trust in Moldova the creator', 'să avem încredere în Iehova creatorul')).to.equal('trust in Jehovah the creator');
+        });
+        it('fixes "worship of export" when source has Iehova', () => {
+            expect(applyTermMappings('worship of export must be paramount', 'închinarea la Iehova trebuie să fie primordială')).to.equal('worship of Jehovah must be paramount');
+        });
+        it('fixes "ask a sheep for support" when source has Iehova', () => {
+            expect(applyTermMappings('ask a sheep for support', 'cerem lui Iehova sprijin')).to.equal('ask Jehovah for support');
+        });
+        it('does NOT fire without Iehova in source', () => {
+            expect(applyTermMappings('trust in Moldova', 'avem încredere în Moldova')).to.equal('trust in Moldova');
+        });
+    });
+
+    describe('"additional insulin" → "additional training" (instruire garbled by STT)', () => {
+        it('fixes "additional insulin"', () => {
+            expect(applyTermMappings('decide whether to take additional insulin', '')).to.equal('decide whether to take additional training');
+        });
+        it('fixes "without higher insulin"', () => {
+            expect(applyTermMappings('find a job without a higher insulin', '')).to.equal('find a job without higher education');
+        });
+    });
+
+    describe('"Love Island" → "additional training" (Insula iubirii STT garble)', () => {
+        it('fixes "Love Island" when source has Insula iubirii', () => {
+            expect(applyTermMappings('how Christians view Love Island', 'cum trebuie creștinii să privească Insula iubirii')).to.equal('how Christians view additional training');
+        });
+        it('does NOT fix "Love Island" without Insula iubirii in source', () => {
+            expect(applyTermMappings('how Christians view Love Island', 'un program TV')).to.equal('how Christians view Love Island');
+        });
+    });
+
+    describe('"additional inspiration" → "additional training" (source-gated on instruire)', () => {
+        it('fixes "additional inspiration" when source has instruire', () => {
+            expect(applyTermMappings('decide whether to take additional inspiration', 'să urmeze sau nu o instruire suplimentară')).to.equal('decide whether to take additional training');
+        });
+        it('does NOT fix "additional inspiration" without instruire in source', () => {
+            expect(applyTermMappings('the Bible provides additional inspiration', 'Biblia oferă inspirație suplimentară')).to.equal('the Bible provides additional inspiration');
+        });
+    });
+
+    describe('"Jehovah \'s" → "Jehovah\'s" (tokenisation spacing artifact)', () => {
+        it('fixes spacing in possessive', () => {
+            expect(applyTermMappings("Jehovah 's promises are sure", '')).to.equal("Jehovah's promises are sure");
+        });
+        it('does not alter "Jehovah" without possessive', () => {
+            expect(applyTermMappings('Jehovah is great', '')).to.equal('Jehovah is great');
+        });
+    });
+
+    describe('double article removal ("his the word", "our the words")', () => {
+        it('fixes "his the word"', () => {
+            expect(applyTermMappings('meditate on his the word daily', '')).to.equal('meditate on his word daily');
+        });
+        it('fixes "our the words"', () => {
+            expect(applyTermMappings('may our the words be acceptable', '')).to.equal('may our words be acceptable');
+        });
+    });
+
+    describe('"I pleasant" → "I liked" (mi-a plăcut MT failure)', () => {
+        it('fixes "I pleasant"', () => {
+            expect(applyTermMappings('I pleasant the idea that one of the sisters said', '')).to.equal('I liked the idea that one of the sisters said');
+        });
+        it('fixes "me and I pleasant"', () => {
+            expect(applyTermMappings('me and I pleasant the contrast between', '')).to.equal('and I liked the contrast between');
+        });
+    });
+
+    describe('"a work" → "a job" (loc de muncă, source-gated)', () => {
+        it('fixes "a work" when source has loc de muncă', () => {
+            expect(applyTermMappings('start looking for a work after school', 'să caute un loc de muncă după școală')).to.equal('start looking for a job after school');
+        });
+        it('fixes "how many work" when source has loc de muncă', () => {
+            expect(applyTermMappings('to see how many work are available', 'câte locuri de muncă sunt disponibile')).to.equal('to see how many jobs are available');
+        });
+        it('does NOT fix "a work" without loc de muncă in source (e.g. a work of art)', () => {
+            expect(applyTermMappings('this is a work of art', 'aceasta este o operă de artă')).to.equal('this is a work of art');
+        });
+    });
+
+    describe('"could not joy" / "are joy serving" (bucura rendered as joy)', () => {
+        it('fixes "could not joy"', () => {
+            expect(applyTermMappings('she could not joy as much as the first sister', '')).to.equal('she could not rejoice as much as the first sister');
+        });
+        it('fixes "who are joy serving"', () => {
+            expect(applyTermMappings('brothers who are joy serving Jehovah', '')).to.equal('brothers who joyfully serve Jehovah');
+        });
+    });
+
+    describe('"ask Jehovah the help" → "ask Jehovah for help"', () => {
+        it('fixes stray article before help', () => {
+            expect(applyTermMappings('ask Jehovah the help in prayer', '')).to.equal('ask Jehovah for help in prayer');
+        });
+    });
+
+    describe('"a young to" → "a young person to" (persoană dropped by MT)', () => {
+        it('fixes "a young to"', () => {
+            expect(applyTermMappings('to help a young to make a wise decision', '')).to.equal('to help a young person to make a wise decision');
+        });
+    });
+
+    describe('"Na te rog" → "Please don\'t" meaning inversion fix', () => {
+        it('fixes "Please don\'t" when source has na as standalone word', () => {
+            expect(applyTermMappings("Please don't.", 'Na te rog')).to.equal('Go ahead, please.');
+        });
+        it('does NOT fix "Please don\'t" without na in source', () => {
+            expect(applyTermMappings("Please don't do that", 'Nu face asta')).to.equal("Please don't do that");
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

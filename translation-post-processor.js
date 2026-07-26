@@ -679,6 +679,86 @@ function applyTermMappings(text, sourceText = '') {
     // "Jehovah is my the help" → stray article inserted between possessive and noun
     result = result.replace(/\bmy the help\b/gi, 'my help');
 
+    // 2026-07-26 Sunday meeting deep-dive fixes:
+
+    // "rugăm/roagă/rugăciune" → Google Translate reads politeness marker "rog" → outputs "Please"
+    // Gate: source must contain "rug" (covers rugăm, roagă, rugăciune, rugați)
+    // Gate covers rugăm/rugăciune (rug) AND roagă/Roagă-te (roag) forms
+    if (/rug|roag/i.test(sourceNorm)) {
+        result = result.replace(/let's\s+Please\b/gi, 'let us pray');
+        result = result.replace(/\blet's pray\b/gi, 'let us pray'); // fallback if two-step fires
+        result = result.replace(/\bshould Please to God\b/gi, 'should pray to God');
+        result = result.replace(/\bwe Please\b/gi, 'we pray');
+        result = result.replace(/\bPlease to God\b/gi, 'pray to God');
+    }
+
+    // Iehova mishearings → garbled English proper nouns
+    // Gate: source must contain Iehova (or close variant)
+    if (/iehov|ihova/i.test(sourceNorm)) {
+        result = result.replace(/\btrust in Moldova\b/gi, 'trust in Jehovah');
+        result = result.replace(/\bworship of export\b/gi, 'worship of Jehovah');
+        result = result.replace(/\bask a sheep for\b/gi, 'ask Jehovah for');
+        result = result.replace(/\bhova (ever|always)\b/gi, 'Jehovah $1');
+    }
+
+    // "instruire (suplimentară)" garbled by STT into medical/unrelated words
+    // "additional insulin" / "without higher insulin" — never valid; no gate needed
+    result = result.replace(/\badditional insulin\b/gi, 'additional training');
+    result = result.replace(/\bwithout (?:a )?higher insulin\b/gi, 'without higher education');
+    // "Love Island" ← STT transcribed "instruirea" as "Insula iubirii" (Romanian TV show name)
+    // "Insula iubirii" = STT garble of "instruirea" (Romanian TV show name for Love Island)
+    if (/insula iubirii/i.test(sourceText)) {
+        result = result.replace(/\bLove Island\b/gi, 'additional training');
+    }
+    // "additional inspiration" in training context (gate: instruire in source)
+    if (/instruir/i.test(sourceNorm)) {
+        result = result.replace(/\badditional inspiration\b/gi, 'additional training');
+        result = result.replace(/\bit inspires you\b/gi, 'it trains you');
+    }
+
+    // "Jehovah 's" → "Jehovah's" (spacing artifact from MT tokenisation)
+    result = result.replace(/\bJehovah 's\b/g, "Jehovah's");
+
+    // Double article artifacts: "his the word", "our the words"
+    result = result.replace(/\bhis the (\w)/g, 'his $1');
+    result = result.replace(/\bour the (\w)/g, 'our $1');
+
+    // "mi-a plăcut" → MT outputs "I pleasant" instead of "I liked"
+    // More-specific rule first to prevent "I pleasant" firing inside "me and I pleasant"
+    result = result.replace(/\bme and I pleasant\b/gi, 'and I liked');
+    result = result.replace(/\bI pleasant\b/gi, 'I liked');
+
+    // "loc de muncă" (job/workplace) → MT outputs "work" (gate on source)
+    // Gate on "munc" covers both "loc de muncă" (singular) and "locuri de muncă" (plural)
+    if (/munc/i.test(sourceNorm)) {
+        result = result.replace(/\ba work\b/g, 'a job');
+        result = result.replace(/\bhow many work\b/gi, 'how many jobs');
+    }
+
+    // "nu putea bucura" / "se bucure" rendered as "joy" not "rejoice/enjoy"
+    result = result.replace(/\bcould not joy\b/gi, 'could not rejoice');
+    result = result.replace(/\bwho are joy serving\b/gi, 'who joyfully serve');
+    result = result.replace(/\bwere joy\b/gi, 'were joyful');
+
+    // "ask Jehovah the help" → stray article
+    result = result.replace(/\bask Jehovah the help\b/gi, 'ask Jehovah for help');
+
+    // "a young to" → missing "person" (MT drops "persoană" in youth-education context)
+    result = result.replace(/\ba young to\b/gi, 'a young person to');
+    result = result.replace(/\bhelp young make\b/gi, 'help a young person make');
+    result = result.replace(/\bon young to\b/gi, 'on a young person to');
+
+    // "ce se întâmplă" (what is happening) → MT drops -ing suffix
+    result = result.replace(/\bwhat is happen\b/gi, 'what is happening');
+    result = result.replace(/\bwhat was happen\b/gi, 'what was happening');
+
+    // "Na te rog" → "Please don't." — "Na" = "here you go / go ahead"; MT reads "Na" as negation
+    // Gate: source must contain "na" as standalone word (imperative particle, not the syllable)
+    if (/\bna\b/i.test(sourceText)) {
+        result = result.replace(/\bPlease don't\.\b/gi, 'Go ahead, please.');
+        result = result.replace(/\bPlease don't\b/gi, 'Go ahead, please');
+    }
+
     return result;
 }
 
