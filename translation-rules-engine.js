@@ -363,7 +363,8 @@ class TranslationRulesEngine {
         //   ("pian", "laptop", "torului") rather than meaningful speech. Short legitimate responses
         //   like "Da" / "Nu" / "Amin" don't need translation in a meeting context.
         // - interim: full per-mode word threshold (modeConfig.minWords) to avoid noise/filler bursts.
-        const interimMinWords = this.modeConfig.minWords || this.MIN_WORDS_FOR_TRANSLATION;
+        // ?? not || so a future mode that intentionally sets minWords: 0 isn't overridden.
+        const interimMinWords = this.modeConfig.minWords ?? this.MIN_WORDS_FOR_TRANSLATION;
         const minWords = isContinuationTail ? 2 : (isFinal ? 2 : interimMinWords);
         if (words.length < minWords) {
             return {

@@ -944,18 +944,26 @@ function preserveSourceNumbers(sourceText, translatedText) {
         return result;
     }
 
+    // Track how many occurrences of each digit-string we've already placed, so two
+    // source numbers with identical digits map to distinct occurrences rather than
+    // both clobbering the first one. (Spliced-in srcNum keeps the same digit-string,
+    // so skipping already-consumed occurrences advances to the next one.)
+    const consumedByDigits = new Map();
     sourceNumbers.forEach((srcNum) => {
         if (isRomanianThousands(srcNum)) return;
         const digits = srcNum.replace(/[.,]/g, '');
         const splitPattern = new RegExp(`(\\d+[\\s.,]+){0,2}\\d+`, 'g');
         const matches = [...result.matchAll(splitPattern)];
+        let skip = consumedByDigits.get(digits) || 0;
         for (const m of matches) {
             const candidate = m[0];
             const candidateDigits = candidate.replace(/[\s.,]/g, '');
             if (candidateDigits === digits) {
+                if (skip > 0) { skip--; continue; } // occurrence already used by an earlier source number
                 // Splice at the matched position rather than replacing the first
                 // occurrence of the candidate substring, which may appear earlier.
                 result = result.slice(0, m.index) + srcNum + result.slice(m.index + candidate.length);
+                consumedByDigits.set(digits, (consumedByDigits.get(digits) || 0) + 1);
                 break;
             }
         }

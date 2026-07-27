@@ -344,6 +344,11 @@ function _loginRateOk(ip) {
             const kept = times.filter(t => t >= cutoff);
             if (kept.length) _loginAttempts.set(k, kept); else _loginAttempts.delete(k);
         }
+        // Hard cap: under a distributed burst every entry may be fresh (stale-prune
+        // removes nothing), so evict oldest-inserted keys to keep memory bounded.
+        while (_loginAttempts.size > 10000) {
+            _loginAttempts.delete(_loginAttempts.keys().next().value);
+        }
     }
     const arr = (_loginAttempts.get(ip) || []).filter(t => t >= cutoff);
     if (arr.length >= 10) { _loginAttempts.set(ip, arr); return false; }
@@ -1223,6 +1228,9 @@ io.on('connection', (socket) => {
             } catch (e) { /* ignore */ }
         }
         recognizeStream = null;
+        streamGeneration++; // Teardown: invalidate in-flight translations NOW, not later in
+                            // createRecognitionStream (which runs on a setTimeout(0) macrotask) —
+                            // otherwise a sub-ms Translate resolve could slip through this window.
         translationInFlight = false; // BUG-21: prevent deadlock if translation was mid-flight at restart
         pendingTranslationQueue = []; // Discard queued translations — stale after stream restart
 
@@ -1636,7 +1644,11 @@ io.on('connection', (socket) => {
                         return;
                     }
 
-                    logger.debug('📝 Recognition result', {
+                    // Final transcripts logged at info so STT hint-tuning stays possible from
+                    // Koyeb prod logs (they include finals that get dropped before translation,
+                    // which the '✅ Translation completed' log does not). Interims stay at debug
+                    // to avoid per-chunk spam/cost on the hot path.
+                    logger[isFinal ? 'info' : 'debug']('📝 Recognition result', {
                         clientId,
                         transcript: transcript.substring(0, 200),
                         isFinal,
@@ -2204,7 +2216,16 @@ async function gracefulShutdown(signal) {
     } catch (err) {
         logger.error('Error closing database during shutdown', { error: err.message });
     }
-    server.close(() => {
+
+    // Notify then cleanly disconnect Socket.IO clients before closing. http.Server.close()
+    // alone does NOT terminate Socket.IO's long-lived transports, so mid-meeting a
+    // deploy-time SIGTERM would leave sockets open, server.close()'s callback would never
+    // fire, and the 10s force-exit would hard-kill every session with no warning. io.close()
+    // disconnects all clients (they auto-reconnect) and closes the underlying HTTP server.
+    try {
+        io.emit('server-shutdown', { message: 'Translation service restarting — reconnecting shortly…' });
+    } catch (err) { /* best-effort notice */ }
+    io.close(() => {
         logger.info('Server closed');
         clearTimeout(forceExit);
         process.exit(0);
@@ -2228,9 +2249,20 @@ process.on('unhandledRejection', (reason) => {
 // should not take the whole translation service down mid-meeting. Node's default
 // would exit; we log and keep serving. Truly fatal conditions (OOM) still exit
 // on their own and Koyeb restarts the instance.
+// Escalation valve: if exceptions recur rapidly (a systemic bug rather than a
+// one-off late throw), stop absorbing them and exit so Koyeb restarts clean
+// instead of the process degrading silently for the rest of the meeting.
+let _uncaughtCount = 0;
+let _uncaughtWindowStart = Date.now();
 process.on('uncaughtException', (err) => {
     logger.error('Uncaught exception (non-fatal — kept alive for live meeting):', {
         error: err instanceof Error ? err.message : String(err),
         stack: err instanceof Error ? err.stack : undefined
     });
+    const now = Date.now();
+    if (now - _uncaughtWindowStart > 60000) { _uncaughtCount = 0; _uncaughtWindowStart = now; }
+    if (++_uncaughtCount >= 10) {
+        logger.error('Too many uncaught exceptions in 60s — exiting for a clean restart');
+        process.exit(1);
+    }
 });
