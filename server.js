@@ -1433,29 +1433,48 @@ io.on('connection', (socket) => {
             }
 
         } catch (error) {
-            logger.error('Translation error', {
-                clientId,
-                reason: decision.reason,
-                error: error.message
-            });
-            socket.emit('translation-error', {
-                message: error.message
-            });
-        } finally {
-            translationInFlight = false;
-            // Drain one item from the pending queue (each item re-enters this finally,
-            // so the whole queue is processed in order without recursion depth growing).
-            if (pendingTranslationQueue.length > 0 && sessionActive) {
-                const { transcript: pt, decision: pd } = pendingTranslationQueue.shift();
-                logger.info('▶️ Running deferred pending translation', {
+            // Don't surface an error for a translation whose stream was already
+            // restarted — the new stream is fine; a spurious error banner would
+            // just be noise.
+            if (myGeneration === streamGeneration) {
+                logger.error('Translation error', {
                     clientId,
-                    preview: pt.substring(0, 60),
-                    remaining: pendingTranslationQueue.length
+                    reason: decision.reason,
+                    error: error.message
                 });
-                translationInFlight = true;
-                performTranslation(pt, pd, true).catch(err => {
-                    logger.error('Deferred translation error', { clientId, error: err.message });
+                socket.emit('translation-error', {
+                    message: error.message
                 });
+            } else {
+                logger.info('Suppressing translation error from a superseded stream generation', {
+                    clientId, error: error.message
+                });
+            }
+        } finally {
+            // Generation-gate the mutex/queue handling. If this completion belongs to a
+            // superseded generation, cleanupStream()/scheduleAutoRestart() have ALREADY
+            // reset translationInFlight and pendingTranslationQueue for the new stream —
+            // and a legitimate new-generation translation may be in flight right now.
+            // A stale completion must not clear that mutex or drain the new queue, or two
+            // same-generation translations could run concurrently and clobber
+            // committedTranslation. (Not gating this reintroduces the exact race the
+            // generation guard exists to prevent.)
+            if (myGeneration === streamGeneration) {
+                translationInFlight = false;
+                // Drain one item from the pending queue (each item re-enters this finally,
+                // so the whole queue is processed in order without recursion depth growing).
+                if (pendingTranslationQueue.length > 0 && sessionActive) {
+                    const { transcript: pt, decision: pd } = pendingTranslationQueue.shift();
+                    logger.info('▶️ Running deferred pending translation', {
+                        clientId,
+                        preview: pt.substring(0, 60),
+                        remaining: pendingTranslationQueue.length
+                    });
+                    translationInFlight = true;
+                    performTranslation(pt, pd, true).catch(err => {
+                        logger.error('Deferred translation error', { clientId, error: err.message });
+                    });
+                }
             }
         }
     }
