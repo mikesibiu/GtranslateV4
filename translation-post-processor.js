@@ -22,6 +22,49 @@
  * @returns {string} Corrected translation
  */
 function applyTermMappings(text, sourceText = '') {
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // WHAT THIS IS
+    //   An ordered pipeline of ~200 domain corrections applied to Google-Translate
+    //   output for Romanian→English JW meeting translation. Each rule rewrites `result`;
+    //   rules run TOP-TO-BOTTOM, so a later rule sees the output of earlier ones.
+    //
+    // ORDERING CONTRACT (important — interactions are order-dependent)
+    //   • Put MORE-SPECIFIC patterns BEFORE more-general ones (e.g. "indifferent of
+    //     whether" before "indifferent of"), or the general rule consumes the specific.
+    //   • The static `mappings[]` table below runs first (congress→convention, etc.);
+    //     later inline rules may rely on that already having happened.
+    //   • When in doubt, append near related rules and add a test — the 375+ tests in
+    //     test/translation-post-processor.test.js are the safety net for reordering.
+    //
+    // GATING CONVENTION (avoid corrupting correct translations)
+    //   • `sourceNorm` = the Romanian source with diacritics stripped (NFD). Gate on it
+    //     (or raw `sourceText`) whenever a fix could mis-fire on a legitimate sentence —
+    //     e.g. tense fixes gate on a Romanian past-tense marker; "church"→"congregation"
+    //     gates on "congregație/adunare" in source.
+    //   • Only leave a rule UNGATED when the English input is impossible/never-valid
+    //     ("be friendship with", "holy shit", "were need").
+    //   • Preserve casing on case-insensitive matches with a callback replacer (see the
+    //     many `(m) => m[0] === 'X' ? … : …` rules) — segments often start mid-sentence.
+    //
+    // RULE CATEGORIES (interleaved by meeting date, not grouped — grep these hints)
+    //   1. Static term map ......... the `mappings[]` array just below
+    //   2. STT mishears of "Iehova" in prayer ... Hopa / Homa / Popa / Boga / iertova
+    //   3. JW terminology .......... congregation(not church), convention, ministry,
+    //                                verses(not lyrics), New World Translation, Branch Committee
+    //   4. STT garbles / non-words . pulberabilă, dioxive, franci→brothers, teocratică
+    //   5. Grammar & verb agreement  missing -s/-ed, possessives, stray articles
+    //   6. Tense / historical-present  (source-gated on Romanian past markers)
+    //   7. Scripture citations ..... "N with M" → "N:M"  (gated on "digit cu digit")
+    //   Rules were appended per meeting; see the dated "──── <date> meeting ────"
+    //   dividers below for the chronological batches.
+    //
+    // CROSS-PROJECT TWIN
+    //   The NON-STT rules here are mirrored in PhraseTranslation's Python
+    //   apply_term_mappings (translation_engine_v2.py). test/fixtures/postprocessor-
+    //   parity-corpus.json + its parity test guard against JS↔Python drift — when you
+    //   add a non-STT rule, add a corpus case so both implementations stay in sync.
+    // ═══════════════════════════════════════════════════════════════════════════════
+
     // Normalize source for diacritic-insensitive matching: Deepgram sometimes drops
     // diacritics (e.g. "congregatie" instead of "congregație"), so source-aware regex
     // checks must work against both the original and the stripped form.
@@ -497,7 +540,7 @@ function applyTermMappings(text, sourceText = '') {
     // "nu mai merită să trăiești" → "no longer deserve living" — should be "no longer worth living"
     result = result.replace(/\bno longer deserve living\b/gi, 'no longer worth living');
 
-    // --- 2026-06-14 Sunday meeting fixes ---
+    // ──────────────────────── 2026-06-14 Sunday meeting ────────────────────────
 
     // "cei care iubesc" → "who I love" (Google MT picks 1sg form of "iubesc" when context is clipped)
     // Affects: "those who I love the truth", "people who I love", "all who I love God", etc.
@@ -549,7 +592,7 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bRomani\b(?=\s+\d)/g, 'Romans');
     }
 
-    // 2026-07-19 Sunday meeting fixes:
+    // ──────────────────────── 2026-07-19 Sunday meeting ────────────────────────
 
     // "lui sfânt" fragment without "spiritul" context → MT produces "holy shit"
     // In a JW meeting this can only ever mean Holy Spirit. Ungated — never valid in this context.
@@ -593,7 +636,7 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bis hot\b/gi, 'is being proclaimed');
     }
 
-    // 2026-07-23 Thursday meeting fixes:
+    // ─────────────────────── 2026-07-23 Thursday meeting ───────────────────────
 
     // "cele 54 de capitole" → STT hears "cai" (horses) → "54 horses" in translation
     result = result.replace(/\b54 horses\b/gi, '54 chapters');
@@ -758,6 +801,7 @@ function applyTermMappings(text, sourceText = '') {
     result = result.replace(/\bwho are joy serving\b/gi, 'who joyfully serve');
     result = result.replace(/\bwere joy\b/gi, 'were joyful');
 
+    // ──────────────────── 2026-07-27 live-session testing ────────────────────
     // "era nevoie de" (was/were needed) → MT drops the -ed: "were need to" → "were needed to".
     // "were need" / "are need" are never valid English, so no source gate needed. (Singular
     // "was need"/"is need" left alone — ambiguous with "there was/is need to…".)

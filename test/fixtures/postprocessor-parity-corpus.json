@@ -1,0 +1,31 @@
+{
+  "_comment": "Shared JS<->Python parity corpus for the post-processor. Every case here MUST produce identical output from GTranslateV4's applyTermMappings (JS) and PhraseTranslation's apply_term_mappings (Python). Only NON-STT rules that exist in BOTH implementations belong here. When you add/change a non-STT rule in either repo, add or update a case so drift becomes a test failure. Fields: name, source (Romanian STT/source_text), input (raw MT English), expected (corrected).",
+  "cases": [
+    { "name": "holy-shit-ungated", "source": "", "input": "guided by holy shit", "expected": "guided by Holy Spirit" },
+    { "name": "doesnt-loves", "source": "", "input": "he doesn't loves us", "expected": "he doesn't love us" },
+    { "name": "do-not-allows", "source": "", "input": "do not allows them", "expected": "do not allow them" },
+    { "name": "we-seen", "source": "", "input": "we seen this before", "expected": "we saw this before" },
+    { "name": "the-jehovah", "source": "", "input": "we trust in the Jehovah", "expected": "we trust in Jehovah" },
+    { "name": "jehovah-s-spacing", "source": "", "input": "in Jehovah 's name", "expected": "in Jehovah's name" },
+    { "name": "indifferent-of-whether", "source": "", "input": "indifferent of whether we try", "expected": "regardless of whether we try" },
+    { "name": "indifferent-of", "source": "", "input": "indifferent of the outcome", "expected": "regardless of the outcome" },
+    { "name": "indifferent-how", "source": "", "input": "indifferent how hard we work", "expected": "no matter how hard we work" },
+    { "name": "to-joy-the", "source": "", "input": "we will to joy the blessings", "expected": "we will to enjoy the blessings" },
+    { "name": "differently-noun", "source": "", "input": "differently situations arise", "expected": "different situations arise" },
+    { "name": "differently-from-unchanged", "source": "", "input": "done differently from before", "expected": "done differently from before" },
+    { "name": "jehovah-promise", "source": "", "input": "Jehovah Promise us this", "expected": "Jehovah promises us this" },
+    { "name": "jehovah-support", "source": "", "input": "Jehovah support us always", "expected": "Jehovah supports us always" },
+    { "name": "who-care-of-us", "source": "", "input": "Jehovah who care of us", "expected": "Jehovah who cares for us" },
+    { "name": "jehovah-servants", "source": "", "input": "Jehovah servants rejoice", "expected": "Jehovah's servants rejoice" },
+    { "name": "was-full-with", "source": "", "input": "she was full with bitterness", "expected": "she was filled with bitterness" },
+    { "name": "will-we-ever-joy", "source": "", "input": "Will We Ever Joy True Justice?", "expected": "Will We Ever Enjoy True Justice?" },
+    { "name": "the-decision-mid-sentence", "source": "", "input": "the Decision is personal", "expected": "the decision is personal" },
+    { "name": "the-decision-sentence-start-unchanged", "source": "", "input": "The Decision was made", "expected": "The Decision was made" },
+    { "name": "the-verse-say", "source": "", "input": "as the verse say", "expected": "as the verse says" },
+    { "name": "scripture-citation-gated", "source": "Psalmul 94 cu 19", "input": "Psalm 94 with 19", "expected": "Psalm 94:19" },
+    { "name": "scripture-citation-no-gate", "source": "doua exemple", "input": "2 with 3 examples", "expected": "2 with 3 examples" },
+    { "name": "exist-is-a-gated", "source": "exista un motiv", "input": "Exist is a reason", "expected": "There is a reason" },
+    { "name": "world-translation-gated", "source": "traducerea lumii", "input": "in the world translation", "expected": "in the New World Translation" },
+    { "name": "world-translation-no-gate", "source": "", "input": "a world translation effort", "expected": "a world translation effort" }
+  ]
+}
