@@ -769,6 +769,12 @@ io.on('connection', (socket) => {
     // (not committedTranslation = prev_committed + emitted, which caused cascade divergence in v155)
     let committedTranslation = ''; // Full translation emitted so far (reset on session start)
     let lastFullTranslation = ''; // Last full-transcript translation (for LCP matching)
+    // Monotonic stream generation. Bumped whenever the LCP state is reset (new/restarted
+    // stream) or the stream is torn down. A performTranslation call captures the generation
+    // at dispatch; if it changes before the (awaited) Google Translate call returns, the
+    // result belongs to a stream that no longer exists and must be discarded rather than
+    // clobbering the new stream's committedTranslation or emitting a stale line.
+    let streamGeneration = 0;
 
     // Domain-specific STT phrase hints to reduce mis-hearings (e.g., “vestitori”)
     // STT phrase hints — boost domain-specific vocabulary the base model struggles with.
@@ -1110,6 +1116,7 @@ io.on('connection', (socket) => {
     // Helper function to clean up stream properly
     function cleanupStream() {
         isRestarting = false; // Cancel any pending auto-restart
+        streamGeneration++; // Invalidate any in-flight translation from the torn-down stream
         translationInFlight = false; // Reset so new sessions aren't blocked
         pendingTranslationQueue = []; // Discard any deferred translations
         lastTranslatedText = '';
@@ -1264,6 +1271,9 @@ io.on('connection', (socket) => {
 
         // translationInFlight is set by the caller before the async gap (RC-4 fix).
         // performTranslation must not set it again — the finally block clears it.
+        // Capture the stream generation at dispatch so we can detect a restart that
+        // happened while we were awaiting the (slow) Google Translate call.
+        const myGeneration = streamGeneration;
         try {
             // ── Step 1: Translate the FULL current transcript for maximum context ──
             // Race against a timeout to prevent hangs if Google Translate API stalls
@@ -1273,6 +1283,21 @@ io.on('connection', (socket) => {
                     setTimeout(() => reject(new Error(`Translation timeout after ${TRANSLATION_TIMEOUT_MS}ms`)), TRANSLATION_TIMEOUT_MS)
                 )
             ]);
+
+            // ── Stale-generation guard ──
+            // If the stream was restarted/torn down while this translation was awaiting
+            // the API, its committedTranslation/lastFullTranslation have been reset for a
+            // new stream. Writing this old result would corrupt the new stream's LCP state
+            // and emit an out-of-order line to the live audience. Discard it. (finally still
+            // clears translationInFlight and drains any current-generation queued work.)
+            if (myGeneration !== streamGeneration) {
+                logger.info('🗑️ Discarding stale translation from a previous stream generation', {
+                    clientId,
+                    dispatchedGen: myGeneration,
+                    currentGen: streamGeneration
+                });
+                return;
+            }
 
             logger.debug('🔤 Full-text translation', {
                 clientId,
@@ -1455,6 +1480,7 @@ io.on('connection', (socket) => {
             // will cause every LCP extraction to fail until it's cleared.
             committedTranslation = '';
             lastFullTranslation = '';
+            streamGeneration++; // New LCP generation — discard translations still in flight from the old stream
 
             // Reset rules engine dedup state on stream restart to prevent
             // legitimate new-stream phrases from being suppressed as duplicates
