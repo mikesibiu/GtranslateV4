@@ -1616,6 +1616,81 @@ describe('applyTermMappings', () => {
         });
     });
 
+    // ── 2026-07-27 live-session fixes ──
+    describe('"were need" → "were needed" (era nevoie, MT drops -ed)', () => {
+        it('fixes "were need to" (ungated — never valid English)', () => {
+            expect(applyTermMappings('efforts of faith and courage were need to enjoy the blessings', ''))
+                .to.equal('efforts of faith and courage were needed to enjoy the blessings');
+        });
+        it('fixes "are need"', () => {
+            expect(applyTermMappings('more workers are need for the harvest', ''))
+                .to.equal('more workers are needed for the harvest');
+        });
+        it('does NOT touch valid "we need" / "they need our help"', () => {
+            expect(applyTermMappings('we need to be patient', '')).to.equal('we need to be patient');
+        });
+        it('preserves capitalization at a segment start ("Were need" → "Were needed")', () => {
+            expect(applyTermMappings('Were need to sacrifice more', '')).to.equal('Were needed to sacrifice more');
+        });
+        it('leaves singular "was need"/"is need" alone (there was/is need to…)', () => {
+            expect(applyTermMappings('there was need to act quickly', '')).to.equal('there was need to act quickly');
+            expect(applyTermMappings('there is need to remain calm', '')).to.equal('there is need to remain calm');
+        });
+    });
+
+    describe('"Great Event" → "Great Tribulation" (necazul→cazul STT mishear)', () => {
+        it('fixes when source has the (garbled) "cazul cel mare"', () => {
+            expect(applyTermMappings('The Great Event could begin at any moment', 'cazul cel Mare ar putea să înceapă'))
+                .to.equal('The Great Tribulation could begin at any moment');
+        });
+        it('fixes when source has the correct "necazul cel mare"', () => {
+            expect(applyTermMappings('the great event is near', 'necazul cel mare este aproape'))
+                .to.equal('the great tribulation is near');
+        });
+        it('does NOT fire without the source gate', () => {
+            expect(applyTermMappings('The Great Event was a concert', 'un concert mare'))
+                .to.equal('The Great Event was a concert');
+        });
+        it('fixes "Great Case" (MT rendered caz as "case") preserving title case', () => {
+            expect(applyTermMappings('The Great Case could begin', 'cazul cel mare ar putea începe'))
+                .to.equal('The Great Tribulation could begin');
+        });
+        it('fixes lowercase "great case"', () => {
+            expect(applyTermMappings('during the great case', 'in necazul cel mare'))
+                .to.equal('during the great tribulation');
+        });
+    });
+
+    describe('"you learn [people]" → "you teach" (a învăța pe cineva)', () => {
+        it('fixes "you learn all the Jews" when source has "înveți pe"', () => {
+            expect(applyTermMappings('that you learn all the Jews', 'că îi înveți pe toți iudeii'))
+                .to.equal('that you teach all the Jews');
+        });
+        it('does NOT touch "you learn" without the "pe" teaching construction', () => {
+            expect(applyTermMappings('you learn quickly from mistakes', 'înveți repede din greșeli'))
+                .to.equal('you learn quickly from mistakes');
+        });
+    });
+
+    describe('past-tense flattening (gated on Romanian past marker)', () => {
+        it('"Jehovah change" → "Jehovah changed" when source has "a schimbat"', () => {
+            expect(applyTermMappings('but Jehovah change the way he provided guidance', 'Iehova a schimbat modul'))
+                .to.equal('but Jehovah changed the way he provided guidance');
+        });
+        it('does NOT change "Jehovah change" without the past-tense gate', () => {
+            expect(applyTermMappings('Jehovah change hearts', 'Iehova schimbă inimi'))
+                .to.equal('Jehovah change hearts');
+        });
+        it('"they need" → "they needed" when source has "aveau nevoie"', () => {
+            expect(applyTermMappings('They need faith to accept that', 'ei aveau nevoie de credință'))
+                .to.equal('They needed faith to accept that');
+        });
+        it('does NOT touch "they need" without the past-tense gate', () => {
+            expect(applyTermMappings('they need our support today', 'au nevoie de sprijin'))
+                .to.equal('they need our support today');
+        });
+    });
+
     describe('"a young to" → "a young person to" (persoană dropped by MT)', () => {
         it('fixes "a young to"', () => {
             expect(applyTermMappings('to help a young to make a wise decision', '')).to.equal('to help a young person to make a wise decision');

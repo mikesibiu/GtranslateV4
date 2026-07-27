@@ -758,6 +758,34 @@ function applyTermMappings(text, sourceText = '') {
     result = result.replace(/\bwho are joy serving\b/gi, 'who joyfully serve');
     result = result.replace(/\bwere joy\b/gi, 'were joyful');
 
+    // "era nevoie de" (was/were needed) → MT drops the -ed: "were need to" → "were needed to".
+    // "were need" / "are need" are never valid English, so no source gate needed. (Singular
+    // "was need"/"is need" left alone — ambiguous with "there was/is need to…".)
+    result = result.replace(/\b(w)ere need\b/gi, (m, w) => (w === 'W' ? 'Were' : 'were') + ' needed');
+    result = result.replace(/\b(a)re need\b/gi, (m, a) => (a === 'A' ? 'Are' : 'are') + ' needed');
+
+    // Romanian past tense flattened to English present. Gated on the past-tense source
+    // marker so legitimate present-tense uses ("Jehovah changes hearts", "they need our
+    // help") are never touched.
+    if (/\bschimbat\b/i.test(sourceNorm)) {
+        // "Iehova a schimbat" (Jehovah changed) → MT: "Jehovah change" (also missing -d).
+        result = result.replace(/\bJehovah change\b/g, 'Jehovah changed');
+    }
+    if (/aveau nevoie/i.test(sourceNorm)) {
+        // "ei aveau nevoie" (they needed) → MT present "they need".
+        result = result.replace(/\b(they) need\b/gi, '$1 needed');
+    }
+
+    // "necazul cel mare" (the great tribulation, JW term) misheard by STT as "cazul cel
+    // mare" (dropped "ne-"); MT then renders "cazul" as "event/case". The gate matches both
+    // the garbled and correct forms since "necazul" ends with "cazul cel mare".
+    if (/cazul cel mare/i.test(sourceNorm)) {
+        result = result.replace(/\bGreat Event\b/g, 'Great Tribulation');
+        result = result.replace(/\bgreat event\b/g, 'great tribulation');
+        result = result.replace(/\bGreat Case\b/g, 'Great Tribulation');
+        result = result.replace(/\bgreat case\b/g, 'great tribulation');
+    }
+
     // "ask Jehovah the help" → stray article
     result = result.replace(/\bask Jehovah the help\b/gi, 'ask Jehovah for help');
 
@@ -837,6 +865,14 @@ function applyTermMappings(text, sourceText = '') {
     // P6: "Jesus learned his listeners" → "taught" ("a învăța pe cineva" = to teach someone)
     // Covers "Jesus also learned" variant.
     result = result.replace(/\b(Jesus(?:\s+also)?)\s+learned\s+(his\s+listeners?)\b/gi, '$1 taught $2');
+
+    // "a învăța PE cineva" (to teach someone) — the personal-accusative "pe <people>" marks
+    // teaching, not learning, but MT renders "învăța" as "learn". Acts 21:21: "înveți pe toți
+    // iudeii" → "you learn all the Jews" should be "you teach…". Gate on the "înv…pe"
+    // construction in source (normalized: inveti/invata … pe) so ordinary "you learn" is safe.
+    if (/\binv[ae]\w*\s+pe\b/i.test(sourceNorm)) {
+        result = result.replace(/\byou learn\b/gi, (m) => (m[0] === 'Y' ? 'You' : 'you') + ' teach');
+    }
 
     // "the verse say" → "the verse says" (3rd-person -s missing, same pattern as "the Bible say")
     result = result.replace(/\bthe verse say\b/gi, 'the verse says');
