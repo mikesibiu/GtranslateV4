@@ -681,6 +681,14 @@ async function translateWithRetry(text, targetLang, sourceLanguage, clientId, ma
 let activeConnections = 0;
 const connectionsByIp = new Map(); // Track connections per IP
 
+// Fallback single-word translations for common Romanian terms that may pass through
+// unchanged. Static data — module-scoped so it isn't reallocated per connection.
+const FALLBACK_TRANSLATIONS = {
+    gheata: 'ice',
+    gheată: 'boot',
+    gheață: 'ice'
+};
+
 io.on('connection', (socket) => {
     // Reject unauthenticated socket connections
     if (APP_PASSWORD && !(socket.request.session && socket.request.session.authenticated)) {
@@ -745,7 +753,6 @@ io.on('connection', (socket) => {
     let restartStreamTimer = null;
     let lastInterimText = '';
     let lastTranslationTime = null; // Track when last translation happened for 15s max interval
-    let lastTranslatedText = ''; // Track concatenated source text already translated
     let translationInterval = 6000; // Store translation interval for restarts
     let lastActivityTime = Date.now();
     let inactivityTimer = null;
@@ -1119,7 +1126,6 @@ io.on('connection', (socket) => {
         streamGeneration++; // Invalidate any in-flight translation from the torn-down stream
         translationInFlight = false; // Reset so new sessions aren't blocked
         pendingTranslationQueue = []; // Discard any deferred translations
-        lastTranslatedText = '';
         lastInterimText = ''; // BUG-13: prevent stale pause-timer retranslation after restart
 
         // Cancel proactive stream duration timer
@@ -1234,13 +1240,6 @@ io.on('connection', (socket) => {
             }
         }, 0); // No delay - restart immediately
     }
-
-    // Fallback single-word translations for common Romanian terms that may pass through unchanged
-    const FALLBACK_TRANSLATIONS = {
-        gheata: 'ice',
-        gheată: 'boot',
-        gheață: 'ice'
-    };
 
 
     /**
@@ -1366,8 +1365,6 @@ io.on('connection', (socket) => {
             }
 
             // Update source tracking
-            const ltRaw = `${lastTranslatedText} ${newText}`.trim();
-            lastTranslatedText = ltRaw.length > 2000 ? ltRaw.slice(-2000) : ltRaw;
             lastTranslationTime = Date.now();
 
             if (!emitted) {
