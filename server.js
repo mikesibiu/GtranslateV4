@@ -1505,6 +1505,14 @@ io.on('connection', (socket) => {
             committedTranslation = '';
             lastFullTranslation = '';
             streamGeneration++; // New LCP generation — discard translations still in flight from the old stream
+            // Starting a new generation makes any in-flight translation stale, so no one owns
+            // the mutex/queue anymore. Reset them here so createRecognitionStream is
+            // self-consistent — otherwise a caller that reaches here without going through
+            // cleanupStream()/scheduleAutoRestart() (which do the reset) could leave a stale
+            // in-flight translation's gen-gated finally unable to clear translationInFlight,
+            // deadlocking all future translations for the connection.
+            translationInFlight = false;
+            pendingTranslationQueue = [];
 
             // Reset rules engine dedup state on stream restart to prevent
             // legitimate new-stream phrases from being suppressed as duplicates
