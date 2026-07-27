@@ -274,7 +274,7 @@ class TranslationRulesEngine {
         const normalized = translation.toLowerCase().trim();
         const now = Date.now();
 
-        // Clean old entries (older than 15s — TRANSLATION_DEDUP_WINDOW)
+        // Clean old entries (older than TRANSLATION_DEDUP_WINDOW — 20s)
         this.recentTranslations = this.recentTranslations.filter(
             entry => now - entry.timestamp < this.TRANSLATION_DEDUP_WINDOW
         );
@@ -329,7 +329,7 @@ class TranslationRulesEngine {
             timestamp: now
         });
 
-        // Keep only last 15 seconds (TRANSLATION_DEDUP_WINDOW)
+        // Keep only the last TRANSLATION_DEDUP_WINDOW (20 seconds)
         this.recentTranslations = this.recentTranslations.filter(
             entry => now - entry.timestamp < this.TRANSLATION_DEDUP_WINDOW
         );
@@ -362,8 +362,9 @@ class TranslationRulesEngine {
         // - isFinal standalone: threshold 2 — single-word finals are almost always STT artifacts
         //   ("pian", "laptop", "torului") rather than meaningful speech. Short legitimate responses
         //   like "Da" / "Nu" / "Amin" don't need translation in a meeting context.
-        // - interim: full 6-word threshold to avoid noise/filler bursts.
-        const minWords = isContinuationTail ? 2 : (isFinal ? 2 : this.MIN_WORDS_FOR_TRANSLATION);
+        // - interim: full per-mode word threshold (modeConfig.minWords) to avoid noise/filler bursts.
+        const interimMinWords = this.modeConfig.minWords || this.MIN_WORDS_FOR_TRANSLATION;
+        const minWords = isContinuationTail ? 2 : (isFinal ? 2 : interimMinWords);
         if (words.length < minWords) {
             return {
                 meetsMinimum: false,
