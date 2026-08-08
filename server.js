@@ -99,7 +99,7 @@ const logger = winston.createLogger({
 });
 
 // ===== GOOGLE CLOUD CREDENTIALS SETUP =====
-// Support both file-based (local/Docker) and environment variable (Heroku) credentials
+// Support both file-based (local/Docker) and environment variable (Koyeb/Cloud) credentials
 let googleCredentials;
 let CREDENTIALS_PATH;
 let credentialsProjectId = null;
@@ -117,7 +117,7 @@ if (process.env.GOOGLE_CREDENTIALS_JSON_B64) {
         process.exit(1);
     }
 } else if (process.env.GOOGLE_CREDENTIALS_JSON) {
-    // Heroku/Cloud deployment: credentials from environment variable
+    // Koyeb/Cloud deployment: credentials from environment variable
     try {
         googleCredentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
         credentialsProjectId = googleCredentials.project_id || null;
@@ -183,7 +183,7 @@ if (process.env.GOOGLE_CREDENTIALS_JSON_B64) {
 
 // ===== CHECK CREDENTIALS =====
 if (googleCredentials) {
-    // Using credentials from environment variable (Heroku)
+    // Using credentials from environment variable (Koyeb/Cloud)
     // Google Cloud clients will be initialized with explicit credentials
 } else if (CREDENTIALS_PATH && fs.existsSync(CREDENTIALS_PATH)) {
     // Using credentials from file (local/Docker)
@@ -191,7 +191,7 @@ if (googleCredentials) {
 } else {
     logger.error('❌ Credentials not found!');
     logger.error('Please provide credentials via:');
-    logger.error('  1. GOOGLE_CREDENTIALS_JSON environment variable (Heroku/Cloud)');
+    logger.error('  1. GOOGLE_CREDENTIALS_JSON environment variable (Koyeb/Cloud)');
     logger.error('  2. GOOGLE_APPLICATION_CREDENTIALS path (Docker/VM)');
     logger.error('  3. google-credentials.json file (Local development)');
     process.exit(1);
@@ -707,7 +707,7 @@ io.on('connection', (socket) => {
         return;
     }
 
-    // Get client IP address (trust proxy: read x-forwarded-for behind Heroku/Koyeb)
+    // Get client IP address (trust proxy: read x-forwarded-for behind Koyeb)
     const xForwardedFor = socket.handshake.headers['x-forwarded-for'];
     const clientIp = xForwardedFor
         ? xForwardedFor.split(',')[0].trim()

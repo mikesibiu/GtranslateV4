@@ -17,7 +17,7 @@ Browser mic
     │  Raw audio (PCM 16-bit, 16kHz)
     │  WebSocket (Socket.IO)
     ▼
-Node.js Server (Heroku)
+Node.js Server (Koyeb)
     │
     ├──► Google Cloud Speech-to-Text  ──►  Streaming transcript (Romanian)
     │                                            │
@@ -55,7 +55,7 @@ same server can serve multiple clients simultaneously.
 
 ### 2. Server (`server.js`)
 
-Node.js + Express + Socket.IO. Runs on Heroku.
+Node.js + Express + Socket.IO. Runs on Koyeb.
 
 One Socket.IO connection = one active speaker session. The server maintains a
 completely independent state per connected client:
@@ -185,7 +185,7 @@ context). These overrides are caught by the post-translation term mapping layer.
 
 ### 6. Database (`billing-db.js`)
 
-PostgreSQL via Heroku Postgres (free tier).
+PostgreSQL via Neon (serverless).
 
 **Tables:**
 - `usage_log` — per-session usage tracking (audio seconds, translation count,
@@ -203,7 +203,7 @@ inserts. This keeps the table small without any scheduled jobs.
 
 ### 7. Deployment
 
-**Platform:** Heroku (single web dyno)
+**Platform:** Koyeb (single web service; auto-deploys from GitHub `main`)
 
 **Environment variables:**
 ```
@@ -211,11 +211,11 @@ GOOGLE_CREDENTIALS_JSON   — Service account JSON (base64 or raw)
 GOOGLE_CLOUD_PROJECT      — GCP project ID (mlf-gtranslate)
 GOOGLE_CLOUD_LOCATION     — us-central1
 GLOSSARY_ENABLED          — true/false
-DATABASE_URL              — Heroku Postgres connection string
+DATABASE_URL              — Neon Postgres connection string
 ```
 
 **Credentials handling:** In production, the Google service account JSON is
-stored as a Heroku config var (`GOOGLE_CREDENTIALS_JSON`). On startup, the server
+stored as a Koyeb environment variable (`GOOGLE_CREDENTIALS_JSON`). On startup, the server
 parses it and initializes both the Speech and Translation clients with explicit
 credentials. No credentials files on disk in production.
 
@@ -287,7 +287,7 @@ test/
 - **Speech-to-Text:** ~$0.016 per minute of audio (Chirp model, streaming)
 - **Translation API v3:** ~$20 per million characters (advanced model + glossary)
 - **Cloud Storage:** Negligible (one small CSV file)
-- **Heroku Postgres:** Free tier (10,000 rows limit)
-- **Heroku Dyno:** Eco dyno ~$5/month
+- **Neon Postgres:** Serverless (scales to zero)
+- **Koyeb:** Nano instance
 
 For a typical 1-hour meeting with one speaker, approximate cost is under $2.

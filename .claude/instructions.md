@@ -4,8 +4,7 @@
 
 **IMPORTANT:** Always use the `git-ops-manager` agent for ALL git operations:
 - Creating commits
-- Pushing to GitHub (origin/main)
-- Pushing to Heroku
+- Pushing to GitHub (origin/main) — Koyeb auto-deploys from `main`
 - Branch management
 - Merge conflict resolution
 
@@ -21,10 +20,12 @@
 ## Deployment Targets
 
 This project deploys to:
-- **GitHub:** https://github.com/mikesibiu/GtranslateV4
-- **Heroku:** https://gtranslate-v4-96dfeefd9842.herokuapp.com
+- **GitHub:** https://github.com/mikesibiu/GtranslateV4 (push to `main`)
+- **Koyeb:** service `gtranslate` (app `gtranslate`) — **auto-deploys from GitHub `main`**.
+  Live URL: https://gtranslate-mysysadmin-aa6fe3a2.koyeb.app
 
-Both must be updated on every deployment.
+Heroku is fully decommissioned — do not push to or reference it.
+Push to `origin` `main` only; Koyeb builds automatically.
 
 ## Code Review Workflow
 

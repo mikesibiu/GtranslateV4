@@ -11,7 +11,7 @@ let pool = null;
 
 /**
  * Initialize database connection
- * Uses DATABASE_URL environment variable (automatically set by Heroku)
+ * Uses DATABASE_URL environment variable (set as a Koyeb env var; Neon connection string)
  */
 function initializeDatabase(logger) {
     const connectionString = process.env.DATABASE_URL;
