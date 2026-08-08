@@ -1672,6 +1672,98 @@ describe('applyTermMappings', () => {
         });
     });
 
+    // ── 2026-08-06 midweek + 2026-08-08 weekend meeting review ──
+    describe('"learn/learned + me/us/him" → teach/taught', () => {
+        it('"they learned us wrong" → "they taught us wrong"', () => {
+            expect(applyTermMappings('they learned us wrong', 'ne au învățat greșit'))
+                .to.equal('they taught us wrong');
+        });
+        it('"learned me and my brothers" → "taught me..."', () => {
+            expect(applyTermMappings('learned me and my brothers', 'învățat pe mine și pe frații mei'))
+                .to.equal('taught me and my brothers');
+        });
+        it('"learn me" → "teach me"; "learns him" → "teaches him"', () => {
+            expect(applyTermMappings('you must learn me', '')).to.equal('you must teach me');
+            expect(applyTermMappings('she learns him', '')).to.equal('she teaches him');
+        });
+        it('does NOT touch valid "learned them by heart" / "learned from him"', () => {
+            expect(applyTermMappings('I learned them by heart', '')).to.equal('I learned them by heart');
+            expect(applyTermMappings('I learned from him', '')).to.equal('I learned from him');
+        });
+    });
+
+    describe('"<pron> seen" → "<pron> saw" (past participle w/o auxiliary)', () => {
+        it('generalizes across subjects', () => {
+            expect(applyTermMappings('I seen that suffering', '')).to.equal('I saw that suffering');
+            expect(applyTermMappings('Jehovah seen something good', '')).to.equal('Jehovah saw something good');
+            expect(applyTermMappings('she seen the truth', '')).to.equal('she saw the truth');
+        });
+        it('does NOT touch "I have seen" / "I\'ve seen"', () => {
+            expect(applyTermMappings('I have seen it', '')).to.equal('I have seen it');
+            expect(applyTermMappings("I've seen it", '')).to.equal("I've seen it");
+        });
+        it('does NOT break inverted questions "Have you seen" / "has he seen"', () => {
+            expect(applyTermMappings('Have you seen him?', '')).to.equal('Have you seen him?');
+            expect(applyTermMappings('has he seen it', '')).to.equal('has he seen it');
+        });
+    });
+
+    describe('missing plural on "question" + "a many"', () => {
+        it('"a many of question" → "many questions"', () => {
+            expect(applyTermMappings('asked me a many of question', 'foarte multe întrebări'))
+                .to.equal('asked me many questions');
+        });
+        it('"a many" → "a lot"', () => {
+            expect(applyTermMappings('we learn a many', 'învățăm foarte multe')).to.equal('we learn a lot');
+        });
+        it('"a few question" → "a few questions" (article forces noun)', () => {
+            expect(applyTermMappings('ask a few question', '')).to.equal('ask a few questions');
+        });
+        it('does NOT touch verb "question" after a bare quantifier', () => {
+            expect(applyTermMappings('many question the wisdom of it', '')).to.equal('many question the wisdom of it');
+        });
+    });
+
+    describe('"joy" as verb: will/who joy → enjoy', () => {
+        it('"will joy the meeting" → "will enjoy the meeting"', () => {
+            expect(applyTermMappings('we will joy the meeting', 'ne vom bucura')).to.equal('we will enjoy the meeting');
+        });
+        it('"who joy talking" → "who enjoy talking"', () => {
+            expect(applyTermMappings('people who joy talking about him', 'se bucură')).to.equal('people who enjoy talking about him');
+        });
+    });
+
+    describe('misc live-review grammar fixes', () => {
+        it('"see what happen" → "see what happens"', () => {
+            expect(applyTermMappings('and see what happen', '')).to.equal('and see what happens');
+        });
+        it('double negative "don\'t lose nothing" → "don\'t lose anything"', () => {
+            expect(applyTermMappings("you don't lose nothing", 'nu pierzi nimic')).to.equal("you don't lose anything");
+        });
+        it('"he pleasant" → "he liked" (gated on plăcut)', () => {
+            expect(applyTermMappings('what he pleasant about the program', 'ce a plăcut'))
+                .to.equal('what he liked about the program');
+        });
+        it('does NOT touch "he pleasant" without plăcut gate', () => {
+            expect(applyTermMappings('he pleasant company', 'companie plăcută'.replace('plăcută', 'X')))
+                .to.equal('he pleasant company');
+        });
+        it('"I start" → "I started" gated on "am început"', () => {
+            expect(applyTermMappings('When I start secular work', 'Când am început munca laică'))
+                .to.equal('When I started secular work');
+        });
+        it('does NOT touch habitual "I start" without past gate', () => {
+            expect(applyTermMappings('I start work at nine', 'încep lucrul la nouă')).to.equal('I start work at nine');
+        });
+        it('"the fathers" → "the parents" gated on "părinți"', () => {
+            expect(applyTermMappings('I told the fathers', 'le am spus părinților')).to.equal('I told the parents');
+        });
+        it('"Redhead" → "Roșca" when source has the surname', () => {
+            expect(applyTermMappings('Redhead, are you smiling now?', 'Roșca zâmbești acum'))
+                .to.equal('Roșca, are you smiling now?');
+        });
+    });
+
     describe('past-tense flattening (gated on Romanian past marker)', () => {
         it('"Jehovah change" → "Jehovah changed" when source has "a schimbat"', () => {
             expect(applyTermMappings('but Jehovah change the way he provided guidance', 'Iehova a schimbat modul'))

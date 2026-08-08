@@ -46,6 +46,11 @@ const TRANSLATION_TIMEOUT_MS = APP_CONFIG.translation?.timeoutMs || 15000; // Ti
 
 const APP_PASSWORD = process.env.APP_PASSWORD || null;
 
+// App version stamped onto translation_log rows (keep in sync with the badge in index.html).
+// Was previously hardcoded 'v206', which mislabelled every logged row and undermined
+// per-version log analysis.
+const APP_VERSION = 'v220';
+
 // Guard: SESSION_SECRET must be set in production — hardcoded fallback is a security hole
 if (NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
     console.error('FATAL: SESSION_SECRET environment variable is not set. Refusing to start in production.');
@@ -1425,7 +1430,7 @@ io.on('connection', (socket) => {
                         sourceLanguage: currentLanguage,
                         targetLanguage: targetLanguage,
                         reason: decision.reason,
-                        appVersion: 'v206'
+                        appVersion: APP_VERSION
                     }).catch(() => {}); // Non-fatal
 
                     restartAttempts = 0;

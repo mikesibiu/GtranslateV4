@@ -703,8 +703,13 @@ function applyTermMappings(text, sourceText = '') {
     // Double-marked negatives — MT inflects the verb after "don't/do not" (grammatically impossible)
     result = result.replace(/\bdoesn't loves\b/gi, "doesn't love");
     result = result.replace(/\bdo not allows\b/gi, 'do not allow');
-    // "am văzut" → "we seen" (past participle without auxiliary — regional but wrong in translation)
-    result = result.replace(/\bwe seen\b/gi, 'we saw');
+    // "am/ai/a văzut" → "<pron> seen" (past participle without auxiliary — non-standard English;
+    // recurring across meetings: "I seen", "she seen", "Jehovah seen"). A bare "<pron> seen"
+    // is never standard English ("I've seen"/"have seen" keep their auxiliary and don't match).
+    // Negative lookbehind excludes inverted questions/perfects where "seen" is correct:
+    // "Have you seen", "has he seen", "had we seen" (and n't forms) must NOT become "saw".
+    result = result.replace(/(?<!\b(?:[Hh]ave|[Hh]as|[Hh]ad|[Hh]aven't|[Hh]asn't|[Hh]adn't)\s)\b(I|you|he|she|we|they|it|Jehovah|God) seen\b/g,
+        (m, p) => p + ' saw');
 
     // Untranslated Romanian leaking into English output — MT failed to translate the word
     // "Mulțumim" (Thank you) appears verbatim in output when MT drops it
@@ -923,6 +928,60 @@ function applyTermMappings(text, sourceText = '') {
 
     // "and start to pray" → "and started to pray" in past narrative ("a început să se roage")
     result = result.replace(/\band start to pray\b/gi, 'and started to pray');
+
+    // ────────────── 2026-08-06 midweek + 2026-08-08 weekend meeting review ──────────────
+
+    // "a învăța PE cineva" (teach someone) with a pronoun object: "learn/learned me/us/him"
+    // is non-standard English (should be teach/taught). Ungated — "learn me/us/him" is never
+    // valid. ("them/her/it" excluded: "learned them by heart", "learned her name" are valid.)
+    result = result.replace(/\b(learn|learns|learned)\s+(me|us|him)\b/gi, (m, v, obj) => {
+        const lv = v.toLowerCase();
+        let repl = lv === 'learns' ? 'teaches' : lv === 'learned' ? 'taught' : 'teach';
+        if (v[0] === v[0].toUpperCase()) repl = repl[0].toUpperCase() + repl.slice(1);
+        return repl + ' ' + obj;
+    });
+
+    // "foarte multe întrebări" → MT drops the plural. Only "a few question" and "a many of
+    // question" are safe to pluralize: the article "a" forces a NOUN reading. Bare
+    // "these/many question" is left alone because "question" can be a verb there
+    // ("many question the wisdom of…").
+    result = result.replace(/\ba many of (questions?)\b/gi, 'many questions');
+    result = result.replace(/\ba many\b/gi, 'a lot');
+    result = result.replace(/\ba few question\b/gi, 'a few questions');
+
+    // "se bucură" (enjoy/rejoice) rendered as bare noun "joy": "will joy" → "will enjoy",
+    // "who joy" → "who enjoy" (the "to joy the"/"were joy"/"could not joy" cases are above).
+    result = result.replace(/\bwill joy\b/gi, 'will enjoy');
+    result = result.replace(/\bwho joy\b/gi, 'who enjoy');
+
+    // "să vedem ce se întâmplă" → "see what happen" (missing 3rd-person -s).
+    result = result.replace(/\bsee what happen\b/gi, 'see what happens');
+
+    // Romanian double negative "nu pierzi nimic" calqued as "don't lose nothing".
+    result = result.replace(/\b(don't|doesn't|do not|does not) lose nothing\b/gi, '$1 lose anything');
+
+    // "mi-a plăcut" verb sense: "he/she pleasant [X]" → "liked" (adjective "pleasant" needs a
+    // copula: "he is pleasant"). Gated on "plăcut" in source so real adjectives are untouched.
+    if (/pl[aă]cut/i.test(sourceNorm)) {
+        result = result.replace(/\b(he|she) pleasant\b/gi, (m, p) => p + ' liked');
+    }
+
+    // "am început …" (I started/began) → MT present "I start". Gated on the past marker so
+    // habitual present ("I start work at 9") is never touched.
+    if (/\bam inceput\b/i.test(sourceNorm)) {
+        result = result.replace(/\bI start\b/g, 'I started');
+    }
+
+    // "părinților" = parents (not "fathers"). Gated on "părinți" in source.
+    if (/parint/i.test(sourceNorm)) {
+        result = result.replace(/\bthe fathers\b/gi, 'the parents');
+    }
+
+    // "Roșca" is a surname here, not the adjective "roșcat" (redhead). Gate on capitalised
+    // "Roșca" in source (case-sensitive — lowercase "roșca" is not a name).
+    if (/\bRoșca\b/.test(sourceText)) {
+        result = result.replace(/\bRedhead\b/g, 'Roșca');
+    }
 
     return result;
 }
