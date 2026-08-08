@@ -708,7 +708,7 @@ function applyTermMappings(text, sourceText = '') {
     // is never standard English ("I've seen"/"have seen" keep their auxiliary and don't match).
     // Negative lookbehind excludes inverted questions/perfects where "seen" is correct:
     // "Have you seen", "has he seen", "had we seen" (and n't forms) must NOT become "saw".
-    result = result.replace(/(?<!\b(?:[Hh]ave|[Hh]as|[Hh]ad|[Hh]aven't|[Hh]asn't|[Hh]adn't)\s)\b(I|you|he|she|we|they|it|Jehovah|God) seen\b/g,
+    result = result.replace(/(?<!\b(?:have|has|had|haven't|hasn't|hadn't)\s)\b(I|you|he|she|we|they|it|Jehovah|God) seen\b/gi,
         (m, p) => p + ' saw');
 
     // Untranslated Romanian leaking into English output — MT failed to translate the word
@@ -947,15 +947,19 @@ function applyTermMappings(text, sourceText = '') {
     // ("many question the wisdom of…").
     result = result.replace(/\ba many of (questions?)\b/gi, 'many questions');
     result = result.replace(/\ba many\b/gi, 'a lot');
-    result = result.replace(/\ba few question\b/gi, 'a few questions');
+    // Negative lookahead: don't touch "a few question marks" or "question and answer".
+    result = result.replace(/\ba few question\b(?!\s+(?:marks?|and\b))/gi, 'a few questions');
 
-    // "se bucură" (enjoy/rejoice) rendered as bare noun "joy": "will joy" → "will enjoy",
-    // "who joy" → "who enjoy" (the "to joy the"/"were joy"/"could not joy" cases are above).
-    result = result.replace(/\bwill joy\b/gi, 'will enjoy');
-    result = result.replace(/\bwho joy\b/gi, 'who enjoy');
+    // "se bucură" (enjoy/rejoice) rendered as bare noun "joy". REQUIRE an explicit subject
+    // before "will joy" so an inverted rhetorical question ("Will joy come to those who serve
+    // Jehovah?" — a common talk/article title) is NOT mangled into "Will enjoy come…".
+    result = result.replace(/\b(I|you|he|she|we|they|it|Jehovah|God)\s+will\s+joy\b/gi,
+        (m, p) => p + ' will enjoy');
+    result = result.replace(/\bwho\s+joy\b/gi, (m) => (m[0] === 'W' ? 'Who' : 'who') + ' enjoy');
 
-    // "să vedem ce se întâmplă" → "see what happen" (missing 3rd-person -s).
-    result = result.replace(/\bsee what happen\b/gi, 'see what happens');
+    // "să vedem ce se întâmplă" → "see what happen" (missing 3rd-person -s). Case-preserving:
+    // "See what happen." is a plausible imperative at a segment start.
+    result = result.replace(/\bsee what happen\b/gi, (m) => (m[0] === 'S' ? 'See' : 'see') + ' what happens');
 
     // Romanian double negative "nu pierzi nimic" calqued as "don't lose nothing".
     result = result.replace(/\b(don't|doesn't|do not|does not) lose nothing\b/gi, '$1 lose anything');
@@ -972,14 +976,15 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bI start\b/g, 'I started');
     }
 
-    // "părinților" = parents (not "fathers"). Gated on "părinți" in source.
-    if (/parint/i.test(sourceNorm)) {
-        result = result.replace(/\bthe fathers\b/gi, 'the parents');
-    }
+    // NOTE: dropped the "the fathers"→"the parents" rule (părinți gate). Too risky: "the
+    // fathers" is a standing biblical idiom in this domain (forefathers/patriarchs, "the God
+    // of our fathers"), and a whole-utterance gate could swap a correct scriptural reference.
+    // Marginal benefit ("I told the fathers") not worth the collision.
 
-    // "Roșca" is a surname here, not the adjective "roșcat" (redhead). Gate on capitalised
-    // "Roșca" in source (case-sensitive — lowercase "roșca" is not a name).
-    if (/\bRoșca\b/.test(sourceText)) {
+    // "Roșca" is a surname here, not the adjective "roșcat" (redhead). Gate on "Rosca" in
+    // sourceNorm (diacritics stripped so it fires even if STT drops ș; still case-sensitive —
+    // sourceNorm preserves case, and lowercase "rosca" is not a name).
+    if (/\bRosca\b/.test(sourceNorm)) {
         result = result.replace(/\bRedhead\b/g, 'Roșca');
     }
 

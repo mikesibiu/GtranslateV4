@@ -1706,6 +1706,10 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings('Have you seen him?', '')).to.equal('Have you seen him?');
             expect(applyTermMappings('has he seen it', '')).to.equal('has he seen it');
         });
+        it('handles capitalized sentence-initial pronouns', () => {
+            expect(applyTermMappings('He seen the vision', '')).to.equal('He saw the vision');
+            expect(applyTermMappings('They seen him leave', '')).to.equal('They saw him leave');
+        });
     });
 
     describe('missing plural on "question" + "a many"', () => {
@@ -1722,6 +1726,10 @@ describe('applyTermMappings', () => {
         it('does NOT touch verb "question" after a bare quantifier', () => {
             expect(applyTermMappings('many question the wisdom of it', '')).to.equal('many question the wisdom of it');
         });
+        it('does NOT touch "a few question marks" / "question and answer"', () => {
+            expect(applyTermMappings('a few question marks', '')).to.equal('a few question marks');
+            expect(applyTermMappings('a few question and answer segments', '')).to.equal('a few question and answer segments');
+        });
     });
 
     describe('"joy" as verb: will/who joy → enjoy', () => {
@@ -1731,11 +1739,16 @@ describe('applyTermMappings', () => {
         it('"who joy talking" → "who enjoy talking"', () => {
             expect(applyTermMappings('people who joy talking about him', 'se bucură')).to.equal('people who enjoy talking about him');
         });
+        it('does NOT mangle an inverted question "Will joy come..."', () => {
+            expect(applyTermMappings('Will joy come to those who serve Jehovah?', ''))
+                .to.equal('Will joy come to those who serve Jehovah?');
+        });
     });
 
     describe('misc live-review grammar fixes', () => {
-        it('"see what happen" → "see what happens"', () => {
+        it('"see what happen" → "see what happens" (case-preserving)', () => {
             expect(applyTermMappings('and see what happen', '')).to.equal('and see what happens');
+            expect(applyTermMappings('See what happen next', '')).to.equal('See what happens next');
         });
         it('double negative "don\'t lose nothing" → "don\'t lose anything"', () => {
             expect(applyTermMappings("you don't lose nothing", 'nu pierzi nimic')).to.equal("you don't lose anything");
@@ -1755,12 +1768,15 @@ describe('applyTermMappings', () => {
         it('does NOT touch habitual "I start" without past gate', () => {
             expect(applyTermMappings('I start work at nine', 'încep lucrul la nouă')).to.equal('I start work at nine');
         });
-        it('"the fathers" → "the parents" gated on "părinți"', () => {
-            expect(applyTermMappings('I told the fathers', 'le am spus părinților')).to.equal('I told the parents');
+        it('does NOT touch biblical "the fathers" (rule dropped — idiom collision)', () => {
+            expect(applyTermMappings('the God of our fathers', 'Dumnezeul părinților noștri'))
+                .to.equal('the God of our fathers');
         });
-        it('"Redhead" → "Roșca" when source has the surname', () => {
+        it('"Redhead" → "Roșca" (gate on sourceNorm, fires even if STT drops ș)', () => {
             expect(applyTermMappings('Redhead, are you smiling now?', 'Roșca zâmbești acum'))
                 .to.equal('Roșca, are you smiling now?');
+            expect(applyTermMappings('Redhead is here', 'Rosca este aici'))
+                .to.equal('Roșca is here');
         });
     });
 
