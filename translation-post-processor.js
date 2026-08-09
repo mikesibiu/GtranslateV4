@@ -722,6 +722,7 @@ function applyTermMappings(text, sourceText = '') {
     }
 
     // "bucura" (to enjoy/rejoice) → MT strips prefix → "to joy the" instead of "to enjoy the"
+    // (pre-existing v210–v217 rule; catches "able to joy the Paradise" → "…to enjoy the…").
     result = result.replace(/\bto joy the\b/gi, 'to enjoy the');
 
     // 2026-07-24 deep-dive fixes (thu-2045):
@@ -990,18 +991,14 @@ function applyTermMappings(text, sourceText = '') {
 
     // ────────────── 2026-08-09 Sunday meeting review ──────────────
 
-    // "a (se) bucura" (to enjoy / rejoice / be glad) → MT strips the reflexive prefix and emits
-    // the bare noun "joy" in verb slots. Gate on "bucur" in source so the noun "joy" ("song of
-    // joy", "the joy of…", or a person named Joy) is never rewritten. Case-preserving.
+    // "a (se) bucura" (enjoy/rejoice) → MT emits the bare noun "joy" in verb slots. Gate on
+    // "bucur". NOTE: "joy" is BOTH the noun (bucurie) and the verb (a se bucura), sharing the
+    // "bucur" root, so the gate cannot disambiguate — ONLY the structurally-unambiguous
+    // "joy special privileges" slot is safe (noun-noun is invalid English there). Deliberately
+    // NOT handled, because "joy" is a valid NOUN after each: "to joy"/"to joy the" ("path to
+    // joy"), "can joy" ("Can joy be real?"), "<modal> joy" ("May joy be with you", "Will joy
+    // come…?"), and "be joy to" ("be a joy to her family / to behold"). v223 removed all of them.
     if (/bucur/i.test(sourceNorm)) {
-        result = result.replace(/\bbe joy to\b/gi, (m) => (m[0] === 'B' ? 'Be' : 'be') + ' glad to');
-        result = result.replace(/\bto joy\b/gi, (m) => (m[0] === 'T' ? 'To' : 'to') + ' enjoy');
-        result = result.replace(/\bcan joy\b/gi, (m) => (m[0] === 'C' ? 'Can' : 'can') + ' rejoice');
-        // Any modal + bare "joy" → "enjoy". Covers the noun-subject cases the subject-whitelisted
-        // "will joy" rule above misses ("Joseph will joy", "they must joy"). Modal case preserved.
-        result = result.replace(/\b(will|would|should|shall|may|might|must)\s+joy\b/gi, '$1 enjoy');
-        // Past-narrative "joy special privileges" → "enjoyed …". Negative lookbehind keeps the
-        // modal/infinitive forms (handled above) from becoming a past participle. Case-preserving.
         result = result.replace(/(?<!\b(?:will|to|can|may|would|should|must|shall|might|do|does|did)\s)\bjoy special privileges\b/gi,
             (m) => (m[0] === 'J' ? 'Enjoyed' : 'enjoyed') + ' special privileges');
     }

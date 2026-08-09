@@ -1845,33 +1845,19 @@ describe('applyTermMappings', () => {
     });
 
     describe('2026-08-09 Sunday review: "joy" as verb (gated on bucur)', () => {
-        it('"be joy to" → "be glad to"', () => {
-            expect(applyTermMappings('today we will be joy to find out', 'astăzi ne vom bucura să aflăm'))
-                .to.equal('today we will be glad to find out');
-        });
-        it('"to joy" → "to enjoy"', () => {
-            expect(applyTermMappings('just to joy some flowers', 'doar ca să se bucure de flori'))
-                .to.equal('just to enjoy some flowers');
-        });
-        it('"can joy" → "can rejoice"', () => {
-            expect(applyTermMappings('at the harvest you can joy a lot', 'la recoltă te poți bucura mult'))
-                .to.equal('at the harvest you can rejoice a lot');
+        // v223: only "joy special privileges" is structurally unambiguous; every other slot leaves
+        // "joy" alone because it is a valid NOUN there.
+        it('does NOT convert "be joy to" (ambiguous with "be a joy to <someone>/behold")', () => {
+            expect(applyTermMappings('she continues to be joy to her family', 'ea continuă să fie o bucurie pentru familia ei'))
+                .to.equal('she continues to be joy to her family');
         });
         it('"joy special privileges" → "enjoyed special privileges" (past narrative)', () => {
             expect(applyTermMappings('Joseph joy special privileges', 'Iosif se bucura de privilegii speciale'))
                 .to.equal('Joseph enjoyed special privileges');
         });
-        it('modal "will joy special privileges" → "will enjoy …" (never "will enjoyed")', () => {
+        it('whitelisted subject "God will joy special privileges" → "will enjoy …" (via will-joy rule)', () => {
             expect(applyTermMappings('God will joy special privileges', 'Dumnezeu se va bucura de privilegii'))
                 .to.equal('God will enjoy special privileges');
-        });
-        it('non-whitelisted subject "Joseph will joy special privileges" → "will enjoy …"', () => {
-            expect(applyTermMappings('Joseph will joy special privileges', 'Iosif se va bucura de privilegii'))
-                .to.equal('Joseph will enjoy special privileges');
-        });
-        it('"they must joy the harvest" → "they must enjoy the harvest"', () => {
-            expect(applyTermMappings('they must joy the harvest', 'trebuie să se bucure de recoltă'))
-                .to.equal('they must enjoy the harvest');
         });
         it('sentence-initial "Joy special privileges" → "Enjoyed …" (case preserved)', () => {
             expect(applyTermMappings('Joy special privileges he received', 'S-a bucurat de privilegii'))
@@ -1880,8 +1866,24 @@ describe('applyTermMappings', () => {
         it('does NOT touch the noun "joy" when source has no bucur (e.g. a person named Joy)', () => {
             expect(applyTermMappings('give the book to Joy', 'dă cartea lui Joy'))
                 .to.equal('give the book to Joy');
-            expect(applyTermMappings('a song of joy', 'un cântec de bucurie? no-bucur-here'))
-                .to.equal('a song of joy');
+        });
+        // v223 regression guards: "joy" is a valid NOUN after these words — must NOT be verb-ified
+        // even with the bucur gate open (the over-broad to/can/modal + joy rules were removed).
+        it('does NOT mangle the blessing "May joy be with you all" (gate open)', () => {
+            expect(applyTermMappings('May joy be with you all', 'Fie ca bucuria să fie cu voi toți'))
+                .to.equal('May joy be with you all');
+        });
+        it('does NOT mangle the inverted question "Will joy come to those who serve Jehovah?"', () => {
+            expect(applyTermMappings('Will joy come to those who serve Jehovah?', 'Se vor bucura cei ce slujesc lui Iehova?'))
+                .to.equal('Will joy come to those who serve Jehovah?');
+        });
+        it('does NOT mangle the noun phrase "the path to joy and peace" (gate open)', () => {
+            expect(applyTermMappings('this is the path to joy and peace', 'aceasta e calea spre bucurie și pace'))
+                .to.equal('this is the path to joy and peace');
+        });
+        it('does NOT mangle the question "Can joy be real?" (gate open)', () => {
+            expect(applyTermMappings('Can joy be real?', 'Poate bucuria să fie reală?'))
+                .to.equal('Can joy be real?');
         });
     });
 
