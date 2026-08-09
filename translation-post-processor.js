@@ -988,6 +988,62 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bRedhead\b/g, 'Roșca');
     }
 
+    // ────────────── 2026-08-09 Sunday meeting review ──────────────
+
+    // "a (se) bucura" (to enjoy / rejoice / be glad) → MT strips the reflexive prefix and emits
+    // the bare noun "joy" in verb slots. Gate on "bucur" in source so the noun "joy" ("song of
+    // joy", "the joy of…", or a person named Joy) is never rewritten. Case-preserving.
+    if (/bucur/i.test(sourceNorm)) {
+        result = result.replace(/\bbe joy to\b/gi, (m) => (m[0] === 'B' ? 'Be' : 'be') + ' glad to');
+        result = result.replace(/\bto joy\b/gi, (m) => (m[0] === 'T' ? 'To' : 'to') + ' enjoy');
+        result = result.replace(/\bcan joy\b/gi, (m) => (m[0] === 'C' ? 'Can' : 'can') + ' rejoice');
+        // Any modal + bare "joy" → "enjoy". Covers the noun-subject cases the subject-whitelisted
+        // "will joy" rule above misses ("Joseph will joy", "they must joy"). Modal case preserved.
+        result = result.replace(/\b(will|would|should|shall|may|might|must)\s+joy\b/gi, '$1 enjoy');
+        // Past-narrative "joy special privileges" → "enjoyed …". Negative lookbehind keeps the
+        // modal/infinitive forms (handled above) from becoming a past participle. Case-preserving.
+        result = result.replace(/(?<!\b(?:will|to|can|may|would|should|must|shall|might|do|does|did)\s)\bjoy special privileges\b/gi,
+            (m) => (m[0] === 'J' ? 'Enjoyed' : 'enjoyed') + ' special privileges');
+    }
+
+    // "a crea / a creat" (to create / created) → MT emits the agent noun "creator" in verb slots
+    // ("God did not creator us", "man was creator in the image"). The gate excludes "creatură/
+    // creaturi" (creature) so an unrelated segment can't open it, and every pattern requires an
+    // object/complement that the noun-title "the Creator of…" never takes — so a correctly
+    // article-dropped "God was Creator of the universe" is left intact. Case-preserving.
+    if (/\bcrea(?!tur)/i.test(sourceNorm)) {
+        result = result.replace(/\b(did not|didn't|do not|don't|does not|doesn't) creator\b/gi, '$1 create');
+        // Passive-verb complements only (in/to/after/by/for) — never "Creator of …".
+        result = result.replace(/\b(was|were) creator (in|to|after|by|for)\b/gi, '$1 created $2');
+        result = result.replace(/\bcreator (us|them|me|you|him|her|it)\b/gi,
+            (m, obj) => (m[0] === 'C' ? 'Created' : 'created') + ' ' + obj);
+        result = result.replace(/\bcreator (such|clones?)\b/gi,
+            (m, obj) => (m[0] === 'C' ? 'Created' : 'created') + ' ' + obj);
+    }
+
+    // "merită" (is worth / worthwhile) → MT emits "deserve" in slots where it is ungrammatical
+    // ("it's not deserve it", "is deserve"). Gate on "merit"; only the clearly-broken forms are
+    // touched, so a correct "does not deserve it" (and "does not deserve the effort") stays intact.
+    if (/\bmerit/i.test(sourceNorm)) {
+        result = result.replace(/\b(it's|that's) not deserve it\b/gi, '$1 not worth it');
+        result = result.replace(/\b(is|are) deserve\b/gi, '$1 worthwhile');
+    }
+
+    // "grijă" (care) → MT sometimes emits the adjective "Careful" where the noun "care" is meant
+    // ("take great Careful of…"). Gate on "grij" (\b excludes "îngrijorat" = worried); the
+    // quantifier is required so "be careful" is untouched; the quantifier's case is preserved.
+    // CASE-SENSITIVE on "Careful" (do NOT add /i): "Careful" capitalised mid-phrase is the MT-bug
+    // signature; lowercase "more careful analysis" is valid English and must be left alone. The
+    // quantifier is matched in either case so a sentence-initial "Much Careful…" is still fixed.
+    if (/\bgrij/i.test(sourceNorm)) {
+        result = result.replace(/\b([Gg]reat|[Gg]ood|[Mm]uch|[Mm]ore)\s+Careful\b/g, (m, q) => q + ' care');
+    }
+
+    // "au văzut" with a NOUN subject: "his brothers seen that…" → "saw". Same auxiliary
+    // lookbehind as the pronoun rule above, so an inverted "Have the brothers seen…?" keeps "seen".
+    result = result.replace(/(?<!\b(?:have|has|had|haven't|hasn't|hadn't)\s)\b(his|her|their|the)\s+(brothers?|sisters?)\s+seen\b/gi,
+        '$1 $2 saw');
+
     return result;
 }
 

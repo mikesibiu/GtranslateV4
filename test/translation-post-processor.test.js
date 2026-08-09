@@ -1843,6 +1843,127 @@ describe('applyTermMappings', () => {
             expect(applyTermMappings("Please don't do that", 'Nu face asta')).to.equal("Please don't do that");
         });
     });
+
+    describe('2026-08-09 Sunday review: "joy" as verb (gated on bucur)', () => {
+        it('"be joy to" → "be glad to"', () => {
+            expect(applyTermMappings('today we will be joy to find out', 'astăzi ne vom bucura să aflăm'))
+                .to.equal('today we will be glad to find out');
+        });
+        it('"to joy" → "to enjoy"', () => {
+            expect(applyTermMappings('just to joy some flowers', 'doar ca să se bucure de flori'))
+                .to.equal('just to enjoy some flowers');
+        });
+        it('"can joy" → "can rejoice"', () => {
+            expect(applyTermMappings('at the harvest you can joy a lot', 'la recoltă te poți bucura mult'))
+                .to.equal('at the harvest you can rejoice a lot');
+        });
+        it('"joy special privileges" → "enjoyed special privileges" (past narrative)', () => {
+            expect(applyTermMappings('Joseph joy special privileges', 'Iosif se bucura de privilegii speciale'))
+                .to.equal('Joseph enjoyed special privileges');
+        });
+        it('modal "will joy special privileges" → "will enjoy …" (never "will enjoyed")', () => {
+            expect(applyTermMappings('God will joy special privileges', 'Dumnezeu se va bucura de privilegii'))
+                .to.equal('God will enjoy special privileges');
+        });
+        it('non-whitelisted subject "Joseph will joy special privileges" → "will enjoy …"', () => {
+            expect(applyTermMappings('Joseph will joy special privileges', 'Iosif se va bucura de privilegii'))
+                .to.equal('Joseph will enjoy special privileges');
+        });
+        it('"they must joy the harvest" → "they must enjoy the harvest"', () => {
+            expect(applyTermMappings('they must joy the harvest', 'trebuie să se bucure de recoltă'))
+                .to.equal('they must enjoy the harvest');
+        });
+        it('sentence-initial "Joy special privileges" → "Enjoyed …" (case preserved)', () => {
+            expect(applyTermMappings('Joy special privileges he received', 'S-a bucurat de privilegii'))
+                .to.equal('Enjoyed special privileges he received');
+        });
+        it('does NOT touch the noun "joy" when source has no bucur (e.g. a person named Joy)', () => {
+            expect(applyTermMappings('give the book to Joy', 'dă cartea lui Joy'))
+                .to.equal('give the book to Joy');
+            expect(applyTermMappings('a song of joy', 'un cântec de bucurie? no-bucur-here'))
+                .to.equal('a song of joy');
+        });
+    });
+
+    describe('2026-08-09 Sunday review: "creator" as verb (gated on crea)', () => {
+        it('"did not creator us" → "did not create us"', () => {
+            expect(applyTermMappings('God did not creator us to die', 'Dumnezeu nu ne-a creat ca să murim'))
+                .to.equal('God did not create us to die');
+        });
+        it('"was creator" → "was created"', () => {
+            expect(applyTermMappings('man was creator in the image of God', 'omul a fost creat după chipul lui Dumnezeu'))
+                .to.equal('man was created in the image of God');
+        });
+        it('"creator us" → "created us"', () => {
+            expect(applyTermMappings('God creator us to be happy', 'Dumnezeu ne-a creat să fim fericiți'))
+                .to.equal('God created us to be happy');
+        });
+        it('"didn\'t creator us like robots" → "create"', () => {
+            expect(applyTermMappings("he didn't creator us like robots", 'nu ne-a creat ca pe niște roboți'))
+                .to.equal("he didn't create us like robots");
+        });
+        it('does NOT touch the noun "Creator" when source has no crea', () => {
+            expect(applyTermMappings('our Creator is loving', 'Făcătorul nostru este iubitor'))
+                .to.equal('our Creator is loving');
+        });
+        it('does NOT invert the noun-title "God was Creator of the universe" (article dropped, gate open)', () => {
+            expect(applyTermMappings('God was Creator of the universe', 'Dumnezeu a fost Creatorul universului'))
+                .to.equal('God was Creator of the universe');
+        });
+    });
+
+    describe('2026-08-09 Sunday review: "deserve" → worth (gated on merit)', () => {
+        it('"it\'s not deserve it" → "it\'s not worth it"', () => {
+            expect(applyTermMappings("it's not deserve it", 'nu merită'))
+                .to.equal("it's not worth it");
+        });
+        it('"is deserve" → "is worthwhile"', () => {
+            expect(applyTermMappings('any activity connected with it is deserve', 'orice activitate merită'))
+                .to.equal('any activity connected with it is worthwhile');
+        });
+        it('leaves "deserve the effort" alone (rule dropped — "does not deserve the effort" is valid)', () => {
+            expect(applyTermMappings('these two options deserve the effort', 'aceste două opțiuni merită efortul'))
+                .to.equal('these two options deserve the effort');
+        });
+        it('does NOT alter a correct "does not deserve it"', () => {
+            expect(applyTermMappings('he does not deserve it', 'nu merită asta'))
+                .to.equal('he does not deserve it');
+        });
+    });
+
+    describe('2026-08-09 Sunday review: "Careful" noun → "care" (gated on grij)', () => {
+        it('"great Careful" → "great care"', () => {
+            expect(applyTermMappings('take great Careful of the garden', 'ai mare grijă de grădină'))
+                .to.equal('take great care of the garden');
+        });
+        it('"so much Careful" → "so much care"', () => {
+            expect(applyTermMappings('so much Careful and consideration', 'atâta grijă și considerație'))
+                .to.equal('so much care and consideration');
+        });
+        it('does NOT touch "be careful" (lowercase, and no grij gate)', () => {
+            expect(applyTermMappings('you must be careful', 'trebuie să fii atent'))
+                .to.equal('you must be careful');
+        });
+        it('does NOT touch lowercase "more careful analysis" even with the grij gate open', () => {
+            expect(applyTermMappings('we need more careful analysis', 'avem nevoie de mai multă grijă'))
+                .to.equal('we need more careful analysis');
+        });
+    });
+
+    describe('2026-08-09 Sunday review: noun-subject "seen" → "saw"', () => {
+        it('"his brothers seen that" → "his brothers saw that"', () => {
+            expect(applyTermMappings('when his brothers seen that their father loved him', 'când frații lui au văzut că tatăl îl iubea'))
+                .to.equal('when his brothers saw that their father loved him');
+        });
+        it('does NOT touch "the brothers have seen"', () => {
+            expect(applyTermMappings('the brothers have seen the vision', 'frații au văzut viziunea'))
+                .to.equal('the brothers have seen the vision');
+        });
+        it('does NOT touch inverted "Have the brothers seen …?" (auxiliary lookbehind)', () => {
+            expect(applyTermMappings('Have the brothers seen this proof?', 'Au văzut frații dovada?'))
+                .to.equal('Have the brothers seen this proof?');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
