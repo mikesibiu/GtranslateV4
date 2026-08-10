@@ -22,6 +22,49 @@
  * @returns {string} Corrected translation
  */
 function applyTermMappings(text, sourceText = '') {
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // WHAT THIS IS
+    //   An ordered pipeline of ~200 domain corrections applied to Google-Translate
+    //   output for Romanian→English JW meeting translation. Each rule rewrites `result`;
+    //   rules run TOP-TO-BOTTOM, so a later rule sees the output of earlier ones.
+    //
+    // ORDERING CONTRACT (important — interactions are order-dependent)
+    //   • Put MORE-SPECIFIC patterns BEFORE more-general ones (e.g. "indifferent of
+    //     whether" before "indifferent of"), or the general rule consumes the specific.
+    //   • The static `mappings[]` table below runs first (congress→convention, etc.);
+    //     later inline rules may rely on that already having happened.
+    //   • When in doubt, append near related rules and add a test — the 375+ tests in
+    //     test/translation-post-processor.test.js are the safety net for reordering.
+    //
+    // GATING CONVENTION (avoid corrupting correct translations)
+    //   • `sourceNorm` = the Romanian source with diacritics stripped (NFD). Gate on it
+    //     (or raw `sourceText`) whenever a fix could mis-fire on a legitimate sentence —
+    //     e.g. tense fixes gate on a Romanian past-tense marker; "church"→"congregation"
+    //     gates on "congregație/adunare" in source.
+    //   • Only leave a rule UNGATED when the English input is impossible/never-valid
+    //     ("be friendship with", "holy shit", "were need").
+    //   • Preserve casing on case-insensitive matches with a callback replacer (see the
+    //     many `(m) => m[0] === 'X' ? … : …` rules) — segments often start mid-sentence.
+    //
+    // RULE CATEGORIES (interleaved by meeting date, not grouped — grep these hints)
+    //   1. Static term map ......... the `mappings[]` array just below
+    //   2. STT mishears of "Iehova" in prayer ... Hopa / Homa / Popa / Boga / iertova
+    //   3. JW terminology .......... congregation(not church), convention, ministry,
+    //                                verses(not lyrics), New World Translation, Branch Committee
+    //   4. STT garbles / non-words . pulberabilă, dioxive, franci→brothers, teocratică
+    //   5. Grammar & verb agreement  missing -s/-ed, possessives, stray articles
+    //   6. Tense / historical-present  (source-gated on Romanian past markers)
+    //   7. Scripture citations ..... "N with M" → "N:M"  (gated on "digit cu digit")
+    //   Rules were appended per meeting; see the dated "──── <date> meeting ────"
+    //   dividers below for the chronological batches.
+    //
+    // CROSS-PROJECT TWIN
+    //   The NON-STT rules here are mirrored in PhraseTranslation's Python
+    //   apply_term_mappings (translation_engine_v2.py). test/fixtures/postprocessor-
+    //   parity-corpus.json + its parity test guard against JS↔Python drift — when you
+    //   add a non-STT rule, add a corpus case so both implementations stay in sync.
+    // ═══════════════════════════════════════════════════════════════════════════════
+
     // Normalize source for diacritic-insensitive matching: Deepgram sometimes drops
     // diacritics (e.g. "congregatie" instead of "congregație"), so source-aware regex
     // checks must work against both the original and the stripped form.
@@ -30,8 +73,8 @@ function applyTermMappings(text, sourceText = '') {
     const mappings = [
         { pattern: /\bvestitori\b/gi, replacement: 'publishers' },
         { pattern: /\bMartorii lui Iehova\b/gi, replacement: "Jehovah's Witnesses" },
-        // Fix transliteration variants of Jehovah produced by Google Translate from Romanian "Iehova"
-        // Matches "Yehova" and "Yehovah" — both observed in production output
+        // NovaTranslate/Deepgram-specific: "Yehova"/"Yehovah" mishearing → Jehovah (Google STT
+        // on main never produces this, so main lacks the rule; preserved here in the merge).
         { pattern: /\bYehovah?\b/gi, replacement: 'Jehovah' },
         { pattern: /\bnume nou\b/gi, replacement: 'new name' },
         { pattern: /\bnume noi\b/gi, replacement: 'new names' },
@@ -41,11 +84,44 @@ function applyTermMappings(text, sourceText = '') {
         // Bible reference format: Romanian "Proverbe de 7,3" → translated "Proverbs of 7,3"
         // → should be "Proverbs 7:3". Pattern: CapitalizedWord + "of" + N,M → N:M
         { pattern: /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+of\s+(\d+)[,.](\d+)\b/g, replacement: '$1 $2:$3' },
+        // "must to [verb]" — literal calque of Romanian "trebuie să [verb]".
+        // Google Translate produces this when the fragment lacks sentence context.
+        // "don't must to" → "don't have to"; "must to" → "must"
+        { pattern: /\bdon['']t\s+must\s+to\b/gi, replacement: "don't have to" },
+        { pattern: /\bmust\s+to\s+/gi, replacement: 'must ' },
+        // STT mishearing: "congresul de circuit" (circuit assembly) is sometimes transcribed
+        // as "congresul de tip construcție", producing "construction type convention/assembly".
+        // NOTE: the congress→convention rule above runs first, so by the time these patterns
+        // execute the text already reads "construction type convention". The "congress" variant
+        // is kept as a defensive fallback in case mapping order ever changes.
+        { pattern: /\bconstruction[\s-]type\s+convention\b/gi, replacement: 'circuit assembly' },
+        { pattern: /\bconstruction[\s-]type\s+assembly\b/gi, replacement: 'circuit assembly' },
+        { pattern: /\bconstruction[\s-]type\s+congress\b/gi, replacement: 'circuit assembly' },
     ];
 
     let result = text;
     for (const { pattern, replacement } of mappings) {
         result = result.replace(pattern, replacement);
+    }
+
+    // Source-aware fix: "Hopa" (STT mishear of "Iehova" in prayer/vocative context).
+    // Google Translate passes the unknown word through verbatim, so "Hopa" appears in result as-is.
+    // CASE-SENSITIVE GATE — intentional: lowercase "hopa" is the Romanian exclamation "whoops"
+    // and must NOT be corrected. Do not add /i to either regex.
+    // Confirmed failure: 2026-04-30 closing prayer — "Hopa să fi alături de noi" → "Hopa, be with us."
+    // MT sometimes translates "Hopa" as "Oops" — catch both outputs.
+    if (/\bHopa\b/.test(sourceText)) {
+        result = result.replace(/\bHopa\b/g, 'Jehovah');
+        result = result.replace(/\bOops\b/g, 'Jehovah');
+    }
+
+    // Source-aware fix: "Homa" (STT mishear of "Iehova" — same /H/ onset family as Hopa/Popa/Boga).
+    // CASE-SENSITIVE GATE — intentional: lowercase "homa" excluded for safety.
+    // Do not add /i to either regex. Possessive form must run before bare form.
+    // Confirmed: 2026-07-26 — "gândurile lui Homa pot deveni" → "Homa's thoughts can become"
+    if (/\bHoma\b/.test(sourceText)) {
+        result = result.replace(/\bHoma's\b/g, "Jehovah's");
+        result = result.replace(/\bHoma\b/g, 'Jehovah');
     }
 
     // Source-aware fix: "congregație" → "congregation" (not "church").
@@ -55,6 +131,17 @@ function applyTermMappings(text, sourceText = '') {
     if (/congregati/i.test(sourceNorm)) {
         result = result.replace(/\bchurch\b/gi, 'congregation');
         result = result.replace(/\bchurches\b/gi, 'congregations');
+    }
+
+    // Source-aware fix: "biserica" (definite singular = "the church") → "the congregation".
+    // In JW meetings, speakers use "biserica" to mean their own congregation/organization,
+    // not the churches of Christendom (for those they use "religiile lumii", "creștinătatea").
+    // Only fires on definite "the church" — "our church"/"his church"/"a church" from
+    // "biserica noastră/lui/o" are not corrected; expand if new patterns emerge in logs.
+    // Note: the trigger word "biserica" contains no Romanian diacritics, so matching
+    // directly against sourceText is sufficient — no need for sourceNorm here.
+    if (/\bbiserica\b/i.test(sourceText)) {
+        result = result.replace(/\bthe church\b/gi, 'the congregation');
     }
 
     // Source-aware fix: STT garbles "congrese speciale" → "congrete fiare" (beasts).
@@ -117,12 +204,852 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\bgatherings\b/gi, 'congregations');
     }
 
+    // Source-aware fix: "serviciu" in JW context = ministry/field service, not "service" (generic).
+    // "serviciul pe pământ" = "his ministry on earth"; "serviciu de predicare" = "preaching ministry".
+    // Only apply when source contains "serviciu" to avoid over-correcting unrelated "service" uses.
+    if (/serviciu/i.test(sourceText)) {
+        result = result.replace(/\bhis service on earth\b/gi, 'his ministry on earth');
+        result = result.replace(/\bthe service on earth\b/gi, 'the ministry on earth');
+        result = result.replace(/\bpreaching service\b/gi, 'preaching ministry');
+        result = result.replace(/\bfield service\b/gi, 'field ministry');
+    }
+
+    // Source-aware fix: "sportivă/sportiv" in Romanian speech = fair/sportsmanlike (showing
+    // integrity and fair play), not "sporty" (fashion/athletic style).
+    // Seen: "ce este sportivă" → "what is sporty" (2026-04-05 session).
+    if (/sportiv[ăa]?\b/i.test(sourceText)) {
+        result = result.replace(/\bsporty\b/gi, 'fair and upright');
+        // NOTE: bare "sporting" intentionally NOT replaced — too broad ("sporting chance",
+        // "sporting event", "sporting goods"). Only the confirmed bad output "sporty" is fixed.
+    }
+
     // Source-aware fix: "romani" in Romanian = Romani people/language (Roma), not Romans.
     // JW meetings regularly reference "limba romani" (Romani language) and "frații romani"
     // (Romani brothers). Exception: "cartea Romani" = the biblical book of Romans.
-    if (/\bromani\b/i.test(sourceText) && !/cart(?:ea)?\s+romani\b/i.test(sourceText)) {
+    if (/\bromani\b/i.test(sourceText) && !/cart(?:ea)?\s+romani\b/i.test(sourceText) && !/romani\s+\d/i.test(sourceText)) {
         result = result.replace(/\bRomans\b/g, 'Romani');
     }
+
+    // Source-aware fix: "blestemator" = blasphemer (theological term, 1 Tim 1:13).
+    // Google Translate renders it as "curser" (colloquial) — wrong in a Bible-reading context.
+    // Confirmed: 2026-04-30 session — "a fost blestemator persecutor" → "a curser persecutor".
+    if (/\bblestemator/i.test(sourceText)) {  // matches singular + plural "blestematori"
+        result = result.replace(/\bcurser\b/gi, 'blasphemer');
+        result = result.replace(/\bcursers\b/gi, 'blasphemers');
+    }
+
+    // Source-aware fix: "versuri" in JW context = Bible verses/scriptures, not song lyrics.
+    // Google Translate defaults to "lyrics" because "versuri" is most commonly poetry/songs.
+    // Confirmed: 2026-04-30 session — "organizarea versurilor" → "organization of lyrics".
+    if (/\bversur/i.test(sourceText)) {
+        result = result.replace(/\blyrics\b/gi, 'verses');
+    }
+
+    // Source-aware fix: "sigur" (Romanian adverb = "certainly/sure") capitalized by STT →
+    // Google Translate treats capital "Sigur" as a person's name and adds possessive.
+    // Confirmed: 2026-04-30 — "pe marginea lui Sigur" → "discuss Sigur's side" (should be "certainly").
+    // Note: "Sigur" is a legitimate Romanian given name, so only apply when lowercase "sigur"
+    // is present in source (STT capitalised it but the speaker meant the adverb).
+    if (/\bsigur\b/.test(sourceText)) {
+        // Possessive MUST run before bare form — bare /\bSigur\b/ would otherwise turn
+        // "Sigur's" into "certainly's" (the \b falls before the apostrophe).
+        result = result.replace(/\bSigur's\b/g, 'certainly');
+        result = result.replace(/\bSigur\b/g, 'certainly');
+    }
+
+    // Source-aware fix: "Popa" (capital) = STT mishear of "Iehova" (same /H/ onset pattern as Hopa).
+    // Lowercase "popa" = Romanian colloquial for "priest" — intentionally excluded by case-sensitive gate.
+    // Confirmed: 2026-05-14 — "gurița sa va trăi de Popa" → "his mouth will live on Popa".
+    if (/\bPopa\b/.test(sourceText)) {
+        result = result.replace(/\bPopa\b/g, 'Jehovah');
+    }
+
+    // Source-aware fix: "franci/francii" = STT mishear of "frați/frații" (brothers/the brothers).
+    // The /ts/ cluster in "frați" causes Google STT to commit to "franci" (francs — French currency).
+    // Confirmed: 2026-05-14 — "450 de franci" → "450 francs" (should be "450 brothers");
+    //            "efectiv am simțit cu francii" → "with the francs" (should be "with the brothers").
+    // Gate uses /\bfrancii?\b/ (not open suffix) to avoid firing on "Francisc" (proper name).
+    // "franci" has no diacritics — sourceText is sufficient (no need for sourceNorm).
+    if (/\bfrancii?\b/i.test(sourceText)) {
+        result = result.replace(/\bthe francs\b/gi, 'the brothers');
+        result = result.replace(/\bfrancs\b/gi, 'brothers');
+    }
+
+    // Grammar fix: "fi prieteni" (be friends) → Google Translate produces "be friendship with".
+    // "be friendship with" is impossible English — safe to fix globally (no source gate needed).
+    // Confirmed: 2026-05-14 — "fi prieteni cu Iehova" → "be friendship with Jehovah".
+    result = result.replace(/\bbe friendship with\b/gi, 'be friends with');
+
+    // Grammar fix: "considera prieteni" → "consider friendship" (wrong noun form).
+    // "consider friendship" IS valid English ("consider friendship important") so source gate required.
+    if (/consider[aă]/i.test(sourceNorm)) {
+        result = result.replace(/\bconsider friendship\b/gi, 'consider friends');
+    }
+
+    // Source-aware fix: "Boga" (capital) = STT mishear of "Iehova" — same /H/ onset mishear
+    // family as Hopa and Popa. Lowercase "boga" is not a standard Romanian word but excluded
+    // by case-sensitive gate for safety. Confirmed: 2026-05-14 — "îl cunoaște pe Boga" →
+    // "knows Boga" (should be "knows Jehovah"); preposition "pe" confirms it is a proper noun.
+    if (/\bBoga\b/.test(sourceText)) {
+        result = result.replace(/\bBoga\b/g, 'Jehovah');
+    }
+
+    // Source-aware fix: "pulberabilă" = STT mishear of "vulnerabilă" (vulnerable).
+    // The /vl/ → /pb/ shift produces a non-word that Google Translate renders as "pulverizable".
+    // "pulberabilă" never appears in real Romanian — safe to fix without false-positive risk.
+    // Confirmed: 2026-05-14 — "o minoritate religioasă pulberabilă" → "a pulverizable religious minority".
+    if (/pulberabil/i.test(sourceText)) {
+        result = result.replace(/\bpulverizable\b/gi, 'vulnerable');
+    }
+
+    // Source-aware fix: "iertova" = STT mishear of "Iehova" — non-word produced by blending
+    // "ierta" (to forgive) with "Iehova". Google Translate maps it to "Forgiveness".
+    // "iertova" is never a real Romanian word — safe gate with no false-positive risk.
+    // Confirmed: 2026-05-17 live — Psalm 83:18 "iertova numai tu ești cel preaînalt" →
+    // "Forgiveness, you alone are the Most High" (should be "Jehovah").
+    if (/iertova/i.test(sourceText)) {
+        result = result.replace(/\bForgiveness\b/g, 'Jehovah');
+        result = result.replace(/\bforgiveness\b/g, 'Jehovah');
+    }
+
+    // Source-aware fix: "prieteni" (friends, plural) → Google Translate renders as "friendship"
+    // (abstract noun) in some constructions. Confirmed: 2026-05-17 live — "Trei prieteni" →
+    // "three friendship" (should be "three friends").
+    // Gate: only apply when source has "prieteni" (plural) — "prietenie/prietenia" = friendship
+    // (abstract) is legitimate and excluded by the \bprieteni\b word boundary.
+    if (/\bprietenii?\b/i.test(sourceText)) {  // matches both prieteni and prietenii (definite form)
+        result = result.replace(/\bfriendship\b/gi, 'friends');
+    }
+
+    // Source-aware fix: "dioxive" = STT garble, likely of "dificile" (difficult).
+    // "dioxyves" is not an English word — safe to replace with "difficult".
+    // Confirmed: 2026-05-17 live — "încercări sunt dioxive" → "trials are dioxyves".
+    if (/dioxiv/i.test(sourceText)) {
+        result = result.replace(/\bdioxyves\b/gi, 'difficult');
+        result = result.replace(/\bdioxive\b/gi, 'difficult');
+    }
+
+    // Source-aware fix: "Comitetul de Ramură" (Branch Committee) — STT mishears "Ramură"
+    // (branch) as something that Google Translate renders as "psychiatric" or similar.
+    // Confirmed: 2026-05-17 live — "John Preda pentru Comitetul de Ramură" →
+    // "John Preda for the Psychiatric committee" (should be "Branch Committee").
+    if (/ramur/i.test(sourceText)) {
+        result = result.replace(/\bpsychiatric\b/gi, 'Branch');
+        result = result.replace(/\bpsychiatry\b/gi, 'Branch');
+    }
+
+    // "sclavul fidel și prevăzător" = "the faithful and discreet slave" (Matthew 24:45)
+    // "prevăzător" (foresighted) → Google Translate: "cautious"; JW canonical term: "discreet"
+    // "fidel" (faithful adjective) → sometimes rendered "faithfully" (adverb) by Google in context
+    // Confirmed: 2026-05-17 live — "sclavul fidel și prevăzător" → "faithfully and cautious slave"
+    if (/prevăzător/i.test(sourceText)) {
+        result = result.replace(/\bcautious\b/gi, 'discreet');
+        result = result.replace(/\bcautiously\b/gi, 'discreet');
+    }
+    if (/\bfidel\b/i.test(sourceText)) {
+        // Only the adjectival "faithfully" that governs "slave" (the "faithful and
+        // discreet slave" phrase) — never a standalone adverb elsewhere in a longer
+        // utterance. Lookahead allows an optional "and <word>" connector.
+        result = result.replace(/\bfaithfully\b(?=\s+(?:and\s+\w+\s+)?slave\b)/gi, 'faithful');
+    }
+
+    // "rugăm" (we pray) → Google Translate sometimes renders as "Please" (confuses with "vă rugăm" = please)
+    // Gate: source contains "rugăm" (first-person plural prayer form)
+    // Confirmed: 2026-05-17 — "continuăm să ne rugăm pentru voi" → "we continue to Please for you"
+    if (/rugăm/i.test(sourceText)) {
+        result = result.replace(/\bPlease for\b/g, 'pray for');
+        result = result.replace(/\bto Please\b/g, 'to pray');
+    }
+
+    // "mă bucură" / "bucur" → Google Translate renders as "joy" (noun) instead of "glad/happy"
+    // Confirmed: 2026-05-17 — "Mă bucură și pe mine" → "I'm joy too"
+    if (/bucur/i.test(sourceText)) {
+        result = result.replace(/\bI'm joy\b/gi, "I'm glad");
+        result = result.replace(/\bI am joy\b/gi, 'I am glad');
+        result = result.replace(/\bmakes me joy\b/gi, 'makes me happy');
+    }
+
+    // "suplinitori" (servants/publishers of Jehovah) → Google Translate: "substitutes"
+    // Confirmed: 2026-05-17 — "2 milioane de suplinitori ai lui Iehova" → "2 million substitutes of Jehovah"
+    if (/suplinitor/i.test(sourceText)) {
+        result = result.replace(/\bsubstitutes\b/gi, 'servants');
+    }
+
+    // "teocratică" (theocratic) → STT splits to "de ocratică", Google Translate outputs "democratic"
+    // Gate catches both the correct form AND the STT-garbled split "de ocratică"
+    // Cannot use /ocratic/ alone — "democratic" in source also contains it
+    // Confirmed: 2026-05-17 — "istoria noastră de ocratică" → "our democratic history"
+    if (/(teocratic|de ocratic)/i.test(sourceText)) {
+        result = result.replace(/\bdemocratic\b/gi, 'theocratic');
+    }
+
+    // "integri" (maintaining integrity) → Google Translate: "intact"
+    // JW context: "a rămâne integri" = to maintain integrity (spiritual steadfastness)
+    // Confirmed: 2026-05-17 — "să rămână integri" → "to stay intact"
+    if (/\bintegr/i.test(sourceText)) {
+        result = result.replace(/\bstay intact\b/gi, 'maintain their integrity');
+        result = result.replace(/\bremain intact\b/gi, 'remain faithful');
+    }
+
+    // "școala pentru evanghelizatori ai regatului" = "Kingdom Evangelizers' School" (official JW programme name)
+    // Confirmed: 2026-05-17 — output "the school for evangelizers of the kingdom"
+    if (/evanghelizatori/i.test(sourceText)) {
+        result = result.replace(/\bthe school for evangelizers of the kingdom\b/gi, "Kingdom Evangelizers' School");
+        result = result.replace(/\bschool for evangelizers of the kingdom\b/gi, "Kingdom Evangelizers' School");
+    }
+
+    // Source-aware fix: "evoMAG" = STT mishear of "Iehova" — evoMAG is a Romanian electronics
+    // retailer; the /jɛ/ onset of "Iehova" phonetically resembles "evo-".
+    // CASE-SENSITIVE GATE — intentional: "evoMAG" only appears capitalised as a brand name;
+    // lowercase "evomag" is a different error pattern and not in scope.
+    // Confirmed: 2026-05-21 — "oameni care îl iubesc pe evoMAG" → "people who love evoMAG"
+    if (/\bevoMAG\b/.test(sourceText)) {
+        result = result.replace(/\bevoMAG\b/g, 'Jehovah');
+    }
+
+    // Source-aware fix: "omul de ordine" / "oamenii de ordine" = JW meeting attendant/floor steward.
+    // Google Translate renders this as "law enforcement officer/people" because the phrase is also
+    // used for police/security in Romanian. In a Kingdom Hall, these are volunteer attendants.
+    // Gate: /de ordine\b/i covers all inflections (omul/omului/oamenii/oamenilor de ordine).
+    // Specific compound forms first (prevents "law enforcement officers" → "attendant officers").
+    // Confirmed: 2026-05-21 — "omul de ordine îi îndrumă pe cei prezenți" →
+    // "the law enforcement officer directs those present"
+    if (/de ordine\b/i.test(sourceText)) {
+        result = result.replace(/\blaw enforcement officers\b/gi, 'attendants');
+        result = result.replace(/\blaw enforcement officer\b/gi, 'attendant');
+        result = result.replace(/\blaw enforcement people\b/gi, 'attendants');
+        result = result.replace(/\blaw enforcement\b/gi, 'attendant');
+    }
+
+    // Source-aware fix: "primul ajutor" (first aid) → Google Translate: "first help"
+    // "First help" is not a recognised English compound noun; "first aid" is the correct medical term.
+    // Confirmed: 2026-05-21 fire safety talk — "acordarea primului ajutor" → "providing first help" (×5)
+    if (/prim(?:ul|ului)?\s+ajutor/i.test(sourceNorm)) {
+        result = result.replace(/\bfirst help\b/gi, 'first aid');
+    }
+
+    // Source-aware fix: "apărarea împotriva incendiilor" (fire protection/fire safety) →
+    // Google Translate: "against protection" (structural inversion confuses the parser).
+    // Confirmed: 2026-05-21 — "regulamentul privind apărarea împotriva incendiilor" →
+    // "against protection regulation" (should be "fire protection regulation")
+    if (/apararea impotriva incendiilor/i.test(sourceNorm)) {
+        result = result.replace(/\bagainst protection\b/gi, 'fire protection');
+    }
+
+    // Source-aware fix: "starea morților" (condition of the dead) — JW theological topic.
+    // STT garbles "morților" (of the dead) to "morală" (moral) → Google Translate: "Moral State".
+    // "Starea morților" is a core JW doctrine about what happens after death; "Moral State" is
+    // completely wrong. Confirmed: 2026-05-21 — "adevărul cu privire la Starea morală" →
+    // "the truth about the Moral State"
+    // ONLY replace the title-cased "Moral State" (Google Translate output for the garble).
+    // Lowercase "moral state" is legitimate English output when a speaker genuinely discusses
+    // the moral condition of the world — replacing it would cause doctrine confusion.
+    if (/starea moral/i.test(sourceText)) {
+        result = result.replace(/\bMoral State\b/g, 'condition of the dead');
+    }
+
+    // Source-aware fix: "cașul de Cult" = STT garble of "casa de cult" (house of worship /
+    // Kingdom Hall). "Worship hut" is degrading and wrong; "Kingdom Hall" is the correct JW term.
+    // Confirmed: 2026-05-21 — "să evacueze la cașul de Cult" → "to evacuate to the Worship hut"
+    if (/cașul de Cult|casei de cult|casa de cult/i.test(sourceText)) {
+        result = result.replace(/\bWorship hut\b/gi, 'Kingdom Hall');
+    }
+
+    // Source-aware fix: "pe Lot" = biblical Lot (nephew of Abraham), not "by lot" (drawing of lots).
+    // Romanian direct-object marker "pe" + name "Lot" → Google Translate interprets "lot" as idiom.
+    // Gate: source has "pe Noe" AND "pe lot" (both often cited together as faithful servants saved
+    // by Jehovah — Gen 7, Gen 19). The pairing "Noe...Lot" uniquely identifies the biblical context.
+    // Confirmed: 2026-05-21 — "Biblia nu l-a salvat pe Noe pe lot" → "did not save Noah by lot"
+    if (/pe Noe/i.test(sourceText) && /\bpe [Ll]ot\b/.test(sourceText)) {
+        result = result.replace(/\bby lot\b/gi, 'Lot');
+    }
+
+    // Source-aware fix: "Turnul de Vegan" = STT garble of "Turnul de Veghe" (The Watchtower).
+    // STT commits "Vegan" (the diet) over "Veghe" (watchfulness) despite phrase hint.
+    // Post-processor is the fallback when the STT hint fails.
+    // Confirmed: 2026-05-24 — "revista Turnul de Vegan" → "The tower de Vegan"
+    if (/Turnul de Vegan/i.test(sourceText)) {
+        result = result.replace(/\btower\s+(?:de|of)\s+Vegan\b/gi, 'Watchtower');
+        result = result.replace(/\b(?:de|of)\s+Vegan\b/gi, 'Watchtower');
+    }
+
+    // Source-aware fix: "conferința publică" = JW public talk (a single discourse), not a "conference"
+    // (which implies a multi-session event). Google Translate consistently produces "public conference".
+    // Confirmed: 2026-05-24 — "conferința publică de astăzi" → "today's public conference"
+    if (/conferinta publica/i.test(sourceNorm)) {
+        result = result.replace(/\bpublic conference\b/gi, 'public talk');
+    }
+
+    // Source-aware fix: "rugăm" rule extension — "We Please to" pattern not caught by v203 rule.
+    // v203 catches "Please for" and "to Please" but misses sentence-initial "We Please to/towards".
+    // Confirmed: 2026-05-24 — "te rugăm Iehova și în aceste clipe" → "We Please to Jehovah"
+    if (/rugăm|rugam/i.test(sourceNorm)) {
+        result = result.replace(/\bWe [Pp]lease\b/g, 'We pray');
+        result = result.replace(/\bwe [Pp]lease\b/g, 'we pray');
+        // "ne rugăm" (we pray) → MT outputs "Please" when fragments arrive without subject
+        // "must Please to Jehovah" pattern from 2026-07-19 Sunday meeting
+        result = result.replace(/\bmust Please to Jehovah\b/gi, 'must pray to Jehovah');
+    }
+
+    // Grammar fix: Romanian possessive + definite article suffix on noun → "your the X" double article.
+    // "ajutorul tău" → "your the help"; "cuvântul tău" → "your the word". No source gate needed —
+    // "your the" is never correct English regardless of context.
+    result = result.replace(/\byour the\b/gi, 'your');
+
+    // Grammar fix: "spiritul tău cel sfânt" → "your holy the spirit" (same possessive/article issue
+    // but the adjective "holy" sits between possessive and "the"). Fix the "holy the spirit" fragment.
+    result = result.replace(/\bholy the spirit\b/gi, 'Holy Spirit');
+
+    // "există" → "exist are" (ungrammatical) — never valid English
+    result = result.replace(/\bexist are\b/gi, 'there are');
+
+    // "plăcut lui Iehova" → "pleasant Jehovah" — adjective used where verb needed
+    result = result.replace(/\bpleasant Jehovah\b/gi, 'pleasing to Jehovah');
+
+    // "rețelele de socializare" → "social networks" — correct to "social media"
+    // "socializare" has no diacritics, so sourceText is sufficient (no need for sourceNorm)
+    if (/socializare/i.test(sourceText)) {
+        result = result.replace(/\bsocial networks\b/gi, 'social media');
+    }
+
+    // "judecată sănătoasă" → "common sense" — article uses "good judgment"
+    // Confirmed: 2026-05-24 WT audio test (w_M_202603_03 paragraph 15/18)
+    if (/judecata sanatoasa/i.test(sourceNorm)) {
+        result = result.replace(/\bcommon sense\b/gi, 'good judgment');
+    }
+
+    // "o presiune continuă" → "continue pressure" — Romanian adjective form mistaken for verb
+    result = result.replace(/\bcontinue pressure\b/gi, 'continuous pressure');
+
+    // "resursele materiale" → "materials resources" (noun used as adj) — Confirmed: 2026-05-24 Awake audio test
+    result = result.replace(/\bmaterials resources\b/gi, 'material resources');
+
+    // "the Bible say" — missing 3rd-person 's' — recurring across all Awake/WT articles
+    // Replacer preserves original capitalisation ("The" at sentence start vs "the" mid-sentence)
+    result = result.replace(/\bthe Bible say\b/gi, (m) => (m[0] === 'T' ? 'The' : 'the') + ' Bible says');
+
+    // "sfaturi" → "tips" — too casual; correct to "advice" — Confirmed: 2026-05-24 Awake audio test
+    if (/sfaturi/i.test(sourceText)) {
+        result = result.replace(/\btips\b/gi, 'advice');
+    }
+
+    // "află mai multe" → "find out many"/"learn many" — "many" vs "more" — Confirmed: 2026-05-24 Awake audio test
+    result = result.replace(/\bfind out many\b/gi, 'find out more');
+    result = result.replace(/\blearn many\b/gi, 'find out more');
+
+    // "resursele medicale" → "physician resources" — should be "medical resources"
+    result = result.replace(/\bphysician resources\b/gi, 'medical resources');
+
+    // "nu mai merită să trăiești" → "no longer deserve living" — should be "no longer worth living"
+    result = result.replace(/\bno longer deserve living\b/gi, 'no longer worth living');
+
+    // ──────────────────────── 2026-06-14 Sunday meeting ────────────────────────
+
+    // "cei care iubesc" → "who I love" (Google MT picks 1sg form of "iubesc" when context is clipped)
+    // Affects: "those who I love the truth", "people who I love", "all who I love God", etc.
+    // Gated on "iubesc" in source: "who I love" is valid English in testimonial/prayer sentences,
+    // so we only correct it when the Romanian source confirms the 3pl relative-clause pattern.
+    if (/\biubesc\b/i.test(sourceNorm)) {
+        result = result.replace(/\bwho I love\b/g, 'who love');
+    }
+
+    // "a început" (he started) → uninflected "start" when partial context arrives
+    result = result.replace(/\bJesus start\b/gi, 'Jesus started');
+    result = result.replace(/\bhe start\b/gi, (m) => (m[0] === 'H' ? 'He' : 'he') + ' started');
+
+    // "a creat" (he created) → uninflected "creator" in translation output; gated on "creat" in source
+    if (/\bcreat\b/i.test(sourceNorm)) {
+        result = result.replace(/\bhe creator\b/gi, 'he created');
+    }
+
+    // "cum anume" → "what certain" / "how certain" (recurring mistranslation of Romanian emphatic "anume")
+    result = result.replace(/\bwhat certain\b/gi, 'what exactly');
+    result = result.replace(/\bhow certain\b/gi, 'exactly how');
+
+    // "vărul de minciuni" → "cousin of lies" ("vărul" = veil/cousin homograph; context is always veil)
+    result = result.replace(/\bthe cousin of lies\b/gi, 'the veil of lies');
+
+    // "combinația creștină" (STT for "congregația creștină") → "Christian combination"
+    result = result.replace(/\bChristian combination\b/gi, 'Christian congregation');
+
+    // "Satanei" STT-garbled to "Safari" → "Safari's lies/deceptions" in translation output
+    result = result.replace(/\bSafari's (lies|deceptions|falsehoods)\b/gi, "Satan's $1");
+
+    // "exprimată" STT-garbled to "estimată" → "conviction estimated by the apostle Paul"
+    result = result.replace(/\bconviction estimated by\b/gi, 'conviction expressed by');
+
+    // "numit Armageddon" STT-garbled to "neumit Armageddon" (non-word) → "appointed/unending Armageddon"
+    result = result.replace(/\bwar appointed Armageddon\b/gi, 'war called Armageddon');
+    result = result.replace(/\bunending war of Armageddon\b/gi, 'war called Armageddon');
+
+    // "paragraful N" STT-garbled to "graful N" → "graph N" in translation output
+    // Gated on "paragraful" in source to avoid touching legitimate "graph N" references.
+    if (/\bparagraful\b/i.test(sourceNorm)) {
+        result = result.replace(/\bgraph (\d+)\b/gi, 'paragraph $1');
+    }
+
+    // "Romani" (Bible book) not converted by glossary when source was lowercase.
+    // Gate on source having "romani \d" (Bible book always has chapter number; ethnic group never does).
+    // Line 172 above is also updated to exclude this case, so the two rules are logically independent.
+    if (/romani\s+\d/i.test(sourceText)) {
+        result = result.replace(/\bRomani\b(?=\s+\d)/g, 'Romans');
+    }
+
+    // ──────────────────────── 2026-07-19 Sunday meeting ────────────────────────
+
+    // "lui sfânt" fragment without "spiritul" context → MT produces "holy shit"
+    // In a JW meeting this can only ever mean Holy Spirit. Ungated — never valid in this context.
+    result = result.replace(/\bholy shit\b/gi, 'Holy Spirit');
+
+    // "sens" (meaning/purpose) → STT mishears as "sexi"/"sex" → MT outputs "sexy"/"sex"
+    // Gated on source containing "sens" — speakers may legitimately discuss sexual immorality.
+    if (/\bsens(ul)?\b/i.test(sourceNorm)) {
+        result = result.replace(/\btrue sexy\b/gi, 'true meaning');
+        result = result.replace(/\bsearch for sex\b/gi, 'search for meaning');
+        result = result.replace(/\blooking for sex\b/gi, 'looking for meaning');
+    }
+
+    // "există" (there is/exists) → MT renders "exist is" or "exist was" (literal transliteration)
+    // Gated on source containing "există"/"exista" — "exist is a/no" can appear in valid English otherwise.
+    if (/\bexist[aă]\b/i.test(sourceNorm)) {
+        result = result.replace(/\b(exist) is (an?)\b/gi, (m, w, art) => (w[0] === 'E' ? 'There' : 'there') + ' is ' + art);
+        result = result.replace(/\b(exist) is no\b/gi, (m, w) => (w[0] === 'E' ? 'There' : 'there') + ' is no');
+        result = result.replace(/\b(exist) was no\b/gi, (m, w) => (w[0] === 'E' ? 'There' : 'there') + ' was no');
+    }
+
+    // "a creat" (created) → MT outputs "creator" for short fragments — Confirmed: 2026-07-19
+    result = result.replace(/\bGod (creator) man\b/gi, (m, w) => 'God ' + (w[0] === 'C' ? 'Created' : 'created') + ' man');
+
+    // "chipul lui Dumnezeu" → STT garbles "Dumnezeu" to a number → "image of 69" etc.
+    // Gated on "chipul" in source — "image of [number]" is never valid in this context.
+    if (/\bchipul\b/i.test(sourceNorm)) {
+        result = result.replace(/\bimage of \d+\b/gi, 'image of God');
+    }
+
+    // "nepoate" (masculine vocative: young man/son, term of affection) → MT outputs "granddaughter" (wrong gender).
+    // The conductor says "Iehova, nepoate!" as an affirmation after a student answers.
+    // Gated on "nepoate" in source to avoid touching unrelated "granddaughter" references.
+    if (/\bnepoate\b/i.test(sourceText)) {
+        result = result.replace(/\bgranddaughter\b/gi, 'young man');
+    }
+
+    // "se vestește" (is announced/proclaimed) → MT outputs "is hot" for short fragments.
+    // Gated on "vesteste"/"vestește" in source.
+    if (/\bvesteste\b/i.test(sourceNorm)) {
+        result = result.replace(/\bis hot\b/gi, 'is being proclaimed');
+    }
+
+    // ─────────────────────── 2026-07-23 Thursday meeting ───────────────────────
+
+    // "cele 54 de capitole" → STT hears "cai" (horses) → "54 horses" in translation
+    result = result.replace(/\b54 horses\b/gi, '54 chapters');
+
+    // "stubbornness led to exile" → STT produced English "exit" for Romanian "exil"
+    result = result.replace(/\bstubbornness led to the exit\b/gi, 'stubbornness led to exile');
+
+    // "compasiune" (compassion) → STT produced "compozitor" (composer/music writer)
+    result = result.replace(/\bkindness and composer\b/gi, 'kindness and compassion');
+
+    // "memorabile" split across chunks: "memora-" + "-bile" → MT outputs "balls that inspire"
+    result = result.replace(/\bballs that inspire us\b/gi, 'examples that inspire us');
+
+    // "nesimțit" used to mean fearless/unflinching → MT outputs negative "insensitive"
+    // Gated on source containing "nesimtit" — "brave and insensitive" can be legitimate for antagonists.
+    if (/nesimtit/i.test(sourceNorm)) {
+        result = result.replace(/\bbrave and insensitive\b/gi, 'brave and steadfast');
+        result = result.replace(/\bunfeeling faith\b/gi, 'unwavering faith');
+    }
+
+    // "meditând" (meditating) → STT heard "medicina" (medicine)
+    result = result.replace(/\bstudying medicine and the examples from the Bible\b/gi, 'meditating on the examples from the Bible');
+
+    // "te rugăm să ne ajuți" (we ask you to help us) → MT fragment: "Please you to help us"
+    result = result.replace(/\bPlease you to help us\b/gi, 'we ask you to help us');
+
+    // "the Jehovah" — article wrongly inserted before proper name Jehovah by MT
+    result = result.replace(/\bthe Jehovah\b/gi, 'Jehovah');
+
+    // "biruit lumea" (overcome the world, John 16:33) → STT heard "vinzi" (sell) → "sell the world"
+    // "overcome" is tense-neutral (works with has/have/will/can); "conquered" breaks after modal verbs.
+    result = result.replace(/\bsell the world\b/gi, 'overcome the world');
+
+    // "pun la cale" (plotting/planning) + STT inserts "ferată" → "cale ferată" (railway) → "laying a railway"
+    // Gated on "ferat" in source (the STT error word ferată) — "laying a railway" is valid English otherwise.
+    if (/ferat/i.test(sourceText)) {
+        result = result.replace(/\blaying a railway\b/gi, 'planning');
+    }
+
+    // "olarul" (the potter, Jeremiah/Isaiah imagery) → STT hears "molarul" (the molar tooth)
+    // Gated on "molarul" in source — prevents false positives if a speaker discusses dentistry.
+    if (/\bmolarul\b/i.test(sourceNorm)) {
+        result = result.replace(/\bwith the molar\b/gi, 'with the potter');
+        result = result.replace(/\bthe molar\b/gi, 'the potter');
+    }
+
+    // "glasul unui Olar" → STT heard "glasul" (voice) instead of "vasul" (vessel)
+    // "potter's voice breaks" should be "potter's vessel breaks" (Jeremiah 19:11 imagery)
+    // Gated on both "olar" (potter talk) and "glasul" (the STT error word) in source.
+    if (/\bolar\b/i.test(sourceNorm) && /\bglas/i.test(sourceNorm)) {
+        result = result.replace(/\bpotter's voice breaks\b/gi, "potter's vessel breaks");
+    }
+
+    // 2026-07-24 deep-dive fixes (thu-1950):
+
+    // Third-person verb agreement — MT drops -s on short fragments (systematic, recurring)
+    result = result.replace(/\bhe say\b/gi, (m) => (m[0] === 'H' ? 'He' : 'he') + ' says');
+    result = result.replace(/\bit say\b/gi, (m) => (m[0] === 'I' ? 'It' : 'it') + ' says');
+    result = result.replace(/\bhe know\b/gi, (m) => (m[0] === 'H' ? 'He' : 'he') + ' knows');
+    // "Așa spune Iehova" → "Thus say Jehovah" ("the Jehovah" already cleaned upstream)
+    result = result.replace(/\bThus say Jehovah\b/gi, 'Thus says Jehovah');
+    result = result.replace(/\bThus say the Lord\b/gi, 'Thus says the Lord');
+
+    // Double-marked negatives — MT inflects the verb after "don't/do not" (grammatically impossible)
+    result = result.replace(/\bdoesn't loves\b/gi, "doesn't love");
+    result = result.replace(/\bdo not allows\b/gi, 'do not allow');
+    // "am/ai/a văzut" → "<pron> seen" (past participle without auxiliary — non-standard English;
+    // recurring across meetings: "I seen", "she seen", "Jehovah seen"). A bare "<pron> seen"
+    // is never standard English ("I've seen"/"have seen" keep their auxiliary and don't match).
+    // Negative lookbehind excludes inverted questions/perfects where "seen" is correct:
+    // "Have you seen", "has he seen", "had we seen" (and n't forms) must NOT become "saw".
+    result = result.replace(/(?<!\b(?:have|has|had|haven't|hasn't|hadn't)\s)\b(I|you|he|she|we|they|it|Jehovah|God) seen\b/gi,
+        (m, p) => p + ' saw');
+
+    // Untranslated Romanian leaking into English output — MT failed to translate the word
+    // "Mulțumim" (Thank you) appears verbatim in output when MT drops it
+    result = result.replace(/\bMulțumim\b/g, 'Thank you');
+
+    // "traducerea/traducerii lumii" (the world translation) → should be "New World Translation" (JW Bible)
+    // Source gate: only fires when "traduc" + "lumii" appear together in source
+    if (/traduc\w*\s+\w*\s*lumii|lumii\s+\w*\s*traduc/i.test(sourceNorm)) {
+        result = result.replace(/\bworld translation\b/gi, 'New World Translation');
+    }
+
+    // "bucura" (to enjoy/rejoice) → MT strips prefix → "to joy the" instead of "to enjoy the"
+    // (pre-existing v210–v217 rule; catches "able to joy the Paradise" → "…to enjoy the…").
+    // v224: skip only the "leads/led to joy the …" noun-collision ("this leads to joy the world
+    // cannot give"). Deliberately narrow to leads/led: "leads to enjoy X" isn't natural English,
+    // so those never have a verb reading. Other carriers (path/way/key/door… to enjoy X) DO take a
+    // correct infinitive ("the path to enjoy the blessings"), so they must stay convertible.
+    result = result.replace(/(?<!\b(?:leads?|led)\s)\bto joy the\b/gi, 'to enjoy the');
+
+    // 2026-07-24 deep-dive fixes (thu-2045):
+
+    // "indiferent de/că/cât" (regardless of / no matter) → MT renders literally as "indifferent"
+    // "indifferent of/how/what" is not natural English; "regardless of" / "no matter" is correct.
+    // Ordered most-specific first to avoid overlapping replacements.
+    result = result.replace(/\bindifferent of whether\b/gi, 'regardless of whether');
+    result = result.replace(/\bindifferent of\b/gi, 'regardless of');
+    result = result.replace(/\bindifferent (how)\b/gi, 'no matter $1');
+    result = result.replace(/\bindifferent (what)\b/gi, 'no matter $1');
+    result = result.replace(/\bindifferent (that)\b/gi, 'regardless of the fact $1');
+
+    // "con reglației/con regulation" → STT garbles "congregației" (of the congregation)
+    result = result.replace(/\bcon regulation\b/gi, 'congregation');
+
+    // "Jehovah is my the help" → stray article inserted between possessive and noun
+    result = result.replace(/\bmy the help\b/gi, 'my help');
+
+    // 2026-07-26 Sunday meeting deep-dive fixes:
+
+    // "rugăm/roagă/rugăciune" → Google Translate reads politeness marker "rog" → outputs "Please"
+    // Gate: source must contain "rug" (covers rugăm, roagă, rugăciune, rugați)
+    // Gate covers rugăm/rugăciune (rug) AND roagă/Roagă-te (roag) forms
+    if (/rug|roag/i.test(sourceNorm)) {
+        result = result.replace(/let's\s+Please\b/gi, 'let us pray');
+        result = result.replace(/\blet's pray\b/gi, 'let us pray'); // fallback if two-step fires
+        result = result.replace(/\bshould Please to God\b/gi, 'should pray to God');
+        result = result.replace(/\bwe Please\b/gi, 'we pray');
+        result = result.replace(/\bPlease to God\b/gi, 'pray to God');
+    }
+
+    // Iehova mishearings → garbled English proper nouns
+    // Gate: source must contain Iehova (or close variant)
+    if (/iehov|ihova/i.test(sourceNorm)) {
+        result = result.replace(/\btrust in Moldova\b/gi, 'trust in Jehovah');
+        result = result.replace(/\bworship of export\b/gi, 'worship of Jehovah');
+        result = result.replace(/\bask a sheep for\b/gi, 'ask Jehovah for');
+        result = result.replace(/\bhova (ever|always)\b/gi, 'Jehovah $1');
+    }
+
+    // "instruire (suplimentară)" garbled by STT into medical/unrelated words
+    // "additional insulin" / "without higher insulin" — never valid; no gate needed
+    result = result.replace(/\badditional insulin\b/gi, 'additional training');
+    result = result.replace(/\bwithout (?:a )?higher insulin\b/gi, 'without higher education');
+    // "Love Island" ← STT transcribed "instruirea" as "Insula iubirii" (Romanian TV show name)
+    // "Insula iubirii" = STT garble of "instruirea" (Romanian TV show name for Love Island)
+    if (/insula iubirii/i.test(sourceText)) {
+        result = result.replace(/\bLove Island\b/gi, 'additional training');
+    }
+    // "additional inspiration" in training context (gate: instruire in source)
+    if (/instruir/i.test(sourceNorm)) {
+        result = result.replace(/\badditional inspiration\b/gi, 'additional training');
+        result = result.replace(/\bit inspires you\b/gi, 'it trains you');
+        // STT garble: "instruire" → "distruge suplimentară" → "additional education or skating"
+        result = result.replace(/\badditional (?:education|training) or skating\b/gi, 'additional training');
+        // STT garble: "instruire superioară" → "o inspire superioară" → MT: "inspired by a higher power"
+        result = result.replace(/\binspired by a higher power\b/gi, 'higher education');
+    }
+
+    // "Jehovah 's" → "Jehovah's" (spacing artifact from MT tokenisation)
+    result = result.replace(/\bJehovah 's\b/g, "Jehovah's");
+
+    // Double article artifacts: "his the word", "our the words"
+    result = result.replace(/\bhis the (\w)/g, 'his $1');
+    result = result.replace(/\bour the (\w)/g, 'our $1');
+
+    // "mi-a plăcut" → MT outputs "I pleasant" instead of "I liked"
+    // More-specific rule first to prevent "I pleasant" firing inside "me and I pleasant"
+    result = result.replace(/\bme and I pleasant\b/gi, 'and I liked');
+    result = result.replace(/\bI pleasant\b/gi, 'I liked');
+
+    // "loc de muncă" (job/workplace) → MT outputs "work" (gate on source)
+    // Gate on "munc" covers both "loc de muncă" (singular) and "locuri de muncă" (plural)
+    if (/munc/i.test(sourceNorm)) {
+        result = result.replace(/\ba work\b/g, 'a job');
+        result = result.replace(/\bhow many work\b/gi, 'how many jobs');
+    }
+
+    // "nu putea bucura" / "se bucure" rendered as "joy" not "rejoice/enjoy"
+    result = result.replace(/\bcould not joy\b/gi, 'could not rejoice');
+    result = result.replace(/\bwho are joy serving\b/gi, 'who joyfully serve');
+    // v224: skip only the NOUN idiom "were a joy TO <pronoun/possessive>" ("were joy to my heart")
+    // and coordinated-noun "were joy and <noun>" ("were joy and peace"). "were joy to <verb>"
+    // ("were joyful to hear") is a real verb value case and must still convert.
+    result = result.replace(/\bwere joy\b(?!\s+(?:to\s+(?:\w+'s|me|us|him|her|them|you|my|his|her|their|our|your)\b|and\b))/gi, 'were joyful');
+
+    // ──────────────────── 2026-07-27 live-session testing ────────────────────
+    // "era nevoie de" (was/were needed) → MT drops the -ed: "were need to" → "were needed to".
+    // "were need" / "are need" are never valid English, so no source gate needed. (Singular
+    // "was need"/"is need" left alone — ambiguous with "there was/is need to…".)
+    result = result.replace(/\b(w)ere need\b/gi, (m, w) => (w === 'W' ? 'Were' : 'were') + ' needed');
+    result = result.replace(/\b(a)re need\b/gi, (m, a) => (a === 'A' ? 'Are' : 'are') + ' needed');
+
+    // Romanian past tense flattened to English present. Gated on the past-tense source
+    // marker so legitimate present-tense uses ("Jehovah changes hearts", "they need our
+    // help") are never touched.
+    if (/\bschimbat\b/i.test(sourceNorm)) {
+        // "Iehova a schimbat" (Jehovah changed) → MT: "Jehovah change" (also missing -d).
+        result = result.replace(/\bJehovah change\b/g, 'Jehovah changed');
+    }
+    if (/aveau nevoie/i.test(sourceNorm)) {
+        // "ei aveau nevoie" (they needed) → MT present "they need".
+        result = result.replace(/\b(they) need\b/gi, '$1 needed');
+    }
+
+    // "necazul cel mare" (the great tribulation, JW term) misheard by STT as "cazul cel
+    // mare" (dropped "ne-"); MT then renders "cazul" as "event/case". The gate matches both
+    // the garbled and correct forms since "necazul" ends with "cazul cel mare".
+    if (/cazul cel mare/i.test(sourceNorm)) {
+        result = result.replace(/\bGreat Event\b/g, 'Great Tribulation');
+        result = result.replace(/\bgreat event\b/g, 'great tribulation');
+        result = result.replace(/\bGreat Case\b/g, 'Great Tribulation');
+        result = result.replace(/\bgreat case\b/g, 'great tribulation');
+    }
+
+    // "ask Jehovah the help" → stray article
+    result = result.replace(/\bask Jehovah the help\b/gi, 'ask Jehovah for help');
+
+    // "a young to" → missing "person" (MT drops "persoană" in youth-education context)
+    result = result.replace(/\ba young to\b/gi, 'a young person to');
+    result = result.replace(/\bhelp young make\b/gi, 'help a young person make');
+    result = result.replace(/\bon young to\b/gi, 'on a young person to');
+
+    // "ce se întâmplă" (what is happening) → MT drops -ing suffix
+    result = result.replace(/\bwhat is happen\b/gi, 'what is happening');
+    result = result.replace(/\bwhat was happen\b/gi, 'what was happening');
+
+    // Romanian historical present "spune" in past narrative → MT outputs "say" after past-tense verb
+    // Allow up to 3 intervening words between past verb and "and say"
+    // Negative lookahead (?!to\b) prevents "loved to come and say" / "asked him to stand and say"
+    result = result.replace(/\b(\w+ed(?:\s+(?!to\b)\w+){0,3})\s+and\s+say\b/gi, '$1 and said');
+    result = result.replace(/\b((?:took|came|gave|held|stood|sat|ran|went|brought|put|told|asked|called|made|kept|left|met)(?:\s+(?!to\b)\w+){0,5})\s+and\s+say\b/gi, '$1 and said');
+
+    // "everything/something/anything that happen" → singular subject requires "happens"
+    result = result.replace(/\b(everything|something|anything|nothing)\s+that\s+happen\b/gi, '$1 that happens');
+
+    // "Na te rog" → "Please don't." — "Na" = "here you go / go ahead"; MT reads "Na" as negation
+    // Gate: source must contain "na" as standalone word (imperative particle, not the syllable)
+    if (/\bna\b/i.test(sourceText)) {
+        result = result.replace(/\bPlease don't\.\b/gi, 'Go ahead, please.');
+        result = result.replace(/\bPlease don't\b/gi, 'Go ahead, please');
+    }
+
+    // 2026-07-26 deep-dive second-pass fixes (v217):
+
+    // P4: "differently" before noun → "different" (Romanian adj "diferit" mismapped to adverb by MT)
+    // Excludes prepositions and past participles (-ed forms) to avoid false positives.
+    result = result.replace(/\bdifferently\s+(?!from\b|than\b|to\b|by\b|in\b|of\b|with\b|on\b|at\b|for\b|about\b|\w*ed\b)/gi, 'different ');
+
+    // Scripture citation: "N with M" → "N:M" — MT translates Romanian chapter-verse separator
+    // "cu" as "with". Gate: source must contain "digit cu digit" (the Romanian citation pattern).
+    // Confirmed source patterns: "Psalm 94 cu 19", "Galateni 6 cu 5", "Isaia 41 cu 10".
+    if (/\b\d+\s+cu\s+\d+\b/.test(sourceText)) {
+        result = result.replace(/\b(\d+)\s+with\s+(\d+)\b/g, '$1:$2');
+    }
+
+    // "second cold" — STT mishears "regi" (Kings) as "reci" (cold) → "second cold 19 with 35"
+    // "second cold" is never valid English; safe to fix without source gate.
+    result = result.replace(/\bsecond cold\b/gi, '2 Kings');
+
+    // Verb agreement: subject + bare "Promise" → "promises" (missing 3rd-person -s)
+    // Confirmed: "Jehovah Promise us", "He promise us", "He promise to continue" (3 instances)
+    result = result.replace(/\b(Jehovah|He|She|God|Jesus)\s+[Pp]romise\b(?![sd]\b)/g, '$1 promises');
+
+    // Verb agreement: "Jehovah support" → "Jehovah supports"
+    result = result.replace(/\bJehovah\s+support\b(?!s\b|ed\b|ing\b)/g, 'Jehovah supports');
+
+    // "who care of us" → "who cares for us" ("care grijă de noi" → wrong preposition + missing -s)
+    result = result.replace(/\bwho care of us\b/gi, 'who cares for us');
+
+    // Missing possessive: "Jehovah servants/servant" (MT drops apostrophe-s)
+    // Safe: "Jehovah's servants" won't match \bJehovah\s+ (no whitespace between Jehovah and ')
+    result = result.replace(/\bJehovah\s+(servants?)\b/g, "Jehovah's $1");
+
+    // "was full with" → "was filled with" ("plină de" = filled with, not full with)
+    result = result.replace(/\bwas full with\b/gi, 'was filled with');
+
+    // P7: "Joy" as verb — "se vor bucura vreodată de adevărata dreptate" (will they ever enjoy)
+    // MT strips prefix → "joy" (noun) instead of "enjoy" (verb). Confirmed: next-week talk title.
+    // Case-preserving: title-case input ("Will We Ever Joy") keeps title case in output.
+    result = result.replace(/\bwill we ever joy\b/gi, (m) =>
+        m[0] === 'W' ? 'Will We Ever Enjoy' : 'will we ever enjoy'
+    );
+
+    // "are happen" → "are happening" (same pattern as "what is happen" fixed in v215)
+    result = result.replace(/\bare happen\b/gi, 'are happening');
+
+    // Mid-sentence "Decision" → "decision" (MT over-capitalises "decizia" with definite article)
+    // Only fires when preceded by article/demonstrative — never at sentence start.
+    result = result.replace(/\b(the|a|this|that|an)\s+Decision\b/g, '$1 decision');
+
+    // P6: "Jesus learned his listeners" → "taught" ("a învăța pe cineva" = to teach someone)
+    // Covers "Jesus also learned" variant.
+    result = result.replace(/\b(Jesus(?:\s+also)?)\s+learned\s+(his\s+listeners?)\b/gi, '$1 taught $2');
+
+    // "a învăța PE cineva" (to teach someone) — the personal-accusative "pe <people>" marks
+    // teaching, not learning, but MT renders "învăța" as "learn". Acts 21:21: "înveți pe toți
+    // iudeii" → "you learn all the Jews" should be "you teach…". Gate on the "înv…pe"
+    // construction in source (normalized: inveti/invata … pe) so ordinary "you learn" is safe.
+    if (/\binv[ae]\w*\s+pe\b/i.test(sourceNorm)) {
+        result = result.replace(/\byou learn\b/gi, (m) => (m[0] === 'Y' ? 'You' : 'you') + ' teach');
+    }
+
+    // "the verse say" → "the verse says" (3rd-person -s missing, same pattern as "the Bible say")
+    result = result.replace(/\bthe verse say\b/gi, 'the verse says');
+
+    // "and start to pray" → "and started to pray" in past narrative ("a început să se roage")
+    result = result.replace(/\band start to pray\b/gi, 'and started to pray');
+
+    // ────────────── 2026-08-06 midweek + 2026-08-08 weekend meeting review ──────────────
+
+    // "a învăța PE cineva" (teach someone) with a pronoun object: "learn/learned me/us/him"
+    // is non-standard English (should be teach/taught). Ungated — "learn me/us/him" is never
+    // valid. ("them/her/it" excluded: "learned them by heart", "learned her name" are valid.)
+    result = result.replace(/\b(learn|learns|learned)\s+(me|us|him)\b/gi, (m, v, obj) => {
+        const lv = v.toLowerCase();
+        let repl = lv === 'learns' ? 'teaches' : lv === 'learned' ? 'taught' : 'teach';
+        if (v[0] === v[0].toUpperCase()) repl = repl[0].toUpperCase() + repl.slice(1);
+        return repl + ' ' + obj;
+    });
+
+    // "foarte multe întrebări" → MT drops the plural. Only "a few question" and "a many of
+    // question" are safe to pluralize: the article "a" forces a NOUN reading. Bare
+    // "these/many question" is left alone because "question" can be a verb there
+    // ("many question the wisdom of…").
+    result = result.replace(/\ba many of (questions?)\b/gi, 'many questions');
+    result = result.replace(/\ba many\b/gi, 'a lot');
+    // Negative lookahead: don't touch "a few question marks" or "question and answer".
+    result = result.replace(/\ba few question\b(?!\s+(?:marks?|and\b))/gi, 'a few questions');
+
+    // "se bucură" (enjoy/rejoice) rendered as bare noun "joy". REQUIRE an explicit subject
+    // before "will joy" so an inverted rhetorical question ("Will joy come to those who serve
+    // Jehovah?" — a common talk/article title) is NOT mangled into "Will enjoy come…".
+    result = result.replace(/\b(I|you|he|she|we|they|it|Jehovah|God)\s+will\s+joy\b/gi,
+        (m, p) => p + ' will enjoy');
+    result = result.replace(/\bwho\s+joy\b/gi, (m) => (m[0] === 'W' ? 'Who' : 'who') + ' enjoy');
+
+    // "să vedem ce se întâmplă" → "see what happen" (missing 3rd-person -s). Case-preserving:
+    // "See what happen." is a plausible imperative at a segment start.
+    result = result.replace(/\bsee what happen\b/gi, (m) => (m[0] === 'S' ? 'See' : 'see') + ' what happens');
+
+    // Romanian double negative "nu pierzi nimic" calqued as "don't lose nothing".
+    result = result.replace(/\b(don't|doesn't|do not|does not) lose nothing\b/gi, '$1 lose anything');
+
+    // "mi-a plăcut" verb sense: "he/she pleasant [X]" → "liked" (adjective "pleasant" needs a
+    // copula: "he is pleasant"). Gated on "plăcut" in source so real adjectives are untouched.
+    if (/pl[aă]cut/i.test(sourceNorm)) {
+        result = result.replace(/\b(he|she) pleasant\b/gi, (m, p) => p + ' liked');
+    }
+
+    // "am început …" (I started/began) → MT present "I start". Gated on the past marker so
+    // habitual present ("I start work at 9") is never touched.
+    if (/\bam inceput\b/i.test(sourceNorm)) {
+        result = result.replace(/\bI start\b/g, 'I started');
+    }
+
+    // NOTE: dropped the "the fathers"→"the parents" rule (părinți gate). Too risky: "the
+    // fathers" is a standing biblical idiom in this domain (forefathers/patriarchs, "the God
+    // of our fathers"), and a whole-utterance gate could swap a correct scriptural reference.
+    // Marginal benefit ("I told the fathers") not worth the collision.
+
+    // "Roșca" is a surname here, not the adjective "roșcat" (redhead). Gate on "Rosca" in
+    // sourceNorm (diacritics stripped so it fires even if STT drops ș; still case-sensitive —
+    // sourceNorm preserves case, and lowercase "rosca" is not a name).
+    if (/\bRosca\b/.test(sourceNorm)) {
+        result = result.replace(/\bRedhead\b/g, 'Roșca');
+    }
+
+    // ────────────── 2026-08-09 Sunday meeting review ──────────────
+
+    // "a (se) bucura" (enjoy/rejoice) → MT emits the bare noun "joy" in verb slots. Gate on
+    // "bucur". NOTE: "joy" is BOTH the noun (bucurie) and the verb (a se bucura), sharing the
+    // "bucur" root, so the gate cannot disambiguate — ONLY the structurally-unambiguous
+    // "joy special privileges" slot is safe (noun-noun is invalid English there). Deliberately
+    // NOT handled, because "joy" is a valid NOUN after each: "to joy"/"to joy the" ("path to
+    // joy"), "can joy" ("Can joy be real?"), "<modal> joy" ("May joy be with you", "Will joy
+    // come…?"), and "be joy to" ("be a joy to her family / to behold"). v223 removed all of them.
+    if (/bucur/i.test(sourceNorm)) {
+        result = result.replace(/(?<!\b(?:will|to|can|may|would|should|must|shall|might|do|does|did)\s)\bjoy special privileges\b/gi,
+            (m) => (m[0] === 'J' ? 'Enjoyed' : 'enjoyed') + ' special privileges');
+    }
+
+    // "a crea / a creat" (to create / created) → MT emits the agent noun "creator" in verb slots
+    // ("God did not creator us", "man was creator in the image"). The gate excludes "creatură/
+    // creaturi" (creature) so an unrelated segment can't open it, and every pattern requires an
+    // object/complement that the noun-title "the Creator of…" never takes — so a correctly
+    // article-dropped "God was Creator of the universe" is left intact. Case-preserving.
+    if (/\bcrea(?!tur)/i.test(sourceNorm)) {
+        result = result.replace(/\b(did not|didn't|do not|don't|does not|doesn't) creator\b/gi, '$1 create');
+        // Passive-verb complements only (in/to/after/by/for) — never "Creator of …".
+        result = result.replace(/\b(was|were) creator (in|to|after|by|for)\b/gi, '$1 created $2');
+        result = result.replace(/\bcreator (us|them|me|you|him|her|it)\b/gi,
+            (m, obj) => (m[0] === 'C' ? 'Created' : 'created') + ' ' + obj);
+        result = result.replace(/\bcreator (such|clones?)\b/gi,
+            (m, obj) => (m[0] === 'C' ? 'Created' : 'created') + ' ' + obj);
+    }
+
+    // "merită" (is worth / worthwhile) → MT emits "deserve" in slots where it is ungrammatical
+    // ("it's not deserve it", "is deserve"). Gate on "merit"; only the clearly-broken forms are
+    // touched, so a correct "does not deserve it" (and "does not deserve the effort") stays intact.
+    if (/\bmerit/i.test(sourceNorm)) {
+        result = result.replace(/\b(it's|that's) not deserve it\b/gi, '$1 not worth it');
+        result = result.replace(/\b(is|are) deserve\b/gi, '$1 worthwhile');
+    }
+
+    // "grijă" (care) → MT sometimes emits the adjective "Careful" where the noun "care" is meant
+    // ("take great Careful of…"). Gate on "grij" (\b excludes "îngrijorat" = worried); the
+    // quantifier is required so "be careful" is untouched; the quantifier's case is preserved.
+    // CASE-SENSITIVE on "Careful" (do NOT add /i): "Careful" capitalised mid-phrase is the MT-bug
+    // signature; lowercase "more careful analysis" is valid English and must be left alone. The
+    // quantifier is matched in either case so a sentence-initial "Much Careful…" is still fixed.
+    if (/\bgrij/i.test(sourceNorm)) {
+        result = result.replace(/\b([Gg]reat|[Gg]ood|[Mm]uch|[Mm]ore)\s+Careful\b/g, (m, q) => q + ' care');
+    }
+
+    // "au văzut" with a NOUN subject: "his brothers seen that…" → "saw". Same auxiliary
+    // lookbehind as the pronoun rule above, so an inverted "Have the brothers seen…?" keeps "seen".
+    result = result.replace(/(?<!\b(?:have|has|had|haven't|hasn't|hadn't)\s)\b(his|her|their|the)\s+(brothers?|sisters?)\s+seen\b/gi,
+        '$1 $2 saw');
 
     return result;
 }
