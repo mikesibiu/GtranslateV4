@@ -22,24 +22,24 @@
   "license": "MIT",
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",
-    "@google-cloud/speech": "^6.0.0",
-    "@google-cloud/translate": "^8.0.0",
+    "@google-cloud/speech": "^7.5.0",
+    "@google-cloud/translate": "^9.4.2",
     "connect-pg-simple": "^10.0.0",
-    "express": "^4.18.2",
+    "express": "^5.2.1",
     "express-session": "^1.19.0",
     "pdf-parse": "^1.1.1",
-    "pg": "^8.16.3",
-    "socket.io": "^4.6.1",
-    "socket.io-client": "^4.8.1",
-    "winston": "^3.11.0"
+    "pg": "^8.23.0",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
     "chai": "^4.5.0",
-    "mocha": "^11.7.5",
-    "nodemon": "^3.1.11",
-    "sinon": "^17.0.1"
+    "mocha": "^11.8.0",
+    "nodemon": "^3.1.14",
+    "sinon": "^22.1.0"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   }
 }
