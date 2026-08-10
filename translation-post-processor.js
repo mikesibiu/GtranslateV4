@@ -723,7 +723,11 @@ function applyTermMappings(text, sourceText = '') {
 
     // "bucura" (to enjoy/rejoice) → MT strips prefix → "to joy the" instead of "to enjoy the"
     // (pre-existing v210–v217 rule; catches "able to joy the Paradise" → "…to enjoy the…").
-    result = result.replace(/\bto joy the\b/gi, 'to enjoy the');
+    // v224: skip only the "leads/led to joy the …" noun-collision ("this leads to joy the world
+    // cannot give"). Deliberately narrow to leads/led: "leads to enjoy X" isn't natural English,
+    // so those never have a verb reading. Other carriers (path/way/key/door… to enjoy X) DO take a
+    // correct infinitive ("the path to enjoy the blessings"), so they must stay convertible.
+    result = result.replace(/(?<!\b(?:leads?|led)\s)\bto joy the\b/gi, 'to enjoy the');
 
     // 2026-07-24 deep-dive fixes (thu-2045):
 
@@ -805,7 +809,10 @@ function applyTermMappings(text, sourceText = '') {
     // "nu putea bucura" / "se bucure" rendered as "joy" not "rejoice/enjoy"
     result = result.replace(/\bcould not joy\b/gi, 'could not rejoice');
     result = result.replace(/\bwho are joy serving\b/gi, 'who joyfully serve');
-    result = result.replace(/\bwere joy\b/gi, 'were joyful');
+    // v224: skip only the NOUN idiom "were a joy TO <pronoun/possessive>" ("were joy to my heart")
+    // and coordinated-noun "were joy and <noun>" ("were joy and peace"). "were joy to <verb>"
+    // ("were joyful to hear") is a real verb value case and must still convert.
+    result = result.replace(/\bwere joy\b(?!\s+(?:to\s+(?:\w+'s|me|us|him|her|them|you|my|his|her|their|our|your)\b|and\b))/gi, 'were joyful');
 
     // ──────────────────── 2026-07-27 live-session testing ────────────────────
     // "era nevoie de" (was/were needed) → MT drops the -ed: "were need to" → "were needed to".

@@ -1498,6 +1498,37 @@ describe('applyTermMappings', () => {
         it('fixes "to joy the"', () => {
             expect(applyTermMappings('we will be able to joy the spiritual Paradise', '')).to.equal('we will be able to enjoy the spiritual Paradise');
         });
+        it('v224: does NOT touch "leads to joy the world cannot give" (joy is a noun there)', () => {
+            expect(applyTermMappings('this leads to joy the world cannot give', 'aceasta duce la bucuria pe care lumea nu o poate da'))
+                .to.equal('this leads to joy the world cannot give');
+        });
+        it('v224: still converts "the path to joy the blessings" (path takes an infinitive)', () => {
+            expect(applyTermMappings('the path to joy the blessings', 'calea de a te bucura de binecuvântări'))
+                .to.equal('the path to enjoy the blessings');
+        });
+    });
+
+    describe('"were joy" → "were joyful" (v224: guarded against the "were a joy to <person>/and" noun idiom)', () => {
+        it('fixes bare "they were joy"', () => {
+            expect(applyTermMappings('they were joy at the news', 'erau bucuroși de veste'))
+                .to.equal('they were joyful at the news');
+        });
+        it('still converts "were joy to <verb>" ("were joyful to hear")', () => {
+            expect(applyTermMappings('they were joy to hear the good news', 'au fost bucuroși să audă vestea bună'))
+                .to.equal('they were joyful to hear the good news');
+        });
+        it('does NOT touch "were joy to my heart" (noun: "were a joy to <possessive>")', () => {
+            expect(applyTermMappings('your words were joy to my heart', 'cuvintele tale au fost bucurie inimii mele'))
+                .to.equal('your words were joy to my heart');
+        });
+        it('does NOT touch "were joy and peace" (coordinated noun)', () => {
+            expect(applyTermMappings('there were joy and peace in the hall', 'erau bucurie și pace în sală'))
+                .to.equal('there were joy and peace in the hall');
+        });
+        it('does NOT touch "were joy to Maria\'s heart" (possessive proper noun)', () => {
+            expect(applyTermMappings("your words were joy to Maria's heart", 'cuvintele tale au fost bucurie inimii Mariei'))
+                .to.equal("your words were joy to Maria's heart");
+        });
     });
 
     // --- 2026-07-26 Sunday meeting deep-dive fixes ---
