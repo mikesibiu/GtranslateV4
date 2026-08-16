@@ -787,12 +787,71 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\binspired by a higher power\b/gi, 'higher education');
     }
 
-    // "Jehovah 's" → "Jehovah's" (spacing artifact from MT tokenisation)
-    result = result.replace(/\bJehovah 's\b/g, "Jehovah's");
+    // Possessive spacing artifact (generalised from the old Jehovah-only rule): MT emits a space —
+    // and sometimes a curly apostrophe — before the genitive "'s" for any word: "God 's", "Peter 's",
+    // "Jehovah ’s". English never has a legitimate space before "'s" (possessive OR the "is"
+    // contraction), so collapsing it is always safe regardless of the word's case.
+    result = result.replace(/\b(\w+)\s+['’]s\b/g, "$1's");
 
     // Double article artifacts: "his the word", "our the words"
     result = result.replace(/\bhis the (\w)/g, 'his $1');
     result = result.replace(/\bour the (\w)/g, 'our $1');
+
+    // ──────────────────── 2026-08-16 Sunday Watchtower deep-dive fixes ────────────────────
+
+    // Spurious article after a religious possessive: MT inserts "the" between the genitive and its
+    // noun ("Jehovah's the Organization", "God's the spirit", "Jehovah's the message"). Restricted
+    // to religious possessors + a fixed noun list where "<Possessor>'s the <noun>" has no valid
+    // "<Possessor> is the <noun>" reading, so a real contraction ("God's the one who…") is untouched.
+    // "servant" deliberately excluded: "Jesus is the servant of Jehovah" (Servant Songs) is a valid
+    // "is the" reading in this exact doctrinal domain, so it's left for the general "his the" rules.
+    result = result.replace(/\b((?:Jehovah|God|Christ|Jesus|Isus|Iehova)'s) the (Organization|Organisation|message|spirit|Spirit|Name|name|people|kingdom|Kingdom)\b/g, '$1 $2');
+
+    // "New New World Translation" — the "traducerea lumii noi" glossary swap collides with "noi"→"New",
+    // and the earlier gated "world translation"→"New World Translation" rule can prepend a further
+    // "New"; collapse any run of leading "New " down to one.
+    result = result.replace(/\b(?:New\s+)+World Translation\b/gi, 'New World Translation');
+
+    // "importantă" (adjective) rendered as the noun "importance" after a degree adverb where only the
+    // adjective is grammatical ("the most importance book", "so importance", "very importance").
+    // Only most/so/very — "more/too importance" can be a valid noun phrase ("give more importance to").
+    // "of" lookbehind preserves the valid idiom "matters of most importance" (noun is correct there).
+    result = result.replace(/(?<!\bof\s)\b(most|so|very) importance\b/gi, '$1 important');
+
+    // "unii pe alții" → "one another" (MT literalises to "one others").
+    result = result.replace(/\bone others\b/gi, 'one another');
+
+    // "loial" (adjective) rendered as the noun "loyalty" after "remain" ("remain loyalty to him").
+    result = result.replace(/\bremain loyalty\b/gi, 'remain loyal');
+
+    // "demnă de încredere" (trustworthy) → MT drops "-worthy" ("a trust book"). Gate on source.
+    if (/incredere/i.test(sourceNorm)) {
+        result = result.replace(/\btrust book\b/gi, 'trustworthy book');
+    }
+
+    // "pe deplin" doubled-subject glitch: "we do not fully we understand" → "we do not fully
+    // understand". Require the leading "we <…> " so a valid fronted-adverb clause with no doubled
+    // subject ("Fully we understand the risks") is left intact — only the duplicate "we" is dropped.
+    result = result.replace(/\b(we\s+(?:\S+\s+){0,4})fully we understand\b/gi, '$1fully understand');
+
+    // "întrebări" (plural) rendered singular after a reflexive ("ask ourselves question") or a
+    // number ≥ two ("five question"). "one/1 question" stays singular; bare "these question" is left
+    // alone because "question" can be a verb there ("these question the wisdom of…").
+    result = result.replace(/\bourselves question\b/gi, 'ourselves questions');
+    // Negative lookahead mirrors the "a few question" rule below: don't touch "two question marks"
+    // or "three question and answer".
+    result = result.replace(/\b(two|three|four|five|six|seven|eight|nine|ten) question\b(?!\s+(?:marks?|and\b))/gi, '$1 questions');
+
+    // 3rd-person-singular "se întâmplă" rendered as bare "happen" ("is happen", "what happen to us").
+    result = result.replace(/\bis happen\b/gi, 'is happening');
+    // Singular subjects only — NOT relative "that/which" (their antecedent may be plural: "things
+    // that happen"). The do-support lookbehind keeps the bare form correct after "do/does/did"
+    // ("does it happen", "why does this happen") and protects the "happen to" idiom in inverted
+    // questions ("does he happen to know").
+    result = result.replace(/(?<!\b(?:do|does|did)\s)\b(this|it|something|what|he|she) happen\b/gi, '$1 happens');
+
+    // "era/mă întreba" continuous past rendered as bare "ask" ("he was ask me" → "was asking me").
+    result = result.replace(/\bwas ask me\b/gi, 'was asking me');
 
     // "mi-a plăcut" → MT outputs "I pleasant" instead of "I liked"
     // More-specific rule first to prevent "I pleasant" firing inside "me and I pleasant"

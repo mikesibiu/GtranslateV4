@@ -1221,6 +1221,100 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('2026-08-16 Sunday Watchtower deep-dive fixes (v226)', () => {
+        it(`possessive spacing: God-space-apostrophe-s collapses`, () => {
+            expect(applyTermMappings("what God 's purpose is", '')).to.equal("what God's purpose is");
+        });
+        it(`possessive spacing: curly Jehovah apostrophe-s collapses`, () => {
+            expect(applyTermMappings('doing Jehovah ’s Will', '')).to.equal("doing Jehovah's Will");
+        });
+        it(`possessive spacing still fixes Jehovah space-apostrophe-s`, () => {
+            expect(applyTermMappings("in Jehovah 's name", '')).to.equal("in Jehovah's name");
+        });
+        it('does NOT alter a correct sentence-start contraction "He \'s" → "He\'s"', () => {
+            expect(applyTermMappings("He 's the one", '')).to.equal("He's the one");
+        });
+        it('spurious article: "Jehovah\'s the Organization" → "Jehovah\'s Organization"', () => {
+            expect(applyTermMappings("Jehovah's the Organization has changed", '')).to.equal("Jehovah's Organization has changed");
+        });
+        it(`spurious article after space+curly glitch on Organization`, () => {
+            expect(applyTermMappings('Jehovah ’s the Organization may act', '')).to.equal("Jehovah's Organization may act");
+        });
+        it('spurious article: "God\'s the spirit" / "Jehovah\'s the message"', () => {
+            expect(applyTermMappings("where God's the spirit is", '')).to.equal("where God's spirit is");
+            expect(applyTermMappings("the Bible is Jehovah's the message to people", '')).to.equal("the Bible is Jehovah's message to people");
+        });
+        it('does NOT strip article for a noun with a valid "is the" reading ("God\'s the Creator")', () => {
+            expect(applyTermMappings("God's the Creator of all", '')).to.equal("God's the Creator of all");
+        });
+        it('collapses "New New World Translation"', () => {
+            expect(applyTermMappings('appears in the New New World Translation', '')).to.equal('appears in the New World Translation');
+        });
+        it('collapses "New New World Translation" even when source triggers the gated glossary rule', () => {
+            expect(applyTermMappings('appears in the New New World Translation', 'în Traducerea lumii noi'))
+                .to.equal('appears in the New World Translation');
+        });
+        it('leaves a single "New World Translation" intact', () => {
+            expect(applyTermMappings('read the New World Translation', '')).to.equal('read the New World Translation');
+        });
+        it('"importance"→"important" after most/so/very', () => {
+            expect(applyTermMappings('the most importance book', '')).to.equal('the most important book');
+            expect(applyTermMappings('why is the Bible so importance to us', '')).to.equal('why is the Bible so important to us');
+            expect(applyTermMappings('Alex is very importance to us', '')).to.equal('Alex is very important to us');
+        });
+        it('does NOT touch the valid noun "importance" ("too much importance", "the importance of")', () => {
+            expect(applyTermMappings('we give too much importance to it', '')).to.equal('we give too much importance to it');
+            expect(applyTermMappings('the importance of prayer', '')).to.equal('the importance of prayer');
+        });
+        it('does NOT touch the valid idiom "of most importance"', () => {
+            expect(applyTermMappings('matters of most importance here', '')).to.equal('matters of most importance here');
+        });
+        it('"one others" → "one another"', () => {
+            expect(applyTermMappings('love one others as I loved you', '')).to.equal('love one another as I loved you');
+        });
+        it('"remain loyalty" → "remain loyal"', () => {
+            expect(applyTermMappings('we can remain loyalty to him', '')).to.equal('we can remain loyal to him');
+        });
+        it('"trust book" → "trustworthy book" (gated on încredere)', () => {
+            expect(applyTermMappings('the Bible is a trust book', 'o carte demnă de încredere')).to.equal('the Bible is a trustworthy book');
+        });
+        it('does NOT touch "trust book" without încredere in source', () => {
+            expect(applyTermMappings('a trust book on finance', 'o carte despre bani')).to.equal('a trust book on finance');
+        });
+        it('"fully we understand" → "fully understand" (doubled subject)', () => {
+            expect(applyTermMappings('decisions we do not fully we understand', '')).to.equal('decisions we do not fully understand');
+        });
+        it('does NOT strip the subject from a valid fronted-adverb "Fully we understand"', () => {
+            expect(applyTermMappings('Fully we understand the risks', '')).to.equal('Fully we understand the risks');
+        });
+        it('pluralizes "question" after reflexive / number ≥ two', () => {
+            expect(applyTermMappings('we ask ourselves question', '')).to.equal('we ask ourselves questions');
+            expect(applyTermMappings('five question that matter', '')).to.equal('five questions that matter');
+        });
+        it('does NOT pluralize "one question", verb "these question", or "two question marks"', () => {
+            expect(applyTermMappings('one question remains', '')).to.equal('one question remains');
+            expect(applyTermMappings('these question the wisdom of it', '')).to.equal('these question the wisdom of it');
+            expect(applyTermMappings('two question marks appear', '')).to.equal('two question marks appear');
+            expect(applyTermMappings('three question and answer sections', '')).to.equal('three question and answer sections');
+        });
+        it('3rd-sing "happen": "is happen"→"is happening", "what happen"→"what happens"', () => {
+            expect(applyTermMappings('why something is happen', '')).to.equal('why something is happening');
+            expect(applyTermMappings('what happen to us', '')).to.equal('what happens to us');
+        });
+        it('does NOT alter plural "they happen" or past "happened"', () => {
+            expect(applyTermMappings('these things happen often', '')).to.equal('these things happen often');
+            expect(applyTermMappings('what happened yesterday', '')).to.equal('what happened yesterday');
+        });
+        it('does NOT break do-support or the "happen to" idiom', () => {
+            expect(applyTermMappings('does it happen often', '')).to.equal('does it happen often');
+            expect(applyTermMappings('why does this happen', '')).to.equal('why does this happen');
+            expect(applyTermMappings('does he happen to know', '')).to.equal('does he happen to know');
+        });
+        it('"was ask me" → "was asking me"', () => {
+            expect(applyTermMappings('he was ask me but you do not see', '')).to.equal('he was asking me but you do not see');
+        });
+    });
+
     describe('"fut" STT mishearing → "steal" (source-gated, live 2026-08-16)', () => {
         it('recovers the intended meaning from the exact live phrase', () => {
             const ro = 'cum se fut de la alții cum să-i înșeli';

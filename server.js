@@ -49,7 +49,7 @@ const APP_PASSWORD = process.env.APP_PASSWORD || null;
 // App version stamped onto translation_log rows (keep in sync with the badge in index.html).
 // Was previously hardcoded 'v206', which mislabelled every logged row and undermined
 // per-version log analysis.
-const APP_VERSION = 'v225';
+const APP_VERSION = 'v226';
 
 // Guard: SESSION_SECRET must be set in production — hardcoded fallback is a security hole
 if (NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -903,6 +903,11 @@ io.on('connection', (socket) => {
         'adunare de circuit',
         'adunarea de circuit',
         'adunarea locală',
+        // "sclavul fidel și prevăzător" (the faithful and discreet slave) — core JW term; STT
+        // garbled it to the non-word "sclavofiber" (2026-08-16 meeting). Phrase forms only.
+        'sclavul fidel',
+        'sclavul fidel și prevăzător',
+        'sclavul fidel și înțelept',
         // Core religious figures — bare forms needed; "gumă"/"mama" misheard from these
         // Single-token proper nouns are acceptable (no adjacent-word ambiguity risk)
         'Iehova',
