@@ -1048,6 +1048,58 @@ function applyTermMappings(text, sourceText = '') {
     result = result.replace(/(?<!\b(?:have|has|had|haven't|hasn't|hadn't)\s)\b(his|her|their|the)\s+(brothers?|sisters?)\s+seen\b/gi,
         '$1 $2 saw');
 
+    // ──────────── "fut" STT mishearing → "steal" (source-gated semantic repair) ────────────
+    // Observed live 2026-08-16: STT heard Romanian "fură/furi" (to steal) as the vulgar homophone
+    // "fut", so Google Translate faithfully produced "fuck". Example source: "cum se fut de la
+    // alții cum să-i înșeli" → intended "how people steal from others, how to deceive them".
+    // The vulgar "fut*" root is NEVER legitimately spoken in a JW meeting, so its presence in the
+    // source is a 100%-reliable STT-mishearing signature; the surrounding domain (honesty/morality
+    // talks) makes "steal" the intended verb. Gated on the source so we only rewrite when that
+    // signature is present — the unconditional net below still catches any other vulgar output.
+    const beforeVulgarRepair = result;
+    if (/\bfut(?:e|em|eti|ut|uti|i)?\b/i.test(sourceNorm)) {
+        // Case-preserving so a sentence-initial "Fuck"/"Get" keeps its capital, and inflection-aware
+        // so tense/number survive the rewrite (fucked→stole, fucks→steals, fucker(s)→thief/thieves),
+        // matching the case-preserving-callback convention used elsewhere in this file.
+        const cap = (w, sample) => (/^[A-Z]/.test(sample) ? w[0].toUpperCase() + w.slice(1) : w);
+        result = result.replace(/\bget the fuck out of\b/gi, (m) => cap('steal from', m));
+        result = result.replace(/\bthe fuck\b/gi, '');
+        result = result.replace(/\bfuck(ing|ed|ers|er|s)?\b/gi, (m, suf) => {
+            const base = { ing: 'stealing', ed: 'stole', s: 'steals', er: 'thief', ers: 'thieves' }[(suf || '').toLowerCase()] || 'steal';
+            return cap(base, m);
+        });
+    }
+    const vulgarRepairChanged = result !== beforeVulgarRepair;
+
+    // ──────────────────────── Profanity safety net (unconditional) ────────────────────────
+    // A JW meeting must NEVER display profanity. STT garbles + MT can occasionally emit a vulgar
+    // word that was never spoken in Romanian (observed live: "fuck" appeared with no vulgar source).
+    // This is a hard final scrub, ungated and last so it also catches profanity introduced by any
+    // earlier rule. The whole word (any casing/inflection) is removed and surrounding spacing/
+    // punctuation is tidied so the sentence reads cleanly. "holy shit"→"Holy Spirit" is handled
+    // earlier; the standalone "shit" forms below are the residual safety net.
+    // \b word-boundaries avoid the Scunthorpe problem (substrings inside clean words are untouched).
+    // Deliberately EXCLUDES words that can be legitimate religious/biblical vocabulary ("damned",
+    // "whore" in older Bible quotations) or proper names ("Dick"). Only unambiguous vulgarity here.
+    const PROFANITY_RE = /\b(?:fuck(?:ing|ed|er|ers|s)?|motherfuck\w*|shit(?:ty|s|ted|ting)?|bullshit(?:ting|ted|s)?|bitch(?:es|ing|ed)?|cunt|dickhead|asshole|pussy|slut(?:ty|s)?|goddamn|god\s*dammit)\b/gi;
+    // Run the tidy pass whenever profanity is removed OR the vulgar-repair layer above changed the
+    // string — the "the fuck"→"" deletion can leave a double space even when no banned word remains.
+    if (PROFANITY_RE.test(result) || vulgarRepairChanged) {
+        result = result.replace(PROFANITY_RE, '');
+        // Tidy the gap the removal left. Order matters. We do NOT capitalize the absolute start of
+        // the string: streaming fragments are often mid-utterance and legitimately lowercase, so
+        // forcing a leading capital would corrupt them. We only recapitalize a word that now follows
+        // a sentence terminator (a genuine sentence boundary).
+        result = result
+            .replace(/[ \t]{2,}/g, ' ')                 // collapse the doubled space left behind
+            .replace(/,\s*(?=,)/g, '')                  // drop an orphaned comma from a removed parenthetical
+            .replace(/\s+([,.;:!?])/g, '$1')            // no space before punctuation
+            .replace(/([.!?])\s+([a-z])/g, (m, p, ch) => p + ' ' + ch.toUpperCase()) // recap after sentence end
+            .replace(/^[\s,;:.]+/, '')                  // strip leading orphaned space/punctuation
+            .replace(/[ \t]+$/gm, '')                     // trailing spaces per line
+            .trim();
+    }
+
     return result;
 }
 

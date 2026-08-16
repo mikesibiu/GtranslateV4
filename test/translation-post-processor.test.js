@@ -1221,6 +1221,76 @@ describe('applyTermMappings', () => {
         });
     });
 
+    describe('"fut" STT mishearing → "steal" (source-gated, live 2026-08-16)', () => {
+        it('recovers the intended meaning from the exact live phrase', () => {
+            const ro = 'cum se fut de la alții cum să-i înșeli';
+            expect(applyTermMappings('how to get the fuck out of others how to deceive them', ro))
+                .to.equal('how to steal from others how to deceive them');
+        });
+        it('maps a standalone profane verb to "steal" when the vulgar root is in source', () => {
+            expect(applyTermMappings('they fuck from the poor', 'ei fut de la cei săraci'))
+                .to.equal('they steal from the poor');
+        });
+        it('does NOT rewrite to "steal" when the source has no vulgar root (net removes instead)', () => {
+            expect(applyTermMappings('we should be fucking honest', 'ar trebui să fim cinstiți'))
+                .to.equal('we should be honest');
+        });
+        it('cleans the double-space left by "the fuck" deletion even when nothing else remains', () => {
+            expect(applyTermMappings('how the fuck do people steal', 'cum se fut oamenii'))
+                .to.equal('how do people steal');
+        });
+        it('preserves inflection: fucked→stole, fucks→steals (vulgar root in source)', () => {
+            expect(applyTermMappings('he fucked from them', 'el s-a futut de la ei')).to.equal('he stole from them');
+            expect(applyTermMappings('she fucks from the weak', 'ea se fute de la cei slabi')).to.equal('she steals from the weak');
+        });
+        it('preserves capitalization at sentence start', () => {
+            expect(applyTermMappings('Fuck from the poor is wrong', 'a fute de la săraci e greșit'))
+                .to.equal('Steal from the poor is wrong');
+        });
+    });
+
+    describe('profanity safety net (unconditional final scrub)', () => {
+        it('removes "fuck" that MT emitted from clean source (mid-sentence)', () => {
+            expect(applyTermMappings('we must fuck obey Jehovah', 'trebuie să ascultăm de Iehova'))
+                .to.equal('we must obey Jehovah');
+        });
+        it('removes "fucking" adjective and tidies spacing', () => {
+            expect(applyTermMappings('this is a fucking blessing', '')).to.equal('this is a blessing');
+        });
+        it('removes profanity at the absolute start (leaves fragment lowercase — mid-utterance safe)', () => {
+            expect(applyTermMappings('Shit happens in life.', '')).to.equal('happens in life.');
+        });
+        it('recapitalizes a word after a sentence terminator when the profanity was sentence-initial there', () => {
+            expect(applyTermMappings('We serve God. Shit really matters.', '')).to.equal('We serve God. Really matters.');
+        });
+        it('fixes spacing before punctuation after removal', () => {
+            expect(applyTermMappings('he was there, shit, at the meeting', '')).to.equal('he was there, at the meeting');
+        });
+        it('does NOT touch clean words containing a profane substring (Scunthorpe)', () => {
+            expect(applyTermMappings('we assumed the assessment was classic', ''))
+                .to.equal('we assumed the assessment was classic');
+        });
+        it('leaves "damnation"/"condemned" untouched (religious vocabulary)', () => {
+            expect(applyTermMappings('warned of coming condemnation', 'avertizat de condamnare'))
+                .to.equal('warned of coming condemnation');
+        });
+        it('leaves "whore" untouched (older Bible-quotation vocabulary)', () => {
+            expect(applyTermMappings('the great whore of Babylon', '')).to.equal('the great whore of Babylon');
+        });
+        it('leaves the proper name "Dick" untouched', () => {
+            expect(applyTermMappings('Dick spoke first at the meeting', '')).to.equal('Dick spoke first at the meeting');
+        });
+        it('scrubs each unambiguous root (representative coverage)', () => {
+            expect(applyTermMappings('what a bitch that was', '')).to.equal('what a that was');
+            expect(applyTermMappings('total bullshit here', '')).to.equal('total here');
+            expect(applyTermMappings('you asshole friend', '')).to.equal('you friend');
+            expect(applyTermMappings('what a dickhead move', '')).to.equal('what a move');
+        });
+        it('does not fire on clean text (no-op)', () => {
+            expect(applyTermMappings('Jehovah blesses his people', '')).to.equal('Jehovah blesses his people');
+        });
+    });
+
     describe('"true sexy" / "search for sex" → meaning (sens misheard as sex, gated on source)', () => {
         it('fixes "true sexy" to "true meaning" when source has sens', () => {
             expect(applyTermMappings('will have true sexy and purpose', 'va avea cu adevărat sens')).to.equal('will have true meaning and purpose');
