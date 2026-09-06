@@ -49,7 +49,7 @@ const APP_PASSWORD = process.env.APP_PASSWORD || null;
 // App version stamped onto translation_log rows (keep in sync with the badge in index.html).
 // Was previously hardcoded 'v206', which mislabelled every logged row and undermined
 // per-version log analysis.
-const APP_VERSION = 'v226';
+const APP_VERSION = 'v227';
 
 // Guard: SESSION_SECRET must be set in production — hardcoded fallback is a security hole
 if (NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -1103,6 +1103,11 @@ io.on('connection', (socket) => {
         'pionierat',
         'pionieră',
         'serviciul cu timp integral',
+        // 2026-09-06 Sunday meeting fix
+        // "prezise" (foretold) → STT hears "trezise" (awakened) — 1-letter p/t confusion
+        // (Bible appendix B9 title: "puterile mondiale prezise de Daniel" → "world powers awakened by Daniel")
+        'prezise de Daniel',
+        'puterile mondiale prezise de Daniel',
     ];
 
     // Helper function to update last activity time
