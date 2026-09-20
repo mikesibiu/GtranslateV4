@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Translate Hub — farace.net</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: #fff;
+        }
+
+        header p {
+            margin-top: 0.5rem;
+            color: #888;
+            font-size: 0.95rem;
+        }
+
+        .cards {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            width: 100%;
+            max-width: 620px;
+        }
+
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 2rem 1.75rem;
+            width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            border: 1px solid #223;
+            transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+
+        .card.gtranslate { border-color: #e94560; }
+        .card.gtranslate:hover { box-shadow: 0 8px 32px rgba(233,69,96,0.35); }
+        .card.phrase:hover  { border-color: #9c27b0; }
+
+        .card-icon {
+            font-size: 2.2rem;
+            line-height: 1;
+        }
+
+        .card-name {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .card-badge {
+            display: inline-block;
+            font-size: 0.6rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            vertical-align: middle;
+            margin-left: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-gtranslate { background: #e94560; color: #fff; }
+        .badge-phrase    { background: #9c27b0; color: #fff; }
+        .badge-default   { background: #ffb300; color: #1a1a2e; }
+
+        .card-desc {
+            font-size: 0.88rem;
+            color: #aaa;
+            line-height: 1.55;
+            flex: 1;
+        }
+
+        .card-meta {
+            font-size: 0.78rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+
+        .card-open {
+            margin-top: 0.5rem;
+            padding: 0.55rem 1.25rem;
+            border-radius: 6px;
+            border: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: opacity 0.15s;
+            color: #fff;
+        }
+
+        .card-open:hover { opacity: 0.85; }
+        .card.gtranslate .card-open { background: #e94560; }
+        .card.phrase   .card-open { background: #9c27b0; }
+
+        footer {
+            margin-top: 3rem;
+            color: #444;
+            font-size: 0.78rem;
+            text-align: center;
+        }
+
+        @media (max-width: 640px) {
+            .card { width: 100%; max-width: 360px; }
+            header h1 { font-size: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🌐 Translate Hub</h1>
+        <p>Real-time speech translation tools</p>
+    </header>
+
+    <div class="cards">
+
+        <a class="card gtranslate" href="https://translate.farace.net/app">
+            <div class="card-icon">🎤</div>
+            <div class="card-name">
+                GTranslate V4
+                <span class="card-badge badge-gtranslate">GOOGLE STT</span>
+                <span class="card-badge badge-default">DEFAULT</span>
+            </div>
+            <div class="card-desc">
+                Real-time speech translation powered by Google Cloud
+                Speech-to-Text V1 and Google Translate.
+            </div>
+            <div class="card-meta">Google STT · 305s session limit</div>
+            <div class="card-open">Open</div>
+        </a>
+
+        <a class="card phrase" href="https://phrasetranslation-mysysadmin-73449e6e.koyeb.app">
+            <div class="card-icon">📖</div>
+            <div class="card-name">
+                PhraseTranslation
+                <span class="card-badge badge-phrase">PHONETICS</span>
+            </div>
+            <div class="card-desc">
+                Phrase and text translation with phonetic pronunciation guides
+                and text-to-speech audio output.
+            </div>
+            <div class="card-meta">Google Translate · TTS · Phonetics</div>
+            <div class="card-open">Open</div>
+        </a>
+
+    </div>
+
+    <footer>farace.net translation tools</footer>
+</body>
+</html>

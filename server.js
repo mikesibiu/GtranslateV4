@@ -387,7 +387,21 @@ app.get('/logout', (req, res) => {
     req.session.destroy(() => res.redirect('/login'));
 });
 
+// Translate Hub — serve hub page when accessed via translate.farace.net (no auth required)
+app.get('/', (req, res, next) => {
+    const host = (req.hostname || '').toLowerCase();
+    if (host.startsWith('translate.')) {
+        res.set('Cache-Control', 'no-cache');
+        return res.sendFile(path.join(__dirname, 'translate-hub.html'));
+    }
+    next();
+});
+
 app.get('/', requireAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.get('/app', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
