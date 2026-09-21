@@ -1082,6 +1082,9 @@ function applyTermMappings(text, sourceText = '') {
             (m, obj) => (m[0] === 'C' ? 'Created' : 'created') + ' ' + obj);
         result = result.replace(/\bcreator (such|clones?)\b/gi,
             (m, obj) => (m[0] === 'C' ? 'Created' : 'created') + ' ' + obj);
+        // Perfect aspect: "has creator some committees". The noun reading always takes an
+        // article ("has a creator"), so a bare "has/have/had creator" can only be the verb.
+        result = result.replace(/\b(has|have|had) creator\b/gi, '$1 created');
     }
 
     // "merită" (is worth / worthwhile) → MT emits "deserve" in slots where it is ungrammatical
@@ -1104,8 +1107,86 @@ function applyTermMappings(text, sourceText = '') {
 
     // "au văzut" with a NOUN subject: "his brothers seen that…" → "saw". Same auxiliary
     // lookbehind as the pronoun rule above, so an inverted "Have the brothers seen…?" keeps "seen".
-    result = result.replace(/(?<!\b(?:have|has|had|haven't|hasn't|hadn't)\s)\b(his|her|their|the)\s+(brothers?|sisters?)\s+seen\b/gi,
+    // An optional kinship modifier is allowed — "his half brothers seen" slipped past in v222.
+    result = result.replace(/(?<!\b(?:have|has|had|haven't|hasn't|hadn't)\s)\b(his|her|their|the)\s+((?:(?:half|step|older|younger|elder)[- ]?)?(?:brothers?|sisters?))\s+seen\b/gi,
         '$1 $2 saw');
+
+    // ──────────── 2026-09-17 Thursday review (v229) ────────────
+    // Each rule is either source-gated or matches a construction that is never valid English.
+    // The gated rules have "does NOT mangle" regression guards in the test suite.
+
+    // "aproape de" (near to) → MT emits "almost to". Psalm 145:18 — "Jehovah is near to all those
+    // calling on him" — came out as "Jehovah is almost to all" five times in one meeting. Gated on
+    // "aproape de": the "almost" sense takes no "de" ("aproape 90 de ani" stays "almost 90 years").
+    if (/\baproape de\b/i.test(sourceNorm)) {
+        result = result.replace(/\b(A|a)lmost to\b/g, (m, a) => (a === 'A' ? 'Near' : 'near') + ' to');
+    }
+    // Segment cut mid-verse: source ends on "aproape de", so the output ends on a dangling
+    // "is almost". A bare trailing "is almost" is never complete English.
+    if (/\baproape de\s*$/i.test(sourceNorm)) {
+        result = result.replace(/\b(is|was|are|were|be) almost\s*$/i, '$1 near');
+    }
+
+    // "se folosește de" (uses) → "is use you". "is use" + object pronoun is never valid.
+    if (/\bfolos/i.test(sourceNorm)) {
+        result = result.replace(/\bis use (you|us|them|me|him|her|it)\b/gi, 'uses $1');
+    }
+
+    // "are grijă de" (cares for) → "is care of". Distinct from "in care of", which is untouched.
+    if (/\bgrij/i.test(sourceNorm)) {
+        result = result.replace(/\bis care of\b/gi, 'cares for');
+    }
+
+    // "mai târziu" (later) → MT emits the adjective "late". Bare "târziu" and the verb family
+    // "întârzia" (întârziat/întârzie/întârziere) really do mean "late", so the rules only run when
+    // EVERY "târziu" in the segment is "mai târziu" and no "întârzi*" is present — any tardy
+    // signal anywhere in the segment disables all three. The be-verb lookbehind additionally
+    // protects "he was again late".
+    const tarziuCount = (sourceNorm.match(/\btarziu\b/gi) || []).length;
+    const maiTarziuCount = (sourceNorm.match(/\bmai tarziu\b/gi) || []).length;
+    if (maiTarziuCount > 0 && maiTarziuCount === tarziuCount && !/\bintarzi/i.test(sourceNorm)) {
+        result = result.replace(/(^|[.!?]\s+)Late,/g, '$1Later,');
+        result = result.replace(/(?<!\b(?:was|is|were|are|been|being|be|am)\s)\bagain late\b/gi, 'again later');
+        result = result.replace(/\b(I|you|he|she|we|they) late (\w+ed)\b/gi, '$1 later $2');
+    }
+
+    // Quantifiers that are never valid English.
+    result = result.replace(/\bmore and many\b/gi, 'more and more');     // "tot mai mulți"
+    result = result.replace(/\bmore many (?=\d)/gi, 'more than ');        // "mai multe 40%"
+
+    // Broken predicates that are never valid English.
+    result = result.replace(/\bkeep (us|them|him|her|me|you) life\b/gi, 'keep $1 alive');
+    result = result.replace(/\b(could|can|would|to) feel safety\b(?!\s+in\s+numbers)/gi, '$1 feel safe');
+    result = result.replace(/\b(couldn't|could not|can't|cannot|didn't|did not|won't|will not) do nothing\b/gi, '$1 do anything');
+    result = result.replace(/\b(can|could|will|would|must|should|may|might) be see\b/gi, '$1 be seen');
+    result = result.replace(/\b(we|they|I|you) speaks\b/gi, '$1 speak');
+    result = result.replace(/\bin lead of\b/gi, 'in charge of');
+    result = result.replace(/\b(we|they|you|I) true (forgive|love|believe|repent|serve)\b/gi, '$1 truly $2');
+
+    // Bare verb where the source is past tense.
+    if (/\bincredere\b/i.test(sourceNorm)) {                               // "avea încredere"
+        result = result.replace(/\b(he|she) trust that\b/gi, '$1 trusted that');
+    }
+    // Clause-final "he need." is ambiguous in English (dropped -s present OR dropped -ed past),
+    // so it is gated on the Romanian past "avea nevoie" / "a avut nevoie", like "they need" above.
+    // The lookahead leaves "he need not" alone.
+    if (/\b(?:avea|a avut) nevoie\b/i.test(sourceNorm)) {
+        result = result.replace(/\b(he|she) need(?=\s*[.,;!?]|\s*$)/gi, '$1 needed');
+    }
+    if (/\bschimbat\b/i.test(sourceNorm)) {                                // "s-a schimbat"
+        // Singular only: plural "their lives change when…" is valid present tense. The positive
+        // lookahead is deliberately short — only continuations seen in production that cannot
+        // follow the noun phrase. Adverbs like "so"/"dramatically" are excluded because a noun
+        // reading can follow them ("his life change so far has been…").
+        result = result.replace(/\b((?:his|her|their|my|our|your|\w+'s)\s+(?:life|status))\s+change\b(?=\s+(?:overnight|from|not(?!\s+only)|always\s+from)\b)/gi,
+            '$1 changed');
+    }
+    if (/\bau inceput\b/i.test(sourceNorm)) {                              // "au început"
+        result = result.replace(/\bthey start to\b/gi, 'they started to');
+    }
+    if (/\b(?:vedea|vazut)\b/i.test(sourceNorm)) {
+        result = result.replace(/\bno one see\b/gi, 'no one saw');
+    }
 
     // ──────────── "fut" STT mishearing → "steal" (source-gated semantic repair) ────────────
     // Observed live 2026-08-16: STT heard Romanian "fură/furi" (to steal) as the vulgar homophone

@@ -2161,6 +2161,275 @@ describe('applyTermMappings', () => {
                 .to.equal('Have the brothers seen this proof?');
         });
     });
+
+    // ── 2026-09-17 Thursday review (v229) ─────────────────────────────────────────
+    // Every positive case below is verbatim production output from the 09-17 meeting.
+
+    describe('2026-09-17 Thursday: "aproape de" → "near" (Psalm 145:18 theme scripture)', () => {
+        it('"Jehovah is almost to all who call" → "near to all"', () => {
+            expect(applyTermMappings('Jehovah is almost to all who call upon him', 'Iehova este aproape de toți cei ce îl cheamă'))
+                .to.equal('Jehovah is near to all who call upon him');
+        });
+        it('"proved to be almost to the brothers" → "near to the brothers"', () => {
+            expect(applyTermMappings('Jehovah proved to be almost to the brothers and sisters', 'Iehova s-a dovedit a fi aproape de frații și surorile'))
+                .to.equal('Jehovah proved to be near to the brothers and sisters');
+        });
+        it('preserves capitalisation of a sentence-initial "Almost to"', () => {
+            expect(applyTermMappings('Almost to all who call upon him', 'aproape de toți cei ce îl cheamă'))
+                .to.equal('Near to all who call upon him');
+        });
+        it('segment truncated mid-verse: "Jehovah is almost" → "Jehovah is near"', () => {
+            expect(applyTermMappings('Psalm 145:18 Jehovah is almost', 'Psalmul 145 cu 18 Iehova este aproape de'))
+                .to.equal('Psalm 145:18 Jehovah is near');
+        });
+        it('does NOT touch "almost 90 years" — aproape with a number really means almost', () => {
+            expect(applyTermMappings('almost 90 years old', 'aproape 90 de ani'))
+                .to.equal('almost 90 years old');
+        });
+        it('does NOT touch "almost to" when the source has no "aproape de"', () => {
+            expect(applyTermMappings('we are almost to the end', 'suntem aproape la sfârșit'))
+                .to.equal('we are almost to the end');
+        });
+        it('does NOT rewrite a truncated "is almost" when the source does not end in "aproape de"', () => {
+            expect(applyTermMappings('the work is almost', 'lucrarea este aproape gata'))
+                .to.equal('the work is almost');
+        });
+    });
+
+    describe('2026-09-17 Thursday: noun-subject "seen" with a modifier ("half brothers")', () => {
+        it('"his half brothers seen that" → "saw"', () => {
+            expect(applyTermMappings('when his half brothers seen that Jacob loved him', 'când frații săi vitregi au văzut că Iacob îl iubea'))
+                .to.equal('when his half brothers saw that Jacob loved him');
+        });
+        it('hyphenated "half-brothers seen" → "saw"', () => {
+            expect(applyTermMappings('his half-brothers seen it', 'frații vitregi au văzut'))
+                .to.equal('his half-brothers saw it');
+        });
+        it('does NOT touch inverted "Have his half brothers seen …?"', () => {
+            expect(applyTermMappings('Have his half brothers seen this?', 'Au văzut frații vitregi asta?'))
+                .to.equal('Have his half brothers seen this?');
+        });
+    });
+
+    describe('2026-09-17 Thursday: "has creator" → "has created" (gated on crea)', () => {
+        it('"has creator some relief committees" → "has created"', () => {
+            expect(applyTermMappings("Jehovah's Organization on earth has creator some relief committees", 'organizația lui Iehova a creat unele comitete de ajutorare'))
+                .to.equal("Jehovah's Organization on earth has created some relief committees");
+        });
+        it('does NOT touch "has a creator" (article present)', () => {
+            expect(applyTermMappings('the universe has a creator', 'universul a fost creat'))
+                .to.equal('the universe has a creator');
+        });
+        it('does NOT touch "has creator" when the source has no crea', () => {
+            expect(applyTermMappings('it has creator rights', 'are drepturi de autor'))
+                .to.equal('it has creator rights');
+        });
+    });
+
+    describe('2026-09-17 Thursday: "is use <obj>" → "uses" (gated on folos)', () => {
+        it('"Jehovah is use you to fulfill" → "Jehovah uses you"', () => {
+            expect(applyTermMappings('Jehovah is use you to fulfill the promise', 'Iehova se folosește de voi pentru a împlini promisiunea'))
+                .to.equal('Jehovah uses you to fulfill the promise');
+        });
+        it('does NOT touch "what is the use of it"', () => {
+            expect(applyTermMappings('what is the use of it', 'la ce folosește'))
+                .to.equal('what is the use of it');
+        });
+    });
+
+    describe('2026-09-17 Thursday: "is care of" → "cares for" (gated on grij)', () => {
+        it('"Jehovah is care of his people" → "cares for"', () => {
+            expect(applyTermMappings('Jehovah is care of his people', 'Iehova are grijă de poporul său'))
+                .to.equal('Jehovah cares for his people');
+        });
+        it('does NOT touch "in care of" (mail address phrase)', () => {
+            expect(applyTermMappings('send it in care of the elders', 'trimite-l în grija bătrânilor'))
+                .to.equal('send it in care of the elders');
+        });
+    });
+
+    describe('2026-09-17 Thursday: "mai târziu" → "later" not "late" (gated on tarziu)', () => {
+        it('clause-initial "Late," → "Later,"', () => {
+            expect(applyTermMappings('who were passing through. Late, his brothers lied to Jacob', 'care treceau prin zonă mai târziu frații săi l-au mințit pe Iacob'))
+                .to.equal('who were passing through. Later, his brothers lied to Jacob');
+        });
+        it('"flee again late" → "again later"', () => {
+            expect(applyTermMappings('had to flee again late', 'au trebuit să fugă din nou mai târziu'))
+                .to.equal('had to flee again later');
+        });
+        it('"she late showed it" → "she later showed it"', () => {
+            expect(applyTermMappings('she late showed it to Potiphar', 'mai târziu ea i l-a arătat lui Potifar'))
+                .to.equal('she later showed it to Potiphar');
+        });
+        it('does NOT touch "he was late for the meeting" (gate open)', () => {
+            expect(applyTermMappings('he was late for the meeting', 'a întârziat, mai târziu a venit'))
+                .to.equal('he was late for the meeting');
+        });
+        it('does NOT touch "Late," when the source has no târziu', () => {
+            expect(applyTermMappings('Late, at night', 'Noaptea'))
+                .to.equal('Late, at night');
+        });
+        // QA v229: bare "târziu" really means "late" — only "mai târziu" means "later".
+        it('does NOT touch "he was again late" when the source is bare "târziu" (late, not later)', () => {
+            expect(applyTermMappings('he was again late for the meeting', 'a ajuns din nou târziu la întrunire'))
+                .to.equal('he was again late for the meeting');
+        });
+        it('does NOT touch "was again late" even when "mai târziu" opens the gate (be-verb lookbehind)', () => {
+            expect(applyTermMappings('he was again late for the meeting', 'mai târziu a ajuns din nou târziu'))
+                .to.equal('he was again late for the meeting');
+        });
+        it('does NOT touch a fronted tardy "Late, as always, he apologized" (bare târziu)', () => {
+            expect(applyTermMappings('Late, as always, he apologized', 'Târziu, ca de obicei, și-a cerut scuze'))
+                .to.equal('Late, as always, he apologized');
+        });
+        it('does NOT touch "arrived again late" when the tardy sense comes from "întârziat" plus an unrelated "mai târziu"', () => {
+            expect(applyTermMappings('he arrived again late to the meeting, but later things changed',
+                'a ajuns din nou întârziat la întrunire, dar mai târziu lucrurile s-au schimbat'))
+                .to.equal('he arrived again late to the meeting, but later things changed');
+        });
+        it('does NOT touch a tardy "arrived again late" when the segment ALSO has an unrelated "mai târziu"', () => {
+            expect(applyTermMappings('he arrived again late, but later things changed',
+                'a ajuns din nou târziu la întrunire, dar mai târziu lucrurile s-au schimbat'))
+                .to.equal('he arrived again late, but later things changed');
+        });
+    });
+
+    describe('2026-09-17 Thursday: ungrammatical quantifiers', () => {
+        it('"more and many people" → "more and more people"', () => {
+            expect(applyTermMappings('more and many people are being forced to leave', 'tot mai mulți oameni sunt forțați să plece'))
+                .to.equal('more and more people are being forced to leave');
+        });
+        it('"more many 40% of" → "more than 40% of"', () => {
+            expect(applyTermMappings('fled their homes, more many 40% of', 'adică mai multe 40% din'))
+                .to.equal('fled their homes, more than 40% of');
+        });
+        it('does NOT touch "more than many expected"', () => {
+            expect(applyTermMappings('more than many expected', 'mai mult decât se aștepta'))
+                .to.equal('more than many expected');
+        });
+    });
+
+    describe('2026-09-17 Thursday: broken predicates', () => {
+        it('"to keep us life" → "to keep us alive"', () => {
+            expect(applyTermMappings('God sent me here before you to keep us life', 'Dumnezeu m-a trimis ca să rămânem în viață'))
+                .to.equal('God sent me here before you to keep us alive');
+        });
+        it('"could feel safety" → "could feel safe"', () => {
+            expect(applyTermMappings('a place where we could feel safety', 'un loc în care să ne simțim în siguranță'))
+                .to.equal('a place where we could feel safe');
+        });
+        it('does NOT touch "we feel safety is important"', () => {
+            expect(applyTermMappings('we feel safety is important', 'simțim că siguranța e importantă'))
+                .to.equal('we feel safety is important');
+        });
+        it('does NOT alter the idiom "would feel safety in numbers"', () => {
+            expect(applyTermMappings('people would feel safety in numbers', 'oamenii s-ar simți în siguranță'))
+                .to.equal('people would feel safety in numbers');
+        });
+        it('"couldn\'t do nothing" → "couldn\'t do anything"', () => {
+            expect(applyTermMappings("but he couldn't do nothing", 'dar el nu putea să facă nimic'))
+                .to.equal("but he couldn't do anything");
+        });
+        it('"character can be see best" → "can be seen"', () => {
+            expect(applyTermMappings('character can be see best in the moments', 'caracterul se poate vedea cel mai bine'))
+                .to.equal('character can be seen best in the moments');
+        });
+        it('"when we speaks about" → "we speak"', () => {
+            expect(applyTermMappings('the first time when we speaks about', 'prima dată când se vorbește despre'))
+                .to.equal('the first time when we speak about');
+        });
+        it('"is in lead of everything" → "is in charge of"', () => {
+            expect(applyTermMappings('Jehovah is in lead of everything', 'Iehova conduce totul'))
+                .to.equal('Jehovah is in charge of everything');
+        });
+        it('"when we true forgive" → "truly forgive"', () => {
+            expect(applyTermMappings('when we true forgive', 'când iertăm cu adevărat'))
+                .to.equal('when we truly forgive');
+        });
+    });
+
+    describe('2026-09-17 Thursday: bare verb where past tense is required', () => {
+        it('"he trust that" → "he trusted that" (gated on incredere)', () => {
+            expect(applyTermMappings('he trust that Jehovah would be with him', 'el avea încredere că Iehova îi e alături'))
+                .to.equal('he trusted that Jehovah would be with him');
+        });
+        it('does NOT touch plural "they trust that"', () => {
+            expect(applyTermMappings('they trust that Jehovah cares', 'au încredere că Iehova are grijă'))
+                .to.equal('they trust that Jehovah cares');
+        });
+        it('clause-final "he need." → "he needed."', () => {
+            expect(applyTermMappings('the doctors and specialists he need.', 'doctorii și specialiștii de care avea nevoie'))
+                .to.equal('the doctors and specialists he needed.');
+        });
+        it('does NOT touch "he need not worry"', () => {
+            expect(applyTermMappings('he need not worry', 'nu trebuie să-și facă griji'))
+                .to.equal('he need not worry');
+        });
+        it('does NOT guess past tense for "he need." without a Romanian past marker', () => {
+            expect(applyTermMappings('the specialists he need.', 'specialiștii de care are nevoie'))
+                .to.equal('the specialists he need.');
+        });
+        it('"his life change overnight" → "changed" (gated on schimbat)', () => {
+            expect(applyTermMappings('his life change overnight', 'viața lui s-a schimbat peste noapte'))
+                .to.equal('his life changed overnight');
+        });
+        it('"Joseph\'s life change from" → "changed"', () => {
+            expect(applyTermMappings("Joseph's life change from a much loved son", 'viața lui Iosif s-a schimbat'))
+                .to.equal("Joseph's life changed from a much loved son");
+        });
+        it('does NOT touch the noun phrase "his life change was sudden"', () => {
+            expect(applyTermMappings('his life change was sudden', 'viața lui s-a schimbat brusc'))
+                .to.equal('his life change was sudden');
+        });
+        it('does NOT touch "his life change" when the source has no schimbat', () => {
+            expect(applyTermMappings('his life change overnight', 'viața lui'))
+                .to.equal('his life change overnight');
+        });
+        it('"Alina\'s status change not all at once" → "changed" (verbatim 09-17 output)', () => {
+            expect(applyTermMappings("Alina's status change not all at once", 's-a schimbat statutul nu dintr-o dată'))
+                .to.equal("Alina's status changed not all at once");
+        });
+        it('does NOT touch plural present "their lives change when…" (valid English)', () => {
+            expect(applyTermMappings('their lives change when they learn the truth', 'viețile lor s-au schimbat'))
+                .to.equal('their lives change when they learn the truth');
+        });
+        it('does NOT touch the noun phrase "her status change request"', () => {
+            expect(applyTermMappings('she filed her status change request', 's-a schimbat ceva'))
+                .to.equal('she filed her status change request');
+        });
+        it('"Joseph\'s life change always from" → "changed" (verbatim 09-17 output)', () => {
+            expect(applyTermMappings("Joseph's life change always from his father's house", 'viața lui Iosif s-a schimbat mereu'))
+                .to.equal("Joseph's life changed always from his father's house");
+        });
+        it('does NOT touch the noun phrase "his life change so far has been remarkable"', () => {
+            expect(applyTermMappings('his life change so far has been remarkable', 'viața lui s-a schimbat'))
+                .to.equal('his life change so far has been remarkable');
+        });
+        it('does NOT touch the noun phrase "his life change dramatically improved things"', () => {
+            expect(applyTermMappings('his life change dramatically improved things', 'viața lui s-a schimbat'))
+                .to.equal('his life change dramatically improved things');
+        });
+        it('does NOT touch the noun phrase "his life change not only affected him"', () => {
+            expect(applyTermMappings('his life change not only affected him', 'viața lui s-a schimbat'))
+                .to.equal('his life change not only affected him');
+        });
+        it('"they start to envy" → "started" (gated on au început)', () => {
+            expect(applyTermMappings('they start to envy him', 'au început să-l invidieze'))
+                .to.equal('they started to envy him');
+        });
+        it('does NOT touch "they start to" without au început', () => {
+            expect(applyTermMappings('they start to sing', 'încep să cânte'))
+                .to.equal('they start to sing');
+        });
+        it('"no one see him" → "no one saw him" (gated on vedea)', () => {
+            expect(applyTermMappings('he was young no one see him', 'era tânăr, nu-l vedea nimeni'))
+                .to.equal('he was young no one saw him');
+        });
+        it('does NOT touch "no one see" when the source has no vedea/văzut', () => {
+            expect(applyTermMappings('let no one see it', 'să nu observe nimeni'))
+                .to.equal('let no one see it');
+        });
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
