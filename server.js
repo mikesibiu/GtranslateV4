@@ -16,7 +16,7 @@ const path = require('path');
 const fs = require('fs');
 const billingDb = require('./billing-db');
 const TranslationRulesEngine = require('./translation-rules-engine');
-const { applyTermMappings, verifyReligiousTerms, preserveSourceNumbers, preserveDates, extractByWordLCP } = require('./translation-post-processor');
+const { normalizeSourceForMT, applyTermMappings, verifyReligiousTerms, preserveSourceNumbers, preserveDates, extractByWordLCP, extractByAlignmentFallback } = require('./translation-post-processor');
 const session = require('express-session');
 
 // ===== CONFIGURATION =====
@@ -896,6 +896,19 @@ io.on('connection', (socket) => {
         // Field service/ministry vocabulary
         'serviciul de predicare',  // preaching service/ministry
         'serviciul de teren',      // field service
+        // Pioneering — multi-word forms per rule 2 above (avoid single-token common nouns);
+        // "pionierat"/"pionieră" bare forms already hinted below (line ~1128)
+        'pionier auxiliar',
+        'pionier permanent',
+        'pionier special',
+        'sunt pionier',
+        'a face pionierat',
+        // Persecution — multi-word forms; STT mishears "suferă persecuții" as "se vinde persecuții"
+        // (2026-09-26 session: "sell persecution" instead of "suffer persecution")
+        'suferă persecuții',
+        'persecuție religioasă',
+        'sub persecuție',
+        'au fost persecutați',
         // Biblical Hebrew words in common Romanian JW use
         'cei răi',     // the wicked ones → STT produced "cei răni" (wounded) — Matthew 5:45
         'cei drepți',  // the righteous ones
@@ -1114,7 +1127,10 @@ io.on('connection', (socket) => {
         'Regatul lui Dumnezeu',
         'Regatul cerurilor',
         // "pionierat" (pioneering/full-time ministry) → STT garbles to unrelated words
+        // (2026-09-26 session: STT produced "pianul aluatul" and "Serviciul Rutier" for this word
+        // twice in the same passage; see also the multi-word "pionier"/"persecuție" hints above)
         'pionierat',
+        'pionieratul',
         'pionieră',
         'serviciul cu timp integral',
         // 2026-09-06 Sunday meeting fix
@@ -1313,8 +1329,12 @@ io.on('connection', (socket) => {
         try {
             // ── Step 1: Translate the FULL current transcript for maximum context ──
             // Race against a timeout to prevent hangs if Google Translate API stalls
+            // Romanian-only source repairs for the MT call; post-processing still gates on fullText.
+            const mtSource = currentLanguage.split('-')[0] === 'ro'
+                ? normalizeSourceForMT(fullText.trim())
+                : fullText.trim();
             const translatedFull = await Promise.race([
-                translateWithRetry(fullText.trim(), targetLanguage, currentLanguage, clientId),
+                translateWithRetry(mtSource, targetLanguage, currentLanguage, clientId),
                 new Promise((_, reject) =>
                     setTimeout(() => reject(new Error(`Translation timeout after ${TRANSLATION_TIMEOUT_MS}ms`)), TRANSLATION_TIMEOUT_MS)
                 )
@@ -1346,6 +1366,7 @@ io.on('connection', (socket) => {
             // ── Step 2: Extract only the NEW portion via word-level LCP ──
             let emitted = null;
             let usedLCP = false;
+            let usedAlignment = false;
 
             if (committedTranslation) {
                 const tail = extractByWordLCP(translatedFull, committedTranslation);
@@ -1354,11 +1375,25 @@ io.on('connection', (socket) => {
                     usedLCP = true;
                     logger.debug('✂️ LCP extraction succeeded', { clientId, tailWords: tail.split(/\s+/).length });
                 } else {
-                    logger.info('⚠️ LCP extraction failed (<75% match) — emitting full translation', {
-                        clientId,
-                        committedPreview: committedTranslation.substring(0, 60),
-                        fullPreview: translatedFull.substring(0, 60)
-                    });
+                    // Below the 75% bar usually means Google reworded the end of a short,
+                    // already-shown segment. Re-emitting in full shows it to the audience twice,
+                    // so take the aligned tail when the source word counts corroborate it.
+                    const aligned = extractByAlignmentFallback(translatedFull, committedTranslation, fullText, newText);
+                    if (aligned) {
+                        emitted = aligned;
+                        usedAlignment = true;
+                        logger.info('🧩 LCP below threshold — emitting aligned tail (duplicate avoided)', {
+                            clientId,
+                            committedPreview: committedTranslation.substring(0, 60),
+                            tailPreview: aligned.substring(0, 60)
+                        });
+                    } else {
+                        logger.info('⚠️ LCP extraction failed (<75% match) — emitting full translation', {
+                            clientId,
+                            committedPreview: committedTranslation.substring(0, 60),
+                            fullPreview: translatedFull.substring(0, 60)
+                        });
+                    }
                 }
             } else {
                 // First translation in this session — emit entire full translation
@@ -1427,7 +1462,7 @@ io.on('connection', (socket) => {
                         clientId,
                         reason: decision.reason,
                         confidence: decision.confidence,
-                        method: usedLCP ? 'full+lcp' : 'full+lcp_failed',
+                        method: usedLCP ? 'full+lcp' : (usedAlignment ? 'full+aligned' : 'full+lcp_failed'),
                         newContent: emitted.substring(0, 200),
                         sourceText: newText.substring(0, 200),
                         count: translationCount,
@@ -1629,10 +1664,16 @@ io.on('connection', (socket) => {
                             });
                         } else {
                             restartAttempts = 0; // Silence is not a failure; don't count toward max
+                            // Let the client distinguish "genuinely quiet" from "stream is restarting" —
+                            // otherwise the UI shows a stuck "Waiting for speech..." even while the mic
+                            // is picking up real audio that isn't reaching Google in time (e.g. a weak
+                            // mobile connection). See 2026-09-26 session: 39 restarts in one meeting.
+                            socket.emit('stream-reconnecting', { clientId });
                             scheduleAutoRestart();
                         }
                     } else if (isStreamTimeout && sessionActive) {
                         logger.info('🔄 Stream timeout detected, auto-restarting...', { clientId });
+                        socket.emit('stream-reconnecting', { clientId });
                         scheduleAutoRestart();
                     } else {
                         // Only emit error for non-timeout errors
@@ -1644,10 +1685,12 @@ io.on('connection', (socket) => {
                 })
                 .on('end', () => {
                     logger.warn('⚠️ Recognition stream ended by Google Cloud', { clientId });
+                    if (sessionActive) socket.emit('stream-reconnecting', { clientId });
                     scheduleAutoRestart();
                 })
                 .on('close', () => {
                     logger.warn('⚠️ Recognition stream closed by Google Cloud', { clientId });
+                    if (sessionActive) socket.emit('stream-reconnecting', { clientId });
                     scheduleAutoRestart();
                 })
                 .on('pipe', () => {

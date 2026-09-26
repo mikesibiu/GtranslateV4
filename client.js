@@ -390,6 +390,17 @@ class GTranslateV4Client {
             this.sttStartTime = Date.now();
         });
 
+        // Server is auto-restarting the STT stream (silence or a connectivity gap).
+        // Without this, the UI can show a stuck "Waiting for speech..." even while
+        // the mic is picking up real audio that isn't reaching the server in time.
+        this.socket.on('stream-reconnecting', () => {
+            const hasRecentTranslation = this.lastTranslation &&
+                (Date.now() - this.lastTranslationTime < 20000);
+            if (!hasRecentTranslation) {
+                this.interimText.textContent = 'Reconnecting...';
+            }
+        });
+
         this.socket.on('interim-result', (data) => {
             if (this.currentMode === 'earbuds') {
                 // Show last known English translation while listening (not raw Romanian STT)
@@ -446,6 +457,12 @@ class GTranslateV4Client {
             // Don't show errors for auto-restart events (server handles it)
             if (!errorCode || (!errorCode.includes('STREAM_ENDED') && !errorCode.includes('STREAM_CLOSED'))) {
                 this.updateStatus(`⚠️ ${errorMsg}`, 'error');
+
+                // Server has given up retrying (not just restarting) — clear any stale
+                // "Reconnecting..." text so it doesn't sit on screen after the stream stopped.
+                if (errorCode === 'SUSTAINED_AUDIO_TIMEOUT' || errorCode === 'MAX_RESTARTS_EXCEEDED') {
+                    this.interimText.textContent = 'Waiting for speech...';
+                }
 
                 // Auto-stop only for fatal errors, not stream restarts
                 if (errorCode && errorCode.includes('DESTROYED')) {
