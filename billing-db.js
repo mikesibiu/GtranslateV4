@@ -99,6 +99,11 @@ async function createSchema(logger) {
 
         CREATE INDEX IF NOT EXISTS idx_snap_snapshot_at ON meeting_snapshots(snapshot_at);
         CREATE INDEX IF NOT EXISTS idx_snap_label ON meeting_snapshots(snapshot_label);
+
+        -- Mirrors translation_log continuously (see archiveTranslationLog()) so that ANY
+        -- meeting is durably captured, not just the 4 scheduled Thu/Sun slots. translation_log
+        -- itself purges rows older than 45 minutes; this table never purges rows on its own.
+        CREATE TABLE IF NOT EXISTS translation_log_archive (LIKE translation_log INCLUDING ALL);
     `;
 
     try {
@@ -377,6 +382,51 @@ async function captureSnapshot(label) {
 }
 
 /**
+ * Mirror translation_log into translation_log_archive, which never purges rows on
+ * its own. Run this on a fixed interval (e.g. every 5 min, every day) so ANY
+ * meeting is durably captured — not just the 4 scheduled Thu/Sun snapshot times.
+ *
+ * Idempotent: relies on translation_log's own primary key ("id") to skip rows
+ * already archived, so calling this on a schedule when there's no live meeting
+ * (translation_log empty or unchanged) is a cheap no-op, not a growing duplicate.
+ *
+ * Column list is explicit (not `SELECT *` into a bare `INSERT`) so that a future
+ * `ALTER TABLE translation_log ADD COLUMN ...` fails loudly here instead of either
+ * silently miscopying columns or throwing on every single cron tick. If you add a
+ * column to translation_log, add it to translation_log_archive too (ALTER TABLE
+ * translation_log_archive ADD COLUMN IF NOT EXISTS ...) and to both lists below.
+ *
+ * @returns {Promise<number>} Number of new rows archived this run
+ */
+async function archiveTranslationLog() {
+    if (!pool) return 0;
+
+    const result = await pool.query(
+        `INSERT INTO translation_log_archive
+            (id, session_id, client_id, source_text, translated_text,
+             source_language, target_language, translation_reason, app_version, created_at)
+         SELECT id, session_id, client_id, source_text, translated_text,
+                source_language, target_language, translation_reason, app_version, created_at
+         FROM translation_log
+         ON CONFLICT (id) DO NOTHING`
+    );
+    return result.rowCount;
+}
+
+/**
+ * Purge translation_log_archive rows older than 365 days. Called from the daily
+ * purge scheduler (not from archiveTranslationLog itself, which runs every 5 min
+ * and doesn't need this check nearly that often).
+ */
+async function purgeOldArchive() {
+    if (!pool) return 0;
+    const result = await pool.query(
+        `DELETE FROM translation_log_archive WHERE created_at < NOW() - INTERVAL '365 days'`
+    );
+    return result.rowCount;
+}
+
+/**
  * Close database connection (for graceful shutdown)
  */
 async function closeDatabase(logger) {
@@ -394,6 +444,8 @@ module.exports = {
     getDailyUsage,
     purgeOldData,
     logTranslation,
+    archiveTranslationLog,
+    purgeOldArchive,
     captureSnapshot,
     closeDatabase
 };

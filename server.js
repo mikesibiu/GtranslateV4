@@ -37,6 +37,12 @@ try {
 
 const PORT = process.env.PORT || 3003;
 const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Visibility for the translation_log_archive safety-net cron job (see createSchema block
+// below). This is now the sole durable capture path for off-schedule meetings, so a silent
+// multi-hour failure here (as happened with an agent-side polling loop on 2026-09-26) needs
+// to be checkable, not just logged and forgotten. Surfaced on GET /health.
+const archiveStatus = { lastRunAt: null, lastError: null };
 const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || String(APP_CONFIG.connection?.maxConnections || 50));
 const MAX_CONNECTIONS_PER_IP = parseInt(process.env.MAX_CONNECTIONS_PER_IP || String(APP_CONFIG.connection?.maxConnectionsPerIp || 5));
 const INACTIVITY_TIMEOUT = parseInt(process.env.INACTIVITY_TIMEOUT || String(APP_CONFIG.connection?.inactivityTimeoutMs || 30 * 60 * 1000));
@@ -443,7 +449,8 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         uptime: process.uptime(),
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        archive: archiveStatus
     });
 });
 
@@ -533,8 +540,10 @@ app.get('/api/billing/daily', requireAuth, async (req, res) => {
 });
 
 // ===== INTERNAL CAPTURE ENDPOINT =====
-// Called by cron-job.org at scheduled meeting times to snapshot translation_log → meeting_snapshots.
-// Auth: Bearer token via CAPTURE_TOKEN env var (set on Koyeb).
+// Manual/ad-hoc trigger to snapshot translation_log → meeting_snapshots on demand.
+// The regular Thu/Sun captures are scheduled in-process via node-cron (see
+// meetingSchedules below), not by this endpoint or an external cron service.
+// Auth: Bearer token via CAPTURE_TOKEN env var (set on Koyeb) — returns 503 if unset.
 
 // Simple in-memory rate limiter: max 10 calls per minute
 const _captureCalls = [];
@@ -2236,9 +2245,11 @@ server.listen(PORT, async () => {
 
             setTimeout(async () => {
                 await billingDb.purgeOldData(90, logger);
+                await billingDb.purgeOldArchive();
                 // Schedule next purge
                 setInterval(() => {
                     billingDb.purgeOldData(90, logger);
+                    billingDb.purgeOldArchive();
                 }, 24 * 60 * 60 * 1000); // Every 24 hours
             }, timeUntil2AM);
         };
@@ -2270,6 +2281,40 @@ server.listen(PORT, async () => {
             }, { timezone: 'Europe/Bucharest' });
         }
         logger.info(`[scheduler] Registered ${meetingSchedules.length} cron jobs for meeting log capture (Europe/Bucharest)`);
+
+        // Safety net: mirror translation_log into translation_log_archive every 5 minutes,
+        // every day — not just the 4 scheduled Thu/Sun slots above. Fixes 2026-09-26: an
+        // off-schedule Saturday meeting had no automatic capture, and an agent-side polling
+        // loop set up to cover it that day silently failed to run for hours. This job runs
+        // inside the same always-on server process as the scheduled snapshots above, so it
+        // doesn't depend on any external polling. It's a no-op (via ON CONFLICT DO NOTHING)
+        // when there's no live meeting, so it's safe to run unconditionally.
+        // 5 min (not 20) because translation_log purges by BOTH a 45-min age cutoff AND a
+        // hard 499-row cap (whichever hits first) — a burst-heavy meeting could blow past
+        // 499 rows well inside 20 minutes and lose rows before a slower poll ever saw them.
+        // No { timezone: ... } option needed: unlike the meeting-specific jobs above, which
+        // fire at a specific wall-clock time, "*/5 * * * *" fires on minute boundaries that
+        // land the same way in every UTC-offset zone, so server-local vs. Bucharest time
+        // makes no difference here.
+        const ARCHIVE_CRON = '*/5 * * * *';
+        if (!cron.validate(ARCHIVE_CRON)) {
+            throw new Error(`Invalid cron expression for translation_log_archive job: "${ARCHIVE_CRON}"`);
+        }
+        cron.schedule(ARCHIVE_CRON, async () => {
+            try {
+                const count = await billingDb.archiveTranslationLog();
+                archiveStatus.lastRunAt = new Date().toISOString();
+                archiveStatus.lastError = null;
+                if (count > 0) {
+                    logger.info(`[archive] Archived ${count} new translation_log rows`);
+                }
+            } catch (err) {
+                archiveStatus.lastRunAt = new Date().toISOString();
+                archiveStatus.lastError = err.message;
+                logger.error(`[archive] Failed: ${err.message}`, { stack: err.stack });
+            }
+        });
+        logger.info('[scheduler] Registered translation_log_archive safety-net job (every 5 min, every day)');
     }
 
     logger.info('✅ Ready to receive connections');
