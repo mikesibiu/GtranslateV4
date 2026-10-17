@@ -15,6 +15,7 @@ const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 const billingDb = require('./billing-db');
+const { loadExtraWindows, isInCaptureWindow } = require('./capture-windows');
 const TranslationRulesEngine = require('./translation-rules-engine');
 const { normalizeSourceForMT, applyTermMappings, verifyReligiousTerms, preserveSourceNumbers, preserveDates, extractByWordLCP, extractByAlignmentFallback } = require('./translation-post-processor');
 const session = require('express-session');
@@ -2282,25 +2283,20 @@ server.listen(PORT, async () => {
         }
         logger.info(`[scheduler] Registered ${meetingSchedules.length} cron jobs for meeting log capture (Europe/Bucharest)`);
 
-        // Safety net: mirror translation_log into translation_log_archive every 5 minutes,
-        // every day — not just the 4 scheduled Thu/Sun slots above. Fixes 2026-09-26: an
-        // off-schedule Saturday meeting had no automatic capture, and an agent-side polling
-        // loop set up to cover it that day silently failed to run for hours. This job runs
-        // inside the same always-on server process as the scheduled snapshots above, so it
-        // doesn't depend on any external polling. It's a no-op (via ON CONFLICT DO NOTHING)
-        // when there's no live meeting, so it's safe to run unconditionally.
-        // 5 min (not 20) because translation_log purges by BOTH a 45-min age cutoff AND a
-        // hard 499-row cap (whichever hits first) — a burst-heavy meeting could blow past
-        // 499 rows well inside 20 minutes and lose rows before a slower poll ever saw them.
-        // No { timezone: ... } option needed: unlike the meeting-specific jobs above, which
-        // fire at a specific wall-clock time, "*/5 * * * *" fires on minute boundaries that
-        // land the same way in every UTC-offset zone, so server-local vs. Bucharest time
-        // makes no difference here.
+        // Safety net: mirror translation_log into translation_log_archive every 5 minutes, but
+        // only inside meeting windows (regular Thu/Sun plus one-off windows in
+        // capture-windows.json - see capture-windows.js). Fixes 2026-09-26: an off-schedule
+        // Saturday meeting had no automatic capture. It must NOT query around the clock: a
+        // Neon query every 5 min defeats its 5-min auto-suspend, and the always-awake
+        // compute used the whole monthly CPU quota (Oct 2026). Outside a window the tick
+        // does no DB work at all. Tick every 5 min because translation_log purges by BOTH a
+        // 45-min age cutoff AND a 499-row cap, so a slower poll could lose rows in a burst.
         const ARCHIVE_CRON = '*/5 * * * *';
         if (!cron.validate(ARCHIVE_CRON)) {
             throw new Error(`Invalid cron expression for translation_log_archive job: "${ARCHIVE_CRON}"`);
         }
         cron.schedule(ARCHIVE_CRON, async () => {
+            if (!isInCaptureWindow(new Date(), loadExtraWindows(undefined, logger))) return;
             try {
                 const count = await billingDb.archiveTranslationLog();
                 archiveStatus.lastRunAt = new Date().toISOString();
@@ -2314,7 +2310,7 @@ server.listen(PORT, async () => {
                 logger.error(`[archive] Failed: ${err.message}`, { stack: err.stack });
             }
         });
-        logger.info('[scheduler] Registered translation_log_archive safety-net job (every 5 min, every day)');
+        logger.info('[scheduler] Registered translation_log_archive safety-net job (every 5 min, meeting windows only)');
     }
 
     logger.info('✅ Ready to receive connections');

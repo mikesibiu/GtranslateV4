@@ -416,7 +416,7 @@ async function archiveTranslationLog() {
 /**
  * Purge translation_log_archive rows older than 365 days. Called from the daily
  * purge scheduler (not from archiveTranslationLog itself, which runs every 5 min
- * and doesn't need this check nearly that often).
+ * during meeting windows and doesn't need this check nearly that often).
  */
 async function purgeOldArchive() {
     if (!pool) return 0;
