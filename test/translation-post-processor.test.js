@@ -471,6 +471,67 @@ describe('applyTermMappings', () => {
                 .to.equal('his mouth will live on Jehovah');
         });
 
+        it('keeps surname "Popa" after a title (sora Alina Popa)', () => {
+            expect(applyTermMappings('sister Alina Popa said', 'sora Alina Popa a spus'))
+                .to.equal('sister Alina Popa said');
+        });
+
+        it('replaces a capitalised-word-prefixed mishear ("Praise Popa")', () => {
+            // Source "pe Popa" is a mishear (ordinary word before it); the English word before
+            // "Popa" is capitalised, which must NOT be mistaken for a given name.
+            expect(applyTermMappings('Praise Popa', 'lăudați pe Popa'))
+                .to.equal('Praise Jehovah');
+        });
+
+        it('replaces only the mishear when a surname and a mishear co-occur', () => {
+            expect(applyTermMappings('sister Alina Popa lives on Popa', 'sora Alina Popa trăiește de Popa'))
+                .to.equal('sister Alina Popa lives on Jehovah');
+        });
+
+        // Production passes the emitted TAIL with the FULL source (server.js), so counts differ.
+        it('tail-only: keeps surname when the tail holds just "Alina Popa"', () => {
+            expect(applyTermMappings('Alina Popa said', 'sora Alina Popa a spus și gurița sa va trăi de Popa'))
+                .to.equal('Alina Popa said');
+        });
+
+        it('tail-only: still replaces "Praise Popa" when the source also has a surname', () => {
+            expect(applyTermMappings('Praise Popa', 'sora Alina Popa a spus lăudați pe Popa'))
+                .to.equal('Praise Jehovah');
+        });
+
+        it('tail-only: replaces a mishear after lowercase word', () => {
+            expect(applyTermMappings('will live on Popa', 'sora Alina Popa a spus de Popa'))
+                .to.equal('will live on Jehovah');
+        });
+
+        it('handles adjacent "Popa Popa" without miscounting', () => {
+            // 1st follows "de" (mishear → Jehovah); 2nd follows a capitalised word (surname slot → kept).
+            expect(applyTermMappings('on Popa Popa', 'de Popa Popa'))
+                .to.equal('on Jehovah Popa');
+        });
+
+        it('handles Popa at string start and possessive', () => {
+            expect(applyTermMappings("Popa's name", 'numele lui Popa'))
+                .to.equal("Jehovah's name");
+            expect(applyTermMappings('Popa is great', 'Popa este mare'))
+                .to.equal('Jehovah is great');
+        });
+
+        it('keeps surname after a hyphenated given name (Ana-Maria Popa)', () => {
+            expect(applyTermMappings('sister Ana-Maria Popa said', 'sora Ana-Maria Popa a spus'))
+                .to.equal('sister Ana-Maria Popa said');
+        });
+
+        it('keeps surname after an initial (M. Popa)', () => {
+            expect(applyTermMappings('M. Popa said', 'M. Popa a spus'))
+                .to.equal('M. Popa said');
+        });
+
+        it('a sentence break before Popa does not make it a surname', () => {
+            expect(applyTermMappings('Alina. Popa', 'Alina. Popa'))
+                .to.equal('Alina. Jehovah');
+        });
+
         it('does NOT replace when source has only lowercase popa (Romanian for priest)', () => {
             expect(applyTermMappings('the priest said', 'popa a spus'))
                 .to.equal('the priest said');

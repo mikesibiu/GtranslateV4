@@ -257,8 +257,44 @@ function applyTermMappings(text, sourceText = '') {
     // Source-aware fix: "Popa" (capital) = STT mishear of "Iehova" (same /H/ onset pattern as Hopa).
     // Lowercase "popa" = Romanian colloquial for "priest" — intentionally excluded by case-sensitive gate.
     // Confirmed: 2026-05-14 — "gurița sa va trăi de Popa" → "his mouth will live on Popa".
+    // Surname guard: Popa is also one of the most common Romanian surnames. 2026-09-17 live:
+    // "sora Alina Popa" → "sister Alina Jehovah". A surname follows a title (sora/fratele/…) or a
+    // given name; the mishear follows ordinary words. STT capitalises many common words at random
+    // ("Am", "Ce", "Iată"), so those don't count as given names. Applied per occurrence on both
+    // sides: the source must contain at least one non-surname Popa, and each English "Popa" in
+    // surname position is left alone.
     if (/\bPopa\b/.test(sourceText)) {
-        result = result.replace(/\bPopa\b/g, 'Jehovah');
+        const notGivenName = /^(?:Am|Ai|Au|Ce|Cum|Da|Nu|Dar|Deci|Iar|Si|Și|Să|Sa|Te|Ne|Cu|De|Din|În|In|La|Pe|Iată|Iata|Tatăl|Tatal|Doamne|Mulțumim|Multumim|Apoi|Acum|Atunci|Dragă|Draga|Sfânt|Sfant|Iehova|Dumnezeu|Lăudați|Laudati|Slăviți|Slaviti|Mulțumiți|Multumiti|Binecuvântați|Binecuvantati|A|E|I|O|Un|Ș|Ț)$/;
+        const enNotGivenName = /^(?:Praise|Thank|Thanks|Glory|Bless|Give|Trust|Lord|God|Father|Dear|Holy|Hallelujah|Amen|And|But|So|Then|Now|The|To|In|On|For|With|By|Of|A|I)$/;
+        const roTitles = /^(?:sora|sorei|fratele|fratelui|frate|familia|familiei|doamna|domnul)$/i;
+        const enTitles = /^(?:sister|brother|family|mr|mrs|ms)$/i;
+        // Previous word of an occurrence. Trailing punctuation is stripped, and a sentence break
+        // ("Alina. Popa") means no given name precedes the surname-candidate.
+        const prevWord = (str, offset) => {
+            const m = str.slice(0, offset).match(/(\S+)\s+$/u);
+            // An initial ("M. Popa") ends in a period but is a given name, not a sentence break.
+            if (!m || (/[.!?;:]$/.test(m[1]) && !/^\p{Lu}\.$/u.test(m[1]))) return undefined;
+            return m[1].replace(/[^\p{L}']+$/u, '') || undefined;
+        };
+        const isSurnameSlot = (prev, titles, notGiven) => !!prev && (titles.test(prev) || (/^\p{Lu}\p{Ll}*(?:-\p{Lu}\p{Ll}+)*$/u.test(prev) && !notGiven.test(prev)));
+        const srcSlots = [...sourceText.matchAll(/\bPopa\b/gu)].map(m => isSurnameSlot(prevWord(sourceText, m.index), roTitles, notGivenName));
+        if (srcSlots.some(isSurname => !isSurname)) {
+            // applyTermMappings is called with the emitted TAIL but the FULL source (server.js), so
+            // occurrence counts often differ. When they match, pair the nth English "Popa" with the nth
+            // source one. Otherwise fall back to English-side evidence only: a title, or a capitalised
+            // given name — and only if the source has a surname slot at all.
+            const srcHasSurname = srcSlots.some(Boolean);
+            const paired = [...result.matchAll(/\bPopa\b/g)].length === srcSlots.length;
+            let n = 0;
+            result = result.replace(/\bPopa\b/g, (m, offset, str) => {
+                const prev = prevWord(str, offset);
+                const keep = paired
+                    ? srcSlots[n]
+                    : isSurnameSlot(prev, enTitles, enNotGivenName) && (srcHasSurname || enTitles.test(prev || ''));
+                n++;
+                return keep ? m : 'Jehovah';
+            });
+        }
     }
 
     // Source-aware fix: "franci/francii" = STT mishear of "frați/frații" (brothers/the brothers).
@@ -939,8 +975,14 @@ function applyTermMappings(text, sourceText = '') {
     // Scripture citation: "N with M" → "N:M" — MT translates Romanian chapter-verse separator
     // "cu" as "with". Gate: source must contain "digit cu digit" (the Romanian citation pattern).
     // Confirmed source patterns: "Psalm 94 cu 19", "Galateni 6 cu 5", "Isaia 41 cu 10".
+    // MT also renders "cu" as "by" ("81 cu 16" → "81 by 16", 2026-09-17).
     if (/\b\d+\s+cu\s+\d+\b/.test(sourceText)) {
-        result = result.replace(/\b(\d+)\s+with\s+(\d+)\b/g, '$1:$2');
+        result = result.replace(/\b(\d+)\s+(?:with|by)\s+(\d+)\b/g, '$1:$2');
+    }
+    // Segment cut mid-citation: source ends on "39 cu" and the verse number arrives in the next
+    // segment, so this one ends "Genesis 39 with". Close it as "Genesis 39:" instead.
+    if (/\b\d+\s+cu\s*$/.test(sourceText)) {
+        result = result.replace(/\b(\d+)\s+(?:with|by)\s*$/, '$1:');
     }
 
     // "second cold" — STT mishears "regi" (Kings) as "reci" (cold) → "second cold 19 with 35"
@@ -1406,6 +1448,51 @@ function preserveDates(sourceText, translatedText) {
     return result;
 }
 
+// Normalize: strip leading/trailing punctuation, lowercase. \p{L}\p{N} (unicode property
+// escapes) keep Romanian diacritics (ă, â, î, ș, ț) as word characters.
+function normalizeAlignmentWord(w) {
+    return w.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+}
+
+// Returns parallel arrays: `norm` for matching, `orig` for slicing the output. Pure-punctuation
+// tokens (em-dash "—", "...") normalize to empty and are excluded from BOTH, so an index into
+// `norm` always slices `orig` at the right position.
+function tokenizeForAlignment(text) {
+    const norm = [];
+    const orig = [];
+    for (const token of text.split(/\s+/)) {
+        const n = normalizeAlignmentWord(token);
+        if (n.length > 0) {
+            norm.push(n);
+            orig.push(token);
+        }
+    }
+    return { norm, orig };
+}
+
+// Greedy subsequence scan: for each committed word, look for it within WINDOW positions of the
+// cursor in fullNorm. Found → advance the cursor past it. Not found (deleted or substituted in
+// full) → skip that committed word without moving the cursor.
+function scanAlignment(fullNorm, committedNorm) {
+    const WINDOW = 3;
+    let matchCount = 0;
+    let lastMatchedInFull = -1;
+    let iInFull = 0;
+    for (let iCommitted = 0; iCommitted < committedNorm.length; iCommitted++) {
+        if (iInFull >= fullNorm.length) break;
+        const searchEnd = Math.min(iInFull + WINDOW + 1, fullNorm.length);
+        for (let j = iInFull; j < searchEnd; j++) {
+            if (fullNorm[j] === committedNorm[iCommitted]) {
+                matchCount++;
+                lastMatchedInFull = j;
+                iInFull = j + 1;
+                break;
+            }
+        }
+    }
+    return { matchCount, lastMatchedInFull };
+}
+
 /**
  * Extract the unemitted portion of a full translation using word-level LCP matching.
  *
@@ -1429,30 +1516,8 @@ function extractByWordLCP(translatedFull, committedTranslation) {
     if (!trimmedCommitted) return trimmedFull;
     if (!trimmedFull) return null;
 
-    // Normalize: split on whitespace, strip leading/trailing punctuation, lowercase.
-    // Use \p{L}\p{N} (unicode property escapes) so Romanian diacritics (ă, â, î, ș, ț)
-    // are preserved as word characters and not stripped by the boundary replace.
-    const normalizeWord = (w) => w.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
-    const normalizeWords = (s) =>
-        s.split(/\s+/)
-         .map(normalizeWord)
-         .filter(w => w.length > 0);
-
-    const committedNorm = normalizeWords(trimmedCommitted);
-
-    // Build fullNorm and fullOrigWords together so their indices always align.
-    // Pure-punctuation tokens (e.g. em-dash "—", "...") normalize to empty string and
-    // must be excluded from BOTH arrays — otherwise lastMatchedInFull (a fullNorm index)
-    // would be used to slice fullOrigWords at the wrong position.
-    const fullNorm = [];
-    const fullOrigWords = [];
-    for (const token of trimmedFull.split(/\s+/)) {
-        const norm = normalizeWord(token);
-        if (norm.length > 0) {
-            fullNorm.push(norm);
-            fullOrigWords.push(token);
-        }
-    }
+    const committedNorm = tokenizeForAlignment(trimmedCommitted).norm;
+    const { norm: fullNorm, orig: fullOrigWords } = tokenizeForAlignment(trimmedFull);
 
     if (committedNorm.length === 0) return trimmedFull;
     if (fullNorm.length <= committedNorm.length) return null;
@@ -1478,26 +1543,7 @@ function extractByWordLCP(translatedFull, committedTranslation) {
     //
     // WINDOW=3 handles up to 3 consecutive word insertions in full between any two
     // consecutive matched committed words (e.g. multiple articles/prepositions).
-    const WINDOW = 3;
-    let matchCount = 0;
-    let lastMatchedInFull = -1;
-    let iInFull = 0;
-
-    for (let iCommitted = 0; iCommitted < committedNorm.length; iCommitted++) {
-        if (iInFull >= fullNorm.length) break;
-        const searchEnd = Math.min(iInFull + WINDOW + 1, fullNorm.length);
-        for (let j = iInFull; j < searchEnd; j++) {
-            if (fullNorm[j] === committedNorm[iCommitted]) {
-                matchCount++;
-                lastMatchedInFull = j;
-                iInFull = j + 1;
-                break;
-            }
-        }
-        // If not found in window: committed word was deleted or substituted in full.
-        // Don't advance iInFull — retry from same position for the next committed word.
-    }
-
+    const { matchCount, lastMatchedInFull } = scanAlignment(fullNorm, committedNorm);
     const matchRatio = matchCount / committedNorm.length;
     if (matchRatio < 0.75) return null;
 
@@ -1505,10 +1551,74 @@ function extractByWordLCP(translatedFull, committedTranslation) {
     return tail || null;
 }
 
+/**
+ * Fallback for when extractByWordLCP rejects the match (<75%). The common cause is Google
+ * rewording the end of a SHORT already-shown segment ("reinforcements next to us" → "a booster
+ * with us": 5/8 words match), after which the caller re-emits the whole translation and the
+ * audience sees everything twice. Here the scan's split point is trusted only when (a) at least
+ * 40% of the committed words aligned, and (b) the split does not run past where the source word
+ * counts say the new content starts (a scan that did would be eating new content via chance
+ * matches). Returns null when either check fails, or when the source shows the segment is
+ * essentially all new (a fresh utterance) — the caller then emits in full, as before.
+ */
+function extractByAlignmentFallback(translatedFull, committedTranslation, sourceFull, sourceNew) {
+    const full = (translatedFull || '').trim();
+    const committed = (committedTranslation || '').trim();
+    if (!full || !committed) return null;
+
+    const wordCount = (s) => (s || '').trim().split(/\s+/).filter(Boolean).length;
+    const srcFull = wordCount(sourceFull);
+    const srcCommitted = srcFull - wordCount(sourceNew);
+    if (srcFull === 0 || srcCommitted < 2) return null;
+
+    const committedNorm = tokenizeForAlignment(committed).norm;
+    const { norm: fullNorm, orig: fullOrigWords } = tokenizeForAlignment(full);
+    if (committedNorm.length === 0 || fullNorm.length === 0) return null;
+
+    const { matchCount, lastMatchedInFull } = scanAlignment(fullNorm, committedNorm);
+    if (lastMatchedInFull < 0 || matchCount / committedNorm.length < 0.4) return null;
+
+    const split = lastMatchedInFull + 1;
+    const expectedSplit = Math.round(fullNorm.length * srcCommitted / srcFull);
+    const tolerance = Math.max(3, Math.round(fullNorm.length * 0.15));
+    if (split > expectedSplit + tolerance) return null;
+
+    const tail = fullOrigWords.slice(split).join(' ').trim();
+    return tail || null;
+}
+
+/**
+ * Pre-translation fixes to the Romanian STT text, for the MT call only (post-processing gates
+ * still see the original). ro-RO STT output carries no punctuation, so Google must guess where
+ * "nu" belongs; these repair the two cases where it predictably guesses wrong.
+ */
+function normalizeSourceForMT(text) {
+    let s = text;
+    // STT capitalises a verb right after "nu" when it guesses a sentence break, and Google then
+    // splits the negation off: "nu Este meritul meu" → "no. It is my merit" (meaning inverted).
+    // Lowercasing re-attaches it. Replayed on history: 2 rows fixed, the only other already read
+    // as a negation, so nothing changes there. Deliberately limited to copula/modal verbs seen in
+    // production — "Nu. Am fost ocupat" ("No. I was busy") is a genuine break that "am" would invert.
+    s = s.replace(/\bnu (Este|Sunt|Era|Putem|Pot)\b/g, (m, verb) => 'nu ' + verb.toLowerCase());
+    // "nu să" is not a Romanian negation (the subjunctive negates as "să nu"), so a bare "nu"
+    // before "să" is the interjection "no": "dar nu să ne concentrăm" = "but no, let's focus",
+    // which Google rendered "let's not focus". Guards: the stutter "să nu să dăm" (a real
+    // negation) and the contrastive "nu să judec, ci să salvez" ("not to judge but to save").
+    s = s.replace(/(\S+\s+)?\bnu (să|sa)(?=\s|$)/g, (m, prev, sa, offset, str) => {
+        if (prev && /^(?:să|sa)\s+$/i.test(prev)) return m;
+        const following = str.slice(offset + m.length).trim().split(/\s+/).slice(0, 8).join(' ');
+        if (/(?:^|\s)ci(?=\s|$)/i.test(following)) return m;
+        return (prev || '') + 'nu, ' + sa;
+    });
+    return s;
+}
+
 module.exports = {
+    normalizeSourceForMT,
     applyTermMappings,
     verifyReligiousTerms,
     preserveSourceNumbers,
     preserveDates,
     extractByWordLCP,
+    extractByAlignmentFallback,
 };
