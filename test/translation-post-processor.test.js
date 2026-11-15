@@ -32,13 +32,23 @@ describe('extractByWordLCP', () => {
             expect(extractByWordLCP('', 'Hello')).to.be.null;
         });
 
-        it('returns null when translatedFull has no more words than committed', () => {
-            // Nothing new to emit
-            expect(extractByWordLCP('Hello world', 'Hello world')).to.be.null;
+        it('returns "" (nothing new) when translatedFull adds nothing to committed', () => {
+            // v234: was null, which made the caller re-emit the whole translation (2026-11-15 row 239)
+            expect(extractByWordLCP('Hello world', 'Hello world')).to.equal('');
         });
 
-        it('returns null when translated is shorter than committed', () => {
+        it('returns "" when the new translation is a shorter prefix of what was shown (Google trimmed a clause)', () => {
+            expect(extractByWordLCP('we thank you for this day and for all', 'we thank you for this day and for all good things')).to.equal('');
+        });
+
+        it('does not swallow a fresh short line that happens to match inside a long previous utterance', () => {
             expect(extractByWordLCP('Hello', 'Hello world')).to.be.null;
+            const committed = 'thank the brothers for the talk and you for coming today to the Kingdom Hall with your families';
+            expect(extractByWordLCP('Thank you, brothers', committed)).to.be.null;
+        });
+
+        it('returns null when a shorter translation is unrelated', () => {
+            expect(extractByWordLCP('Goodbye friends', 'Hello world today')).to.be.null;
         });
     });
 
@@ -128,16 +138,49 @@ describe('extractByWordLCP', () => {
             expect(result).to.equal('more');
         });
 
-        it('greedy scan: three consecutive substitutions fail below 75% (WINDOW does not false-pass)', () => {
-            // 13-word committed; if 3 consecutive content words all substituted (not found in window),
-            // matchCount = 10, ratio = 10/13 = 76.9% → still passes. Need ≥4 misses to fail.
-            // This test uses 8-word committed with 3 consecutive misses → 5/8 = 62.5% < 75% → null.
+        it('three consecutive substitutions in a long text still align (global alignment)', () => {
+            // v234: the greedy window-3 scan could give null on scattered rewording and the caller
+            // re-sent everything. The alignment sees one reworded run inside an otherwise identical text.
+            const committed = 'the brothers gathered at the hall one two three four five six seven eight nine ten eleven twelve';
+            const full      = 'the brothers gathered at the hall one two ALPHA BETA GAMMA six seven eight nine ten eleven twelve extra';
+            expect(extractByWordLCP(full, committed)).to.equal('extra');
+        });
+
+        it('function-word matches alone do not carry a long committed text (content words must match)', () => {
+            // 12 of 16 committed words align (0.75 ≥ 0.55) but they are all the/of/is/in/and/it/on;
+            // none of house/king/city/hill/stone does, so this is a fresh utterance.
+            const committed = 'the house of the king is in the city and it is on the hill of stone';
+            const full      = 'the day of the lord is in the land and it is on the way of truth and more';
+            expect(extractByWordLCP(full, committed)).to.be.null;
+        });
+
+        it('short committed text needs a strict match, so a reworded or unrelated short text is rejected', () => {
             const committed = 'one two three four five six seven eight';
             const full      = 'one two ALPHA BETA GAMMA six seven eight extra';
-            const result = extractByWordLCP(full, committed);
-            // "three","four","five" all not found in their windows (ALPHA/BETA/GAMMA block them)
-            // → matchCount ≤ 5, ratio ≤ 62.5% < 75% → null
-            expect(result).to.be.null;
+            expect(extractByWordLCP(full, committed)).to.be.null;
+            expect(extractByWordLCP('this is the end of the day and it is what it is', 'it was the start of a day and we are in the place')).to.be.null;
+        });
+
+        it('unrelated text (fresh utterance) is rejected', () => {
+            const committed = 'prayer Jehovah our Father we come before you and at this hour';
+            const full      = 'That is why we kindly ask you to help us be careful';
+            expect(extractByWordLCP(full, committed)).to.be.null;
+        });
+
+        it('does not drift over runs of common words and swallow new content (2026-11-15 row 288)', () => {
+            const committed = 'who suffers is driven out of the house and refugees and Satan tries through this toxic gas to make us take sides and then we can hate the aggressor and stand on the side of';
+            const full      = 'who suffers is driven out of the house and refugees and Satan tries through this toxic gas to make us take sides and then we can hate the aggressor and stand on the side of the other but the reality in this war of who is fighting is that in 2020 the faithful slave identified the king of the North';
+            const tail = extractByWordLCP(full, committed);
+            expect(tail.startsWith('the other but the reality')).to.equal(true);
+            expect(tail).to.include('2020');
+        });
+
+        it('rewording scattered through a long committed text does not re-send it (2026-11-15 row 287)', () => {
+            const committed = 'with Ukraine and who is with Russia in reality who do we must be with as if Stop thinking at first view is any war is an aggressor and the one who suffers who is driven out of the house and';
+            const full      = 'with Ukraine and who is with Russia in reality who must we be with? Just think about it at first view, every war is an aggressor and the one who suffers. Who is driven out of their homes and refugees are the same but Satan tries through this toxic gas';
+            const tail = extractByWordLCP(full, committed);
+            expect(tail).to.be.a('string');
+            expect(tail.startsWith('refugees are the same')).to.equal(true);
         });
 
         it('greedy scan: multiple scattered diffs (production regression — triple repeat)', () => {
@@ -2835,5 +2878,102 @@ describe('applyTermMappings — v217 fixes', () => {
     });
     it('does NOT change "inspired by a higher power" without instruire in source', () => {
         expect(T('inspired by a higher power', '')).to.equal('inspired by a higher power');
+    });
+});
+
+
+// v234: fixes from the 2026-11-15 Sunday meeting review.
+describe('normalizeSourceForMT — STT mishearing repairs (2026-11-15)', () => {
+    const { normalizeSourceForMT } = require('../translation-post-processor');
+    const cases = [
+        ['spiritul lunii ne influențează', 'spiritul lumii ne influențează'],
+        ['ce înseamnă adult e spiritual', 'ce înseamnă adulter spiritual'],
+        ['cât este detoxic', 'cât este de toxic'],
+        ['un tub de veghe', 'un turn de veghe'],
+        ['un pervelagiu mare', 'un privilegiu mare'],
+        ['în concreția creștină', 'în congregația creștină'],
+        ['fătă ce vrei', 'fă ce vrei'],
+        ['2:00 aspecte', 'două aspecte'],
+        ['coran cu Avraam', 'contemporan cu Avraam'],
+        ['Cine a cucerit pastile acum', 'Cine a cucerit Bastilia acum'],
+        ['Isus ținuta de Fratele Ion', 'Discursul ținut de Fratele Ion'],
+        ['Ăă sclavul fidel', 'sclavul fidel'],
+    ];
+    cases.forEach(([input, expected]) => {
+        it(`"${input}" -> "${expected}"`, () => expect(normalizeSourceForMT(input)).to.equal(expected));
+    });
+    it('leaves ordinary uses alone', () => {
+        expect(normalizeSourceForMT('luna aceasta am luat pastile')).to.equal('luna aceasta am luat pastile');
+        expect(normalizeSourceForMT('Isus a ținut un discurs')).to.equal('Isus a ținut un discurs');
+        expect(normalizeSourceForMT('un semn de la Dumnezeu')).to.equal('un semn de la Dumnezeu');
+    });
+});
+
+describe('cleanEnglishOutput (2026-11-15)', () => {
+    const { cleanEnglishOutput } = require('../translation-post-processor');
+    it('removes the space before punctuation and before clitics', () => {
+        expect(cleanEnglishOutput('work , you have a car . Jehovah \'s creation')).to.equal('work, you have a car. Jehovah\'s creation');
+    });
+    it('strips zero-width characters', () => {
+        expect(cleanEnglishOutput('a\u200bb\ufeffc')).to.equal('abc');
+    });
+    it('fixes Romanian negative concord', () => {
+        expect(cleanEnglishOutput("I didn't know nothing")).to.equal("I didn't know anything");
+        expect(cleanEnglishOutput("I don't know nothing")).to.equal("I don't know anything");
+        expect(cleanEnglishOutput('he never saw nobody')).to.equal('he never saw anybody');
+        expect(cleanEnglishOutput("we can't see no one")).to.equal("we can't see anyone");
+    });
+    it('does not rewrite across a clause or the "not nothing" idiom', () => {
+        expect(cleanEnglishOutput("That's not nothing")).to.equal("That's not nothing");
+        expect(cleanEnglishOutput('never knew that nothing could separate us')).to.equal('never knew that nothing could separate us');
+        expect(cleanEnglishOutput('did not know why nothing changed')).to.equal('did not know why nothing changed');
+    });
+    it('does not rewrite across a coordinator or a subject "nothing"', () => {
+        expect(cleanEnglishOutput("He didn't come and nobody called")).to.equal("He didn't come and nobody called");
+        expect(cleanEnglishOutput("I don't think nothing can separate us")).to.equal("I don't think nothing can separate us");
+    });
+    it('handles curly apostrophes', () => {
+        expect(cleanEnglishOutput('I didn\u2019t know nothing')).to.equal('I didn\u2019t know anything');
+    });
+    it('leaves genuine "nothing" alone', () => {
+        expect(cleanEnglishOutput('I know nothing')).to.equal('I know nothing');
+        expect(cleanEnglishOutput('nothing is impossible')).to.equal('nothing is impossible');
+    });
+    it('renders "simplu ca bună ziua" as plain as day', () => {
+        expect(cleanEnglishOutput('the king fights as simple as Hello so')).to.equal('the king fights as plain as day so');
+    });
+    it('skips the double-negative rule for non-Romanian sources', () => {
+        expect(cleanEnglishOutput("I don't know nothing", false)).to.equal("I don't know nothing");
+    });
+});
+
+
+describe('extractByAlignmentFallback (v234)', () => {
+    const { extractByAlignmentFallback } = require('../translation-post-processor');
+
+    it('rescues a short segment whose ending Google reworded, when the source word counts agree', () => {
+        const committed = 'we need to have reinforcements next to us';
+        const full      = 'we need to have a booster with us so that we can endure';
+        // 16 source words, 8 of them new → the split is expected about half-way through
+        const tail = extractByAlignmentFallback(full, committed, 'a b c d e f g h i j k l m n o p', 'i j k l m n o p');
+        expect(tail).to.be.a('string');
+        expect(tail.endsWith('so that we can endure')).to.equal(true);
+        expect(tail).to.not.include('we need to have');
+    });
+
+    it('returns null when the split runs far past where the source says new content starts', () => {
+        const committed = 'we need to have reinforcements next to us';
+        const full      = 'we need to have a booster with us so that we can endure';
+        // source says only 2 of 16 words were committed → split near the start expected
+        expect(extractByAlignmentFallback(full, committed, 'a b c d e f g h i j k l m n o p', 'c d e f g h i j k l m n o p')).to.be.null;
+    });
+
+    it('returns null for a fresh utterance (fewer than 2 committed source words)', () => {
+        expect(extractByAlignmentFallback('one two three four', 'one two', 'a b c d', 'a b c d')).to.be.null;
+        expect(extractByAlignmentFallback('one two three four', 'one two', 'a b c d', 'b c d')).to.be.null;
+    });
+
+    it('returns null when the committed text is only function words', () => {
+        expect(extractByAlignmentFallback('and so we went to the hall and sang', 'and so', 'a b c d e f g h', 'c d e f g h')).to.be.null;
     });
 });

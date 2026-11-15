@@ -901,6 +901,51 @@ describe('TranslationRulesEngine', () => {
         });
     });
 
+    describe('getNewText with an utterance longer than the 500-char tracked tail (2026-11-15 rows 238/239/288)', () => {
+        const words = (n, tag) => Array.from({ length: n }, (_, i) => `${tag}${i}`).join(' ');
+
+        it('returns only the text after the tracked tail, not the whole utterance', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            const translatedSoFar = words(160, 'cuvant'); // ~1,300 chars
+            engine.approveTranslation(translatedSoFar, 'max_interval', 0.9, 'c', translatedSoFar); // stores only the last 500 chars
+            expect(engine.lastTranslatedText.length).to.be.at.most(500);
+            const result = engine.getNewText(translatedSoFar + ' ceva nou aici');
+            expect(result).to.equal('ceva nou aici');
+        });
+
+        it('returns "" when the tracked tail is already the end of the text', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            const text = words(160, 'cuvant');
+            engine.approveTranslation(text, 'max_interval', 0.9, 'c', text);
+            expect(engine.getNewText(text + ' ')).to.equal('');
+        });
+
+        it('does not cut mid-word when STT revised the last stored word', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            const base = words(120, 'cuvant') + ' despre cre';
+            engine.approveTranslation(base, 'max_interval', 0.9, 'c', base);
+            // the interim "cre" was revised to "creștini": the stored tail no longer ends on a word boundary
+            const result = engine.getNewText(words(120, 'cuvant') + ' despre creștini si altceva');
+            expect(result).to.equal('creștini si altceva'); // one word re-translated, not the whole utterance
+        });
+
+        it('does not skip content when the tail phrase recurs later in the text', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            const phrase = 'Dumnezeu sa ne binecuvanteze pe toti cei prezenti aici astazi';
+            const first = words(100, 'alfa') + ' ' + phrase;
+            engine.approveTranslation(first, 'max_interval', 0.9, 'c', first);
+            const result = engine.getNewText(first + ' ' + words(10, 'beta') + ' ' + phrase + ' ' + words(5, 'gama'));
+            expect(result.startsWith('beta0')).to.equal(true);
+        });
+
+        it('still treats an unrelated utterance as new', () => {
+            const engine = new TranslationRulesEngine('talks', mockLogger);
+            { const t = words(160, 'cuvant'); engine.approveTranslation(t, 'max_interval', 0.9, 'c', t); }
+            const fresh = words(30, 'alt');
+            expect(engine.getNewText(fresh)).to.equal(fresh);
+        });
+    });
+
     describe('Pre-Translation Duplicate Detection (getNewText overlap)', () => {
         // getNewText uses > 0.65 (strict). Tests guard against threshold regression.
 

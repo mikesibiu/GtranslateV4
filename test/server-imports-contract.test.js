@@ -61,3 +61,15 @@ describe('normalizeSourceForMT', () => {
         assert.strictEqual(normalizeSourceForMT('Iehova ne iubește'), 'Iehova ne iubește');
     });
 });
+
+// v234: APP_VERSION was a stale hard-coded 'v227' written to every translation_log row while
+// v233 was deployed, so DB rows could not be tied to a release.
+describe('APP_VERSION', () => {
+    it('matches the version shown in the index.html header', () => {
+        const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+        const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+        const appVersion = server.match(/const APP_VERSION = '(v\d+)'/)[1];
+        const htmlVersion = html.match(/<h1>[^<]*<span[^>]*>(v\d+)<\/span>/)[1];
+        assert.strictEqual(appVersion, htmlVersion);
+    });
+});

@@ -1470,45 +1470,84 @@ function tokenizeForAlignment(text) {
     return { norm, orig };
 }
 
-// Greedy subsequence scan: for each committed word, look for it within WINDOW positions of the
-// cursor in fullNorm. Found → advance the cursor past it. Not found (deleted or substituted in
-// full) → skip that committed word without moving the cursor.
-function scanAlignment(fullNorm, committedNorm) {
-    const WINDOW = 3;
-    let matchCount = 0;
-    let lastMatchedInFull = -1;
-    let iInFull = 0;
-    for (let iCommitted = 0; iCommitted < committedNorm.length; iCommitted++) {
-        if (iInFull >= fullNorm.length) break;
-        const searchEnd = Math.min(iInFull + WINDOW + 1, fullNorm.length);
-        for (let j = iInFull; j < searchEnd; j++) {
-            if (fullNorm[j] === committedNorm[iCommitted]) {
-                matchCount++;
-                lastMatchedInFull = j;
-                iInFull = j + 1;
-                break;
-            }
-        }
-    }
-    return { matchCount, lastMatchedInFull };
+// Word equivalence for alignment: exact match, or one word being a prefix of the other (min 5
+// chars) so Google's "friend"→"friends" / "preach"→"preaching" rewording counts as the same word.
+function alignmentWordScore(a, b) {
+    if (a === b) return 2;
+    const minLen = Math.min(a.length, b.length);
+    if (minLen >= 5 && (a.startsWith(b) || b.startsWith(a))) return 1;
+    return -1;
 }
 
 /**
- * Extract the unemitted portion of a full translation using word-level LCP matching.
+ * Needleman-Wunsch alignment of the whole committed translation against a PREFIX of the new full
+ * translation (free end in full). Replaces the v160 greedy window-3 scan, which could drift
+ * forward over runs of common words ("the", "of", "to") and swallow genuinely new content
+ * (2026-11-15 row 288: ~40 source words never shown) and which fell over on scattered rewording
+ * (row 287: previous segment shown twice). The global score penalises overshoot, so the split
+ * lands where the committed text really ends.
+ * Returns { matches, split } — split is the index in fullNorm where the new content begins.
+ */
+// Function words match unrelated English sentences by chance; they must not carry a match decision.
+const ALIGN_STOPWORDS = new Set(['the','of','to','and','a','an','is','are','was','were','in','on','at','by','for','with','as','be','that','this','it','i','we','you','he','she','they','not','but','or','if','so','do','does','did','have','has','had','from','my','our','your','his','her','their','will','can','what','who','which','there']);
+
+function alignCommittedToFull(committedNorm, fullNorm) {
+    const n = committedNorm.length;
+    const m = fullNorm.length;
+    if (n * m > 4e6) return { matches: 0, contentMatches: 0, split: 0 }; // pathological size: treat as unrelated
+    const GAP = -1;
+    const w = m + 1;
+    const score = new Int32Array((n + 1) * w);
+    const hits = new Uint16Array((n + 1) * w);        // counts stay far below 65k (guard above)
+    const contentHits = new Uint16Array((n + 1) * w);
+    for (let j = 1; j <= m; j++) score[j] = j * GAP;
+    for (let i = 1; i <= n; i++) {
+        score[i * w] = i * GAP;
+        for (let j = 1; j <= m; j++) {
+            const sub = alignmentWordScore(committedNorm[i - 1], fullNorm[j - 1]);
+            const diag = score[(i - 1) * w + j - 1] + sub;
+            const up = score[(i - 1) * w + j] + GAP;
+            const left = score[i * w + j - 1] + GAP;
+            const idx = i * w + j;
+            if (diag >= up && diag >= left) {
+                score[idx] = diag;
+                hits[idx] = hits[(i - 1) * w + j - 1] + (sub > 0 ? 1 : 0);
+                contentHits[idx] = contentHits[(i - 1) * w + j - 1] + (sub > 0 && !ALIGN_STOPWORDS.has(committedNorm[i - 1]) ? 1 : 0);
+            } else if (up >= left) {
+                score[idx] = up;
+                hits[idx] = hits[(i - 1) * w + j];
+                contentHits[idx] = contentHits[(i - 1) * w + j];
+            } else {
+                score[idx] = left;
+                hits[idx] = hits[i * w + j - 1];
+                contentHits[idx] = contentHits[i * w + j - 1];
+            }
+        }
+    }
+    let bestJ = 0;
+    let bestScore = -Infinity;
+    for (let j = 0; j <= m; j++) {
+        const sc = score[n * w + j];
+        if (sc > bestScore) { bestScore = sc; bestJ = j; }
+    }
+    return { matches: hits[n * w + bestJ], contentMatches: contentHits[n * w + bestJ], split: bestJ };
+}
+
+/**
+ * Extract the unemitted portion of a full translation by aligning it with the previous one.
  *
- * Sends the full STT transcript to Google Translate for maximum context quality,
- * then extracts only the new (unemitted) portion using word-level LCP matching.
+ * Returns:
+ *   - the new tail (string) when the new translation continues the committed one,
+ *   - '' when it does but adds nothing (e.g. the final result repeats the last interim) — the
+ *     caller must NOT emit anything (v233 re-emitted the whole text here, 2026-11-15 row 239),
+ *   - null when the two are unrelated (fresh utterance / heavy divergence) — caller falls back.
  *
- * If ≥75% of committedTranslation words match the prefix of translatedFull,
- * returns the tail (new words). Otherwise returns null — caller should emit the
- * full translation.
- *
- * Romanian diacritics (ă, â, î, ș, ț) are preserved as word characters via
- * Unicode property escapes (\p{L}\p{N} with /u flag).
+ * Romanian diacritics (ă, â, î, ș, ț) are preserved as word characters via Unicode property
+ * escapes (\p{L}\p{N} with /u flag).
  *
  * @param {string} translatedFull - Translation of the full STT transcript
  * @param {string} committedTranslation - Full translation from the previous call
- * @returns {string|null} New tail to emit, or null if LCP ratio < 75%
+ * @returns {string|null}
  */
 function extractByWordLCP(translatedFull, committedTranslation) {
     const trimmedFull = translatedFull.trim();
@@ -1520,35 +1559,23 @@ function extractByWordLCP(translatedFull, committedTranslation) {
     const { norm: fullNorm, orig: fullOrigWords } = tokenizeForAlignment(trimmedFull);
 
     if (committedNorm.length === 0) return trimmedFull;
-    if (fullNorm.length <= committedNorm.length) return null;
+    if (fullNorm.length === 0) return null;
 
-    // Greedy subsequence scan with bounded lookahead window.
-    //
-    // Problem: Google Translate non-determinism produces translations that differ in
-    // multiple scattered ways: inserted/deleted articles ("the"), word-form changes
-    // ("congregate"→"congregation"), synonym swaps ("connection"→"contact"). Strict
-    // prefix matching breaks on the first difference; a substitution budget (previous
-    // fix) is exhausted after 1-2 scattered changes in a 30-word sequence, so the
-    // ratio drops below 75% and the entire full text is re-emitted as a duplicate.
-    //
-    // Solution: for each committed word, search for it in fullNorm within a small
-    // lookahead window starting at the current scan position. If found, advance the
-    // scan cursor past it. If not found (deleted or substituted in full), skip the
-    // committed word without advancing the scan cursor — the 75% match threshold
-    // still guards against genuine divergence.
-    //
-    // The tail starts immediately after the last matched full-position, so skipped
-    // committed words and inserted full words between matched positions are absorbed
-    // into the "committed prefix" region and do not re-appear in the output.
-    //
-    // WINDOW=3 handles up to 3 consecutive word insertions in full between any two
-    // consecutive matched committed words (e.g. multiple articles/prepositions).
-    const { matchCount, lastMatchedInFull } = scanAlignment(fullNorm, committedNorm);
-    const matchRatio = matchCount / committedNorm.length;
-    if (matchRatio < 0.75) return null;
+    const { matches, contentMatches, split } = alignCommittedToFull(committedNorm, fullNorm);
+    // Short committed text matches unrelated sentences by chance on function words alone, so it
+    // needs a stricter bar than a long one; and content (non-function) words must carry the match.
+    // Google sometimes returns a SHORTER translation of a longer transcript (a trailing clause
+    // trimmed). If nearly all of it is the start of what was already shown, there is nothing new.
+    // It must also cover most of the committed text: a fresh short line ("Thank you, brothers")
+    // can match as a subsequence of a long previous utterance and must not be swallowed.
+    if (fullNorm.length <= committedNorm.length && split === fullNorm.length &&
+        fullNorm.length / committedNorm.length >= 0.6 && matches / fullNorm.length >= 0.9) return '';
+    const minRatio = committedNorm.length < 15 ? 0.75 : 0.55;
+    if (matches / committedNorm.length < minRatio) return null;
+    const contentWords = committedNorm.filter(wd => !ALIGN_STOPWORDS.has(wd)).length;
+    if (contentWords > 0 && contentMatches / contentWords < 0.4) return null;
 
-    const tail = fullOrigWords.slice(lastMatchedInFull + 1).join(' ').trim();
-    return tail || null;
+    return fullOrigWords.slice(split).join(' ').trim();
 }
 
 /**
@@ -1575,10 +1602,12 @@ function extractByAlignmentFallback(translatedFull, committedTranslation, source
     const { norm: fullNorm, orig: fullOrigWords } = tokenizeForAlignment(full);
     if (committedNorm.length === 0 || fullNorm.length === 0) return null;
 
-    const { matchCount, lastMatchedInFull } = scanAlignment(fullNorm, committedNorm);
-    if (lastMatchedInFull < 0 || matchCount / committedNorm.length < 0.4) return null;
+    const { matches, contentMatches, split } = alignCommittedToFull(committedNorm, fullNorm);
+    if (split <= 0 || matches / committedNorm.length < 0.4) return null;
+    const contentWords = committedNorm.filter(wd => !ALIGN_STOPWORDS.has(wd)).length;
+    // A committed text of only function words ("and so") aligns to anything by chance.
+    if (contentWords === 0 || contentMatches / contentWords < 0.3) return null;
 
-    const split = lastMatchedInFull + 1;
     const expectedSplit = Math.round(fullNorm.length * srcCommitted / srcFull);
     const tolerance = Math.max(3, Math.round(fullNorm.length * 0.15));
     if (split > expectedSplit + tolerance) return null;
@@ -1610,11 +1639,60 @@ function normalizeSourceForMT(text) {
         if (/(?:^|\s)ci(?=\s|$)/i.test(following)) return m;
         return (prev || '') + 'nu, ' + sa;
     });
+    // STT mishearings of JW vocabulary seen in the 2026-11-15 meeting. Each was translated
+    // faithfully by MT into nonsense ("spirit of the moon", "how detoxifying it is", "Quran with
+    // Abram"), so repairing the Romanian before the MT call is the only place to fix them.
+    // Every rule is anchored on neighbouring words so ordinary uses are left alone.
+    s = s.replace(/\b(spiritul|spirit|duhul) lunii\b/gi, (m, w) => w + ' lumii');     // "spirit of the world"
+    s = s.replace(/\badult e spiritual\b/gi, 'adulter spiritual');
+    s = s.replace(/\bdetoxic\b/gi, 'de toxic');
+    s = s.replace(/\btub de veghe\b/gi, 'turn de veghe');
+    s = s.replace(/\bpervelagiu\b/gi, 'privilegiu');
+    s = s.replace(/\bconcreția\b/gi, 'congregația');
+    s = s.replace(/\bfătă ce vrei\b/gi, 'fă ce vrei');
+    s = s.replace(/\b2:00 aspecte\b/gi, 'două aspecte');
+    s = s.replace(/\bcoran cu\b/g, 'contemporan cu');
+    s = s.replace(/\b(cucerit|cucerește|cucerit-a) (pastile|pastila|pastilia)\b/gi, '$1 Bastilia'); // the school joke
+    s = s.replace(/^Isus ținuta de\b/, 'Discursul ținut de');                                   // "Talk given by"
+    // STT filler vocalisations ("Ăă", "Äă") survive as stray tokens and come out as noise.
+    s = s.replace(/(^|\s)[ĂÄ]ă(?=\s|$)/g, '$1').replace(/\s{2,}/g, ' ').replace(/^\s+/, '');
+    return s;
+}
+
+/**
+ * Final tidy of the English output. The glossary and Google leave artefacts that read badly on a
+ * live caption: a space before punctuation ("work , you", "Jehovah 's"), zero-width characters, and
+ * Romanian negative concord carried into English ("didn't know nothing"). Source-aware only for
+ * the double negative (Romanian requires it; English forbids it).
+ */
+function cleanEnglishOutput(text, sourceIsRomanian = true) {
+    if (!text) return text;
+    let s = text.replace(/[\u200B-\u200D\u2060\uFEFF]/g, '');
+    s = s.replace(/\s+([,.;:!?])/g, '$1');
+    s = s.replace(/(\w) (['’](?:s|re|ve|ll|d)|n['’]t)\b/g, '$1$2');
+    s = s.replace(/\s{2,}/g, ' ');
+    if (sourceIsRomanian) {
+        // "nu știu nimic" → "I don't know nothing": a negation followed within 2 words by
+        // nothing/nobody/no one takes "anything/anybody/anyone" in English. Not across a clause
+        // ("never knew that nothing could…"), and not "not nothing" (a real idiom).
+        const blockers = new Set(['that', 'why', 'what', 'if', 'because', 'whether', 'how', 'when', 'who', 'which', 'where', 'since', 'unless', 'until',
+            'and', 'but', 'so', 'then', 'while', 'as', 'or', 'nor', 'though', 'after', 'before']);
+        const swap = { nothing: 'anything', nobody: 'anybody', 'no one': 'anyone' };
+        s = s.replace(/(\b(?:not|never|cannot)\b|n['’]t)((?:\s+\w+){0,2}?)(\s+)(nothing|nobody|no one)\b(?!\s+(?:can|could|will|would|is|was|are|were|has|have|had|should|may|might|must|does|did)\b)/gi, (m, neg, gap, sp, target) => {
+            const gapWords = gap.trim().split(/\s+/).filter(Boolean);
+            if (gapWords.length === 0 && /^not$/i.test(neg)) return m;
+            if (gapWords.some(g => blockers.has(g.toLowerCase()))) return m;
+            return neg + gap + sp + swap[target.toLowerCase()];
+        });
+        // "simplu ca bună ziua" = "plain as day", which MT renders literally.
+        s = s.replace(/\bsimple as (?:hello|good day|good morning)\b/gi, 'plain as day');
+    }
     return s;
 }
 
 module.exports = {
     normalizeSourceForMT,
+    cleanEnglishOutput,
     applyTermMappings,
     verifyReligiousTerms,
     preserveSourceNumbers,

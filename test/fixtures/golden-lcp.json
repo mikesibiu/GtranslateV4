@@ -36,10 +36,10 @@
     "expectedTail": "as a living sacrifice"
   },
   {
-    "description": "triple synonym swap (connection→contact, congregate→congregation, edify→edification) — match ratio 66.7% < 75%, returns null",
+    "description": "triple synonym swap (connection→contact, congregate→congregation, edify→edification) — v234 global alignment keeps the continuation (v233 gave null and re-sent everything); the reworded tail 'to edification' may repeat a word or two, which beats showing the whole text twice",
     "committed": "we can also look at the point of connection between congregate and edify their role",
     "full": "we can also look at the point of contact between the congregation and to edification plus more content",
-    "expectedTail": null
+    "expectedTail": "to edification plus more content"
   },
   {
     "description": "greedy scan: three diffs at start, remaining 6/8 words match = 75% — tail extracted (greedy is resilient)",
@@ -48,7 +48,7 @@
     "expectedTail": "india juliet"
   },
   {
-    "description": "committed longer than full — full is a subset, returns null (nothing new)",
+    "description": "committed longer than full — full covers only 7 of 13 committed words (<60%), so it is not treated as a trimmed clause: returns null",
     "committed": "we thank you Jehovah for your love and guidance and support and wisdom",
     "full": "we thank you Jehovah for your love",
     "expectedTail": null

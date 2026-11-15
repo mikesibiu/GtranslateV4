@@ -222,6 +222,19 @@ class TranslationRulesEngine {
             return extracted;
         }
 
+        // v234: lastTranslatedText is stored as only the LAST 500 chars of the transcript, so
+        // once an utterance outgrows ~500 chars startsWith() can never match and the bag overlap
+        // below falls under 65% — the WHOLE utterance was then treated as new (2026-11-15 rows
+        // 238/239/288: ~180 words re-sent, translation re-emitted in full). Find where that
+        // stored tail ends inside the current text and take everything after it.
+        const afterTail = this.extractAfterTail(trimmedFull, normalizedFull, normalizedLast);
+        if (afterTail !== null) {
+            if (!afterTail) {
+                this.logger.info('⛔ DUPLICATE DETECTED: Tracked tail is the end of current text');
+            }
+            return afterTail;
+        }
+
         // Check if texts have significant overlap (>65% similarity)
         // Raised from 45% → 65% to avoid rejecting legitimate continuations
         // that share common words with the previous translation
@@ -235,6 +248,47 @@ class TranslationRulesEngine {
         // Text doesn't match previous - return full text (new utterance)
         this.logger.debug('✅ New text detected, no duplication');
         return trimmedFull;
+    }
+
+    /**
+     * Locate the end of the previously translated text (a suffix of it) inside the current
+     * transcript. Returns the untranslated remainder ('' if none), or null when the tail can't
+     * be found (new utterance, or STT revised words inside the tracked tail).
+     */
+    extractAfterTail(trimmedFull, normalizedFull, normalizedLast) {
+        if (normalizedFull.length !== trimmedFull.length) return null; // case-fold changed indices
+        const isBoundary = ch => ch === undefined || /[\s.,;:!?"'„”“()…—-]/.test(ch);
+        const findTail = (last) => {
+            // The stored tail ends where the previously translated text ended, so in the current
+            // text it must end near (at least ~80% of) the stored length — never earlier. This
+            // keeps a stock phrase that merely recurs in a fresh utterance from being taken for it.
+            const minEnd = Math.floor(last.length * 0.8);
+            for (const probeLen of [200, 120, 60]) {
+                if (last.length < probeLen) continue;
+                let probe = last.slice(-probeLen);
+                const firstSpace = probe.indexOf(' ');
+                if (firstSpace >= 0) probe = probe.slice(firstSpace + 1); // start on a word boundary
+                if (probe.length < 40) continue;
+                let idx = normalizedFull.indexOf(probe);
+                while (idx >= 0) {
+                    const end = idx + probe.length;
+                    const startsOk = idx === 0 || isBoundary(normalizedFull[idx - 1]);
+                    const endsOk = end >= normalizedFull.length || isBoundary(normalizedFull[end]);
+                    if (startsOk && endsOk && end >= minEnd) {
+                        return trimmedFull.substring(end).trim();
+                    }
+                    idx = normalizedFull.indexOf(probe, idx + 1);
+                }
+            }
+            return null;
+        };
+        const found = findTail(normalizedLast);
+        if (found !== null) return found;
+        // STT often revises the last interim word ("cre" → "creștini"), so the stored tail no
+        // longer ends on a word boundary. Retry without that last word: it is re-translated, which
+        // costs one word instead of the whole utterance.
+        const lastSpace = normalizedLast.lastIndexOf(' ');
+        return lastSpace > 0 ? findTail(normalizedLast.slice(0, lastSpace)) : null;
     }
 
     /**

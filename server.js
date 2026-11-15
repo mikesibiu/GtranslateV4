@@ -17,7 +17,7 @@ const fs = require('fs');
 const billingDb = require('./billing-db');
 const { loadExtraWindows, isInCaptureWindow } = require('./capture-windows');
 const TranslationRulesEngine = require('./translation-rules-engine');
-const { normalizeSourceForMT, applyTermMappings, verifyReligiousTerms, preserveSourceNumbers, preserveDates, extractByWordLCP, extractByAlignmentFallback } = require('./translation-post-processor');
+const { normalizeSourceForMT, applyTermMappings, verifyReligiousTerms, preserveSourceNumbers, preserveDates, extractByWordLCP, extractByAlignmentFallback, cleanEnglishOutput } = require('./translation-post-processor');
 const session = require('express-session');
 
 // ===== CONFIGURATION =====
@@ -56,7 +56,7 @@ const APP_PASSWORD = process.env.APP_PASSWORD || null;
 // App version stamped onto translation_log rows (keep in sync with the badge in index.html).
 // Was previously hardcoded 'v206', which mislabelled every logged row and undermined
 // per-version log analysis.
-const APP_VERSION = 'v227';
+const APP_VERSION = 'v234';
 
 // Guard: SESSION_SECRET must be set in production — hardcoded fallback is a security hole
 if (NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -832,6 +832,22 @@ io.on('connection', (socket) => {
     //     explicitly increases false positives per Google documentation.
     const STT_PHRASE_HINTS = [
         'vestitori',
+        // 2026-11-15 meeting: each was misheard and then faithfully mistranslated
+        // ("spirit of the moon", "how detoxifying", "pills", "Quran", "privilege" left untranslated).
+        'spiritul lumii',
+        'spirit al lumii',
+        'prietenia cu lumea',
+        'prieten al lui Iehova',
+        'prieteni ai lui Iehova',
+        'adulter spiritual',
+        'turn de veghe',
+        'Turnul de Veghe',
+        'cât este de toxic',
+        'un privilegiu',
+        'Bastilia',
+        'sclavul fidel și prevăzător',
+        'regele Nordului',
+        'regele Sudului',
         'Martorii lui Iehova',
         // Convention vocabulary — use only multi-word forms to avoid early-commit garbling
         // (single-token 'congres'/'congrese' removed: they caused adjacent-word substitutions)
@@ -1315,9 +1331,9 @@ io.on('connection', (socket) => {
      * so each subsequent LCP match compares the whole previous full translation —
      * eliminating the divergence cascade that broke v150–v156.
      *
-     * Fallback: if LCP match ratio < 60%, translates decision.newText (the delta chunk)
-     * directly — same as v157. committedTranslation is still set to translatedFull so
-     * the next attempt has a clean baseline.
+     * v234: extraction returns the new tail, '' (nothing new — no emit, baseline kept), or null
+     * (unrelated/fresh utterance — aligned fallback, else the full translation is emitted).
+     * Isolated chunks are never translated.
      *
      * @param {string} fullText - Full STT transcript for this utterance
      * @param {Object} decision - Decision object from shouldTranslate()
@@ -1377,10 +1393,18 @@ io.on('connection', (socket) => {
             let emitted = null;
             let usedLCP = false;
             let usedAlignment = false;
+            let nothingNew = false;
 
             if (committedTranslation) {
                 const tail = extractByWordLCP(translatedFull, committedTranslation);
-                if (tail) {
+                if (tail === '') {
+                    // The new translation continues what was already shown and adds nothing
+                    // (e.g. the final result repeats the last interim). Emitting the full text
+                    // here re-sent ~1000 chars on 2026-11-15 (row 239).
+                    nothingNew = true;
+                    usedLCP = true;
+                    logger.info('⏭️ Translation adds nothing beyond what was shown — skipping emit', { clientId, reason: decision.reason });
+                } else if (tail) {
                     emitted = tail;
                     usedLCP = true;
                     logger.debug('✂️ LCP extraction succeeded', { clientId, tailWords: tail.split(/\s+/).length });
@@ -1414,15 +1438,24 @@ io.on('connection', (socket) => {
             // ── Fallback: LCP failed — emit full translation (full context preserved) ──
             // v127 behavior: never translate chunks in isolation. A decontextualized chunk
             // translation loses grammatical context and produces broken English.
-            if (!emitted) {
+            if (!emitted && !nothingNew) {
                 emitted = translatedFull.trim();
             }
+            if (nothingNew) emitted = ''; // post-processing below is a no-op on '' and the empty-emit guard skips it
 
             // ── KEY FIX: committedTranslation = translatedFull (not += emitted) ──
             // This prevents the divergence cascade that broke v150-v156:
             // each subsequent LCP starts from the WHOLE previous full translation.
-            committedTranslation = translatedFull;
-            lastFullTranslation = translatedFull;
+            // When nothing new was emitted keep the text that was actually shown: advancing it
+            // would bury any source words MT absorbed or dropped, and no later diff could show them.
+            if (!nothingNew) {
+                committedTranslation = translatedFull;
+                lastFullTranslation = translatedFull;
+            } else if (newText.split(/\s+/).length >= 4) {
+                logger.warn('Translation added nothing for a multi-word delta; kept previous baseline', {
+                    clientId, newTextWords: newText.split(/\s+/).length
+                });
+            }
 
             // ── Step 3: Post-processing ──
             // Language-aware: applyTermMappings and source-aware fixes assume
@@ -1436,6 +1469,9 @@ io.on('connection', (socket) => {
             emitted = verifyReligiousTerms(emitted, fullText, targetLanguage);
             emitted = preserveSourceNumbers(newText, emitted);
             emitted = preserveDates(newText, emitted);
+            if (targetLanguage.split('-')[0] === 'en') {
+                emitted = cleanEnglishOutput(emitted, sourceLangBase === 'ro');
+            }
 
             // Single-word fallback translation (Romanian source only — keys are Romanian words)
             if (sourceLangBase === 'ro') {
@@ -1450,7 +1486,7 @@ io.on('connection', (socket) => {
             lastTranslationTime = Date.now();
 
             if (!emitted) {
-                logger.info('⏭️ Empty translation result - skipping emit', { clientId });
+                if (!nothingNew) logger.info('⏭️ Empty translation result - skipping emit', { clientId });
             } else {
                 const isDuplicate = translationRules.isTranslationDuplicate(emitted);
 
