@@ -427,6 +427,29 @@ async function purgeOldArchive() {
 }
 
 /**
+ * All archived translation rows for one Europe/Bucharest calendar day, oldest first.
+ * Read-only; used by the automatic after-meeting review (GET /internal/meeting-rows).
+ * @param {string} localDate - 'YYYY-MM-DD' (validated by the caller)
+ * @param {number} [limit=5000] - hard cap on rows returned
+ * @returns {Promise<Array<object>>}
+ */
+async function getMeetingRows(localDate, limit = 5000) {
+    if (!pool) return [];
+    const result = await pool.query(
+        `SELECT to_char(created_at AT TIME ZONE 'Europe/Bucharest', 'HH24:MI:SS') AS local_time,
+                client_id, translation_reason, source_text, translated_text,
+                source_language, target_language, app_version
+         FROM translation_log_archive
+         WHERE created_at >= ($1::date)::timestamp AT TIME ZONE 'Europe/Bucharest'
+           AND created_at <  ($1::date + 1)::timestamp AT TIME ZONE 'Europe/Bucharest'
+         ORDER BY created_at ASC
+         LIMIT $2`,
+        [localDate, limit]
+    );
+    return result.rows;
+}
+
+/**
  * Close database connection (for graceful shutdown)
  */
 async function closeDatabase(logger) {
@@ -447,5 +470,6 @@ module.exports = {
     archiveTranslationLog,
     purgeOldArchive,
     captureSnapshot,
+    getMeetingRows,
     closeDatabase
 };

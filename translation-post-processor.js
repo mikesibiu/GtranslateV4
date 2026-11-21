@@ -975,9 +975,14 @@ function applyTermMappings(text, sourceText = '') {
     // Scripture citation: "N with M" → "N:M" — MT translates Romanian chapter-verse separator
     // "cu" as "with". Gate: source must contain "digit cu digit" (the Romanian citation pattern).
     // Confirmed source patterns: "Psalm 94 cu 19", "Galateni 6 cu 5", "Isaia 41 cu 10".
-    // MT also renders "cu" as "by" ("81 cu 16" → "81 by 16", 2026-09-17).
+    // MT also renders "cu" as "by" ("81 cu 16" → "81 by 16", 2026-09-17) and as "through"
+    // ("Romani 14 cu 12" → "Romans 14 through 12", 2026-11-19).
     if (/\b\d+\s+cu\s+\d+\b/.test(sourceText)) {
         result = result.replace(/\b(\d+)\s+(?:with|by)\s+(\d+)\b/g, '$1:$2');
+        // "through" is often genuine English ("verses 10 through 20"), so only the pair the source
+        // itself joins with "cu" is converted.
+        result = result.replace(/\b(\d+)\s+through\s+(\d+)\b/g, (m, a, b) =>
+            new RegExp(`(^|\\D)${a}\\s+cu\\s+${b}(\\D|$)`).test(sourceText) ? `${a}:${b}` : m);
     }
     // Segment cut mid-citation: source ends on "39 cu" and the verse number arrives in the next
     // segment, so this one ends "Genesis 39 with". Close it as "Genesis 39:" instead.
@@ -1494,12 +1499,15 @@ const ALIGN_STOPWORDS = new Set(['the','of','to','and','a','an','is','are','was'
 function alignCommittedToFull(committedNorm, fullNorm) {
     const n = committedNorm.length;
     const m = fullNorm.length;
-    if (n * m > 4e6) return { matches: 0, contentMatches: 0, split: 0 }; // pathological size: treat as unrelated
+    if (n * m > 4e6) return { matches: 0, contentMatches: 0, split: 0, emitFrom: 0 }; // pathological size: treat as unrelated
     const GAP = -1;
     const w = m + 1;
     const score = new Int32Array((n + 1) * w);
     const hits = new Uint16Array((n + 1) * w);        // counts stay far below 65k (guard above)
     const contentHits = new Uint16Array((n + 1) * w);
+    const dir = new Uint8Array((n + 1) * w);          // 0 = diagonal, 1 = up (committed word skipped), 2 = left (full word inserted)
+    for (let j = 1; j <= m; j++) dir[j] = 2;
+    for (let i = 1; i <= n; i++) dir[i * w] = 1;
     for (let j = 1; j <= m; j++) score[j] = j * GAP;
     for (let i = 1; i <= n; i++) {
         score[i * w] = i * GAP;
@@ -1517,10 +1525,12 @@ function alignCommittedToFull(committedNorm, fullNorm) {
                 score[idx] = up;
                 hits[idx] = hits[(i - 1) * w + j];
                 contentHits[idx] = contentHits[(i - 1) * w + j];
+                dir[idx] = 1;
             } else {
                 score[idx] = left;
                 hits[idx] = hits[i * w + j - 1];
                 contentHits[idx] = contentHits[i * w + j - 1];
+                dir[idx] = 2;
             }
         }
     }
@@ -1530,7 +1540,70 @@ function alignCommittedToFull(committedNorm, fullNorm) {
         const sc = score[n * w + j];
         if (sc > bestScore) { bestScore = sc; bestJ = j; }
     }
-    return { matches: hits[n * w + bestJ], contentMatches: contentHits[n * w + bestJ], split: bestJ };
+    return {
+        matches: hits[n * w + bestJ],
+        contentMatches: contentHits[n * w + bestJ],
+        // `split` is where the committed text ends; decisions ("nothing new", over-run checks) use
+        // it. `emitFrom` may be earlier (see below) and is used only to slice the emitted tail.
+        split: bestJ,
+        emitFrom: pullSplitBeforeReorderedInsert(dir, w, n, bestJ, committedNorm, fullNorm),
+    };
+}
+
+/**
+ * Google often moves NEW words in front of the last few words it had already returned: "...then
+ * you will realize" became "...when your sister or brother who is inactive will realize that we
+ * want..." (2026-11-19 row 216). The alignment then matches "will realize" by skipping the
+ * inserted words, so the split lands after them and they are never shown. When the tail of the
+ * aligned region is a run of 3+ inserted full-text words (2+ of them content words) followed by
+ * at most 4 matched words, move the split back to the start of that run: re-showing up to 4 words
+ * is far better than silently dropping a clause. Bounds: at most MAX_TRAILING words of any kind
+ * may follow the run (so a heavily reworded tail cannot pull the split far back), and the start
+ * extends back over up to 2 unmatched words just before the run (never shown either; a longer
+ * unmatched stretch is reworded text that was shown).
+ */
+function pullSplitBeforeReorderedInsert(dir, w, n, split, committedNorm, fullNorm) {
+    // Trace back the alignment path; record for each full index j (0-based) whether it was
+    // inserted (left move) or consumed by a committed word (diagonal).
+    const inserted = new Uint8Array(split);
+    const consumed = new Uint8Array(split);
+    let i = n;
+    let j = split;
+    while (i > 0 || j > 0) {
+        const d = dir[i * w + j];
+        if (i > 0 && j > 0 && d === 0) {
+            if (alignmentWordScore(committedNorm[i - 1], fullNorm[j - 1]) > 0) consumed[j - 1] = 1;
+            i--; j--;
+        } else if (i > 0 && (j === 0 || d === 1)) {
+            i--;
+        } else {
+            inserted[j - 1] = 1;
+            j--;
+        }
+    }
+    const MAX_REPEAT = 4;      // matched (already shown) words we accept re-showing
+    const MAX_TRAILING = 7;    // words of any kind between the run and the split
+    let matchedAfter = 0;
+    let k = split - 1;
+    while (k >= 0 && matchedAfter <= MAX_REPEAT && split - 1 - k <= MAX_TRAILING) {
+        if (inserted[k]) {
+            let start = k;
+            while (start > 0 && inserted[start - 1]) start--;
+            const run = fullNorm.slice(start, k + 1);
+            const content = run.filter(wd => !ALIGN_STOPWORDS.has(wd)).length;
+            if (matchedAfter >= 1 && run.length >= 3 && content >= 2 && start > 0) {
+                // An unmatched word just before the run was never shown either, but a long
+                // unmatched stretch is reworded text that WAS shown: extend by at most 2.
+                for (let ext = 0; ext < 2 && start > 0 && !consumed[start - 1]; ext++) start--;
+                return start;
+            }
+            k = start - 1;
+            continue;
+        }
+        if (consumed[k]) matchedAfter++;
+        k--;
+    }
+    return split;
 }
 
 /**
@@ -1561,7 +1634,7 @@ function extractByWordLCP(translatedFull, committedTranslation) {
     if (committedNorm.length === 0) return trimmedFull;
     if (fullNorm.length === 0) return null;
 
-    const { matches, contentMatches, split } = alignCommittedToFull(committedNorm, fullNorm);
+    const { matches, contentMatches, split, emitFrom } = alignCommittedToFull(committedNorm, fullNorm);
     // Short committed text matches unrelated sentences by chance on function words alone, so it
     // needs a stricter bar than a long one; and content (non-function) words must carry the match.
     // Google sometimes returns a SHORTER translation of a longer transcript (a trailing clause
@@ -1575,7 +1648,7 @@ function extractByWordLCP(translatedFull, committedTranslation) {
     const contentWords = committedNorm.filter(wd => !ALIGN_STOPWORDS.has(wd)).length;
     if (contentWords > 0 && contentMatches / contentWords < 0.4) return null;
 
-    return fullOrigWords.slice(split).join(' ').trim();
+    return fullOrigWords.slice(emitFrom).join(' ').trim();
 }
 
 /**
@@ -1602,7 +1675,7 @@ function extractByAlignmentFallback(translatedFull, committedTranslation, source
     const { norm: fullNorm, orig: fullOrigWords } = tokenizeForAlignment(full);
     if (committedNorm.length === 0 || fullNorm.length === 0) return null;
 
-    const { matches, contentMatches, split } = alignCommittedToFull(committedNorm, fullNorm);
+    const { matches, contentMatches, split, emitFrom } = alignCommittedToFull(committedNorm, fullNorm);
     if (split <= 0 || matches / committedNorm.length < 0.4) return null;
     const contentWords = committedNorm.filter(wd => !ALIGN_STOPWORDS.has(wd)).length;
     // A committed text of only function words ("and so") aligns to anything by chance.
@@ -1612,9 +1685,48 @@ function extractByAlignmentFallback(translatedFull, committedTranslation, source
     const tolerance = Math.max(3, Math.round(fullNorm.length * 0.15));
     if (split > expectedSplit + tolerance) return null;
 
-    const tail = fullOrigWords.slice(split).join(' ').trim();
+    const tail = fullOrigWords.slice(emitFrom).join(' ').trim();
     return tail || null;
 }
+
+// Unicode-aware whole-word regex: "<" and ">" in the pattern mark word start/end.
+function roWordRegex(pattern, flags) {
+    // "<" marks a word start only where it is not part of a lookbehind "(?<!" / "(?<=".
+    return new RegExp(pattern.replace(/(?<!\(\?)</g, '(?<![\\p{L}\\p{N}])').replace(/(?<!\(\?<[!=][^)]*)>/g, '(?![\\p{L}\\p{N}])'), flags + 'u');
+}
+
+// [pattern, flags, replacement] — see normalizeSourceForMT. Order matters only where noted.
+const RO_STT_REPAIRS_2026_11_19 = [
+    ['<(țăruș|țărușul) de (copt|porc)>', 'gi', '$1 de cort'],                 // "baking stake", "pig's stake"
+    ['<(înfipt|înfige|înfigem|înfigă) (sărutul|perușul)>', 'gi', '$1 țărușul'], // "with a kiss", "the parrot"
+    ['<departe a lui (Iehova|Dumnezeu)>', 'gi', 'de partea lui $1'],          // "stay away from Jehovah" (inverted)
+    ['<se potrivească dușmanilor>', 'gi', 'se împotrivească dușmanilor'],     // "suit his enemies" (inverted)
+    ['<(în|din) saună (\\d+) cu (\\d+)>', 'gi', '$1 Psalmul $2 cu $3'],             // "in the sauna 37" (citation form only)
+    ['<condenția>', 'gi', 'campania'],                                        // "support the continence"
+    ['<aluat în mână>', 'gi', 'a luat în mână'],                              // "dough in his hand"
+    ['<a futut>', 'gi', 'a putut'],                                           // vulgar mishearing of "could"
+    ['<cartea judecător>', 'gi', 'cartea Judecători'],                        // "the book judge"
+    ['<cartea plângerii>', 'gi', 'cartea Plângerile'],                        // "the book of complaint"
+    ['<este actor puternic>', 'gi', 'este atotputernic'],                     // "a powerful actor"
+    ['<(bătrân|bătrânul|bătrâni) de complicații>', 'gi', '$1 de congregație'], // "old man of complications"
+    ['<Biblie incognitate>', 'gi', 'biblic al congregației'],                 // "Bible study incognitate"
+    ['<în dreapta atenția>', 'gi', 'îndreaptă atenția'],                      // "on the right attention"
+    ['<întoarcă la YouTube>', 'gi', 'întoarcă la Iehova'],                    // "return to YouTube"
+    // "s-au" heard as "sau" ("or"): "sau pregătit pentru noi" → "or prepared for us". Limited to
+    // participles that need the reflexive and were seen in production.
+    // Not after another participle: "au adunat sau pregătit" shares one auxiliary (real "or").
+    ['(?<!\\p{L}(?:at|it|ut|ât|să) )<sau (pregătit|confruntat|întâmplat|îndepărtat|botezat|bucurat|adunat|întors)>', 'gi', 's-au $1'],
+    // Only the coordinated form: a lone "o soră negativă" can mean "pessimistic".
+    ['<un frate sau o soră negativă>', 'gi', 'un frate sau o soră inactivă'],    // "a negative brother or sister"
+    // Iael (Jael) is heard as the two pronouns "ea el" ("she he"); STT never produces the
+    // punctuation that would make the adjacent pair real speech.
+    // Lowercase only: STT capitalises after a guessed sentence break ("cu ea El a plecat").
+    ['<lui ia el>', 'g', 'lui Iael'],
+    ['<ea el>', 'g', 'Iael'],
+    ['<barac(u)?>', 'g', 'Barac'],                                            // lowercase → "hut"; "baracă" untouched
+    ['<arma(?:geton|tedon|gedon)(ul|ului)?>', 'gi', 'Armaghedon$1'],          // "Armageddon" variants
+];
+const RO_STT_REPAIRS_COMPILED = RO_STT_REPAIRS_2026_11_19.map(([p, f, r]) => [roWordRegex(p, f), r]);
 
 /**
  * Pre-translation fixes to the Romanian STT text, for the MT call only (post-processing gates
@@ -1654,6 +1766,11 @@ function normalizeSourceForMT(text) {
     s = s.replace(/\bcoran cu\b/g, 'contemporan cu');
     s = s.replace(/\b(cucerit|cucerește|cucerit-a) (pastile|pastila|pastilia)\b/gi, '$1 Bastilia'); // the school joke
     s = s.replace(/^Isus ținuta de\b/, 'Discursul ținut de');                                   // "Talk given by"
+    // 2026-11-19 meeting (Jael / Judges 4, inactive ones). Each misheard form is not valid
+    // Romanian in that position, and each produced nonsense or an inverted meaning in English.
+    // JS \b is ASCII-only (it treats ț, î, ă as non-word characters), so these use Unicode-aware
+    // boundaries; with \b, "țăruș…" and "în…" never matched and "baracă" became "Baracă".
+    for (const [re, replacement] of RO_STT_REPAIRS_COMPILED) s = s.replace(re, replacement);
     // STT filler vocalisations ("Ăă", "Äă") survive as stray tokens and come out as noise.
     s = s.replace(/(^|\s)[ĂÄ]ă(?=\s|$)/g, '$1').replace(/\s{2,}/g, ' ').replace(/^\s+/, '');
     return s;

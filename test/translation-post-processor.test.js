@@ -183,6 +183,48 @@ describe('extractByWordLCP', () => {
             expect(tail.startsWith('refugees are the same')).to.equal(true);
         });
 
+        it('new words Google moved in front of already-shown words are not dropped (2026-11-19 row 216)', () => {
+            const committed = "and we apply it as if without saying any more words you have to And that's it then you will realize";
+            const full      = "and we apply that without saying a word you have to And that's when your sister or brother who is inactive will realize that We want them to come back and encourage them to be bold";
+            const tail = extractByWordLCP(full, committed);
+            expect(tail).to.include('your sister or brother who is inactive');
+            expect(tail).to.include('We want them to come back');
+            expect(tail.split(/\s+/).length).to.be.below(26); // re-shows at most a few words, never the whole line
+        });
+
+        describe('reordered-insert pull-back bounds (v235 QA)', () => {
+            const W = (p, a, b) => Array.from({ length: b - a + 1 }, (_, i) => p + (a + i));
+            it('keeps "nothing new" when a shorter final has an inserted run near its end', () => {
+                const committed = W('word', 1, 40).join(' ');
+                const full = [...W('word', 1, 33), 'zebra', 'yak', 'xylophone', 'word34', 'word35'].join(' ');
+                expect(extractByWordLCP(full, committed)).to.equal('');
+            });
+            it('does not pull back when more than 7 words follow the inserted run', () => {
+                const committed = [...W('cw', 1, 20), 'rwa', 'rwb', 'rwc', 'rwd', 'rwe', 'rwf', 'rwg', 'rwh'].join(' ');
+                const full = [...W('cw', 1, 20), 'zebra', 'yak', 'xylophone', 'rwa', 'qa', 'qb', 'qc', 'qd', 'qe', 'qf', 'rwh', 'newa', 'newb'].join(' ');
+                expect(extractByWordLCP(full, committed)).to.equal('newa newb');
+            });
+            it('pulls back to an inserted run followed by a short matched tail', () => {
+                const committed = [...W('cw', 1, 20), 'will', 'realize'].join(' ');
+                const full = [...W('cw', 1, 20), 'zebra', 'yak', 'xylophone', 'will', 'realize', 'newa', 'newb'].join(' ');
+                expect(extractByWordLCP(full, committed)).to.equal('zebra yak xylophone will realize newa newb');
+            });
+            it('includes an unmatched word just before the run', () => {
+                const tail = extractByWordLCP('we saw the brothers when your sister brother inactive will realize that we want them back',
+                    'we saw the brothers then you will realize');
+                expect(tail).to.equal('when your sister brother inactive will realize that we want them back');
+            });
+            it('a 1–2 word insertion is not treated as reordered new content', () => {
+                expect(extractByWordLCP('so he fled to the old big tent quickly and rested', 'so he fled to the tent quickly'))
+                    .to.equal('and rested');
+            });
+        });
+
+        it('a plain continuation still splits exactly where the committed text ends', () => {
+            expect(extractByWordLCP('so he fled to the tent of Heber the Kenite and rested', 'so he fled to'))
+                .to.equal('the tent of Heber the Kenite and rested');
+        });
+
         it('greedy scan: multiple scattered diffs (production regression — triple repeat)', () => {
             // Mirrors the screenshot bug: "connection"→"contact" (synonym), "the" inserted,
             // "congregate"→"congregation" (word form) — 3 differences in 13 committed words.
@@ -1206,7 +1248,7 @@ describe('applyTermMappings', () => {
 
     describe('"Romani" (Bible book) → "Romans" when source has "romani \d"', () => {
         it('converts Romani to Romans when source shows Bible book pattern', () => {
-            expect(applyTermMappings('Romani 5 through 12', 'romani 5 cu 12')).to.equal('Romans 5 through 12');
+            expect(applyTermMappings('Romani 5 through 12', 'romani 5 cu 12')).to.equal('Romans 5:12'); // 'cu' = chapter:verse (2026-11-19)
         });
         it('does not fire when source has ethnic group context (no digit after romani)', () => {
             expect(applyTermMappings('the Romani people', 'frații romani')).to.equal('the Romani people');
@@ -2746,6 +2788,13 @@ describe('applyTermMappings — v217 fixes', () => {
     });
 
     // Scripture citation "N with M" → "N:M"
+    it('converts "Romans 14 through 12" to "Romans 14:12" (2026-11-19 row 54)', () => {
+        expect(T('What Romans 14 through 12 says', 'Ce romani 14 cu 12 spune')).to.equal('What Romans 14:12 says');
+    });
+    it('keeps a genuine English "10 through 20" that the source did not join with "cu"', () => {
+        expect(T('read verses 10 through 20 and Psalm 94 with 19', 'citiți versetele 10 până la 20 și Psalmul 94 cu 19'))
+            .to.equal('read verses 10 through 20 and Psalm 94:19');
+    });
     it('converts "Psalm 94 with 19" to "Psalm 94:19" when source has cu pattern', () => {
         expect(T('Psalm 94 with 19', 'Psalmul 94 cu 19')).to.equal('Psalm 94:19');
     });
@@ -2898,6 +2947,31 @@ describe('normalizeSourceForMT — STT mishearing repairs (2026-11-15)', () => {
         ['Cine a cucerit pastile acum', 'Cine a cucerit Bastilia acum'],
         ['Isus ținuta de Fratele Ion', 'Discursul ținut de Fratele Ion'],
         ['Ăă sclavul fidel', 'sclavul fidel'],
+        // 2026-11-19 (Judges 4 / inactive ones)
+        ['un țăruș de porc și un ciocan', 'un țăruș de cort și un ciocan'],
+        ['un țăruș de copt', 'un țăruș de cort'],
+        ['înfipt sărutul bătându l', 'înfipt țărușul bătându l'],
+        ['să înfigem perușul', 'să înfigem țărușul'],
+        ['a ales să stea departe a lui Iehova', 'a ales să stea de partea lui Iehova'],
+        ['să li se potrivească dușmanilor', 'să li se împotrivească dușmanilor'],
+        ['în saună 37 cu 10', 'în Psalmul 37 cu 10'],
+        ['susținem condenția', 'susținem campania'],
+        ['aluat în mână un țăruș', 'a luat în mână un țăruș'],
+        ['instrumentele simple a futut doborî', 'instrumentele simple a putut doborî'],
+        ['din cartea judecător', 'din cartea Judecători'],
+        ['cartea plângerii de nu', 'cartea Plângerile de nu'],
+        ['Iehova este actor puternic', 'Iehova este atotputernic'],
+        ['bătrânul de complicații', 'bătrânul de congregație'],
+        ['studiul Biblie incognitate', 'studiul biblic al congregației'],
+        ['capitolul 4 în dreapta atenția', 'capitolul 4 îndreaptă atenția'],
+        ['să se întoarcă la YouTube', 'să se întoarcă la Iehova'],
+        ['sau pregătit pentru noi', 's-au pregătit pentru noi'],
+        ['lecții sau confruntat cu', 'lecții s-au confruntat cu'],
+        ['un frate sau o soră negativă', 'un frate sau o soră inactivă'],
+        ['despre ea el o femeie', 'despre Iael o femeie'],
+        ['curajul lui ia el', 'curajul lui Iael'],
+        ['barac și Debora', 'Barac și Debora'],
+        ['bătălia armagetonul', 'bătălia Armaghedonul'],
     ];
     cases.forEach(([input, expected]) => {
         it(`"${input}" -> "${expected}"`, () => expect(normalizeSourceForMT(input)).to.equal(expected));
@@ -2906,6 +2980,15 @@ describe('normalizeSourceForMT — STT mishearing repairs (2026-11-15)', () => {
         expect(normalizeSourceForMT('luna aceasta am luat pastile')).to.equal('luna aceasta am luat pastile');
         expect(normalizeSourceForMT('Isus a ținut un discurs')).to.equal('Isus a ținut un discurs');
         expect(normalizeSourceForMT('un semn de la Dumnezeu')).to.equal('un semn de la Dumnezeu');
+    });
+    it('leaves ordinary uses alone (2026-11-19 rules)', () => {
+        for (const t of ['fie azi sau mâine', 'pregătit sau nu', 'o baracă de lemn', 'în sauna de lângă casă',
+                         'o plantă negativă', 'aici sau acolo', 'departe de casă', 'realea el',
+                         // v235 QA: shared auxiliary, sentence-break capital, lone "pessimistic", non-citation
+                         'cei care au adunat sau pregătit materiale', 'cu ea El a plecat', 'o soră negativă',
+                         'în saună 20 de minute']) {
+            expect(normalizeSourceForMT(t)).to.equal(t);
+        }
     });
 });
 

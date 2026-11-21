@@ -32,7 +32,11 @@ FIX = {  # wrong word form / wrong sense / mid-sentence capital → corrected ta
     'divertismente': 'entertainment', 'capitolul': 'chapter',
 }
 ADD = [('turn de veghe', 'Watchtower'), ('sclavul fidel și prevăzător', 'the faithful and discreet slave'),
-       ('Faptele apostolilor', 'Acts')]
+       ('Faptele apostolilor', 'Acts'),
+       # 2026-11-19 row 17: the single-word entry înaintea→before turned "607 înaintea erei noastre"
+       # into "607 BEFORE". A longer entry wins over the single word, so add the whole phrase.
+       ('înaintea erei noastre', 'B.C.E.'), ('înainte de era noastră', 'B.C.E.'),
+       ('înainte erei noastre', 'B.C.E.')]
 
 remove = {strip(x) for x in REMOVE}
 fix = {strip(k): v for k, v in FIX.items()}

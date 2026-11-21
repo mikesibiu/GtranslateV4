@@ -56,7 +56,7 @@ const APP_PASSWORD = process.env.APP_PASSWORD || null;
 // App version stamped onto translation_log rows (keep in sync with the badge in index.html).
 // Was previously hardcoded 'v206', which mislabelled every logged row and undermined
 // per-version log analysis.
-const APP_VERSION = 'v234';
+const APP_VERSION = 'v235';
 
 // Guard: SESSION_SECRET must be set in production — hardcoded fallback is a security hole
 if (NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -586,6 +586,51 @@ app.post('/internal/capture-logs', express.json({ limit: '4kb' }), async (req, r
         res.json({ success: true, rows: count, label });
     } catch (error) {
         logger.error('Capture snapshot error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ===== INTERNAL MEETING-ROWS ENDPOINT (read-only) =====
+// Used by the automatic after-meeting review (a scheduled Claude Code routine): it first checks
+// whether a meeting happened that day (rows: [] → nothing to review), then analyses the rows.
+// Auth: Bearer REVIEW_TOKEN — a separate, read-only token so the review can never trigger
+// captures or touch anything else. 503 if unset or shorter than 32 chars. Only FAILED attempts
+// are throttled (own bucket, checked after auth), so strangers probing the URL cannot lock the
+// review out.
+const _reviewFailures = [];
+function _reviewFailureRateOk() {
+    const cutoff = Date.now() - 60000;
+    while (_reviewFailures.length && _reviewFailures[0] < cutoff) _reviewFailures.shift();
+    return _reviewFailures.length < 20;
+}
+
+app.get('/internal/meeting-rows', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const reviewToken = process.env.REVIEW_TOKEN;
+    if (!reviewToken || reviewToken.length < 32) {
+        return res.status(503).json({ error: 'Review endpoint not configured' });
+    }
+    const authHeader = req.headers['authorization'] || '';
+    const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    const tokensMatch = provided.length === reviewToken.length &&
+        crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(reviewToken));
+    if (!tokensMatch) {
+        // Throttle only bad attempts; a valid token is always served.
+        if (!_reviewFailureRateOk()) return res.status(429).json({ error: 'Too many requests' });
+        _reviewFailures.push(Date.now());
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const date = String(req.query.date || '');
+    // Round-trip check rejects impossible dates (2026-02-30) before they reach Postgres.
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
+    if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+        return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    }
+    try {
+        const rows = await billingDb.getMeetingRows(date);
+        res.json({ date, timezone: 'Europe/Bucharest', count: rows.length, rows });
+    } catch (error) {
+        logger.error('Meeting rows query error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -1164,6 +1209,45 @@ io.on('connection', (socket) => {
         // (Bible appendix B9 title: "puterile mondiale prezise de Daniel" → "world powers awakened by Daniel")
         'prezise de Daniel',
         'puterile mondiale prezise de Daniel',
+        // 2026-11-19 Thursday meeting (Judges 4 — Jael; "frații inactivi"). Every name below was
+        // misheard throughout the Bible study: Iael → "ea el"/"Air"/"Talia el", Barac → "hut",
+        // Debora → "Horus", Armaghedon → "Armand"/"Market"/"pharmacy", cort → "body"/"harbor",
+        // țăruș → "kiss"/"parrot", inactiv → "active"/"negative" (meaning inverted).
+        'Iael',
+        'lui Iael',
+        'Sisera',
+        'lui Sisera',
+        'Barac',
+        'Debora',
+        'profetesa Debora',
+        'Heber kenitul',
+        'soțul lui Iael',
+        'Iabin regele',
+        'regele Hațorului',
+        'Rahav',
+        'Armaghedon',
+        'Armaghedonul',
+        'războiul de la Armaghedon',
+        'Meghido',
+        'în cortul ei',
+        'intrarea cortului',
+        'țărușul de cort',
+        'un țăruș de cort',
+        'frații inactivi',
+        'frații noștri inactivi',
+        'o soră inactivă',
+        'un frate inactiv',
+        'celor inactivi',
+        'mărturie informală',
+        'campania specială',
+        'în Psalmul',
+        'Iehova este atotputernic',
+        'cartea Plângerile',
+        'cartea Judecători',
+        'broșura Iubește oamenii',
+        'studiul biblic al congregației',
+        'bătrân de congregație',
+        'bătrânii de congregație',
     ];
 
     // Helper function to update last activity time
