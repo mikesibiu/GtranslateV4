@@ -2,7 +2,8 @@
 
 A scheduled Claude Code routine runs this procedure after every Thursday and Sunday meeting.
 It reviews the meeting's translations, fixes what can safely be fixed in code, emails the owner
-a full report, and opens a pull request for the owner to merge. **It never deploys**: nothing
+a full report, and pushes a `review/<date>` branch; the email has a one-click link to open
+it as a pull request for the owner to merge. **It never deploys**: nothing
 reaches the live app until the owner merges the PR (Koyeb deploys `main`).
 
 The routine's prompt supplies the values that are not in the repo: the read-only `REVIEW_TOKEN`
@@ -35,7 +36,7 @@ or log output.
    - HTTP **429**: wait 70 s and retry, up to 3 times.
    - Any other non-200, or a body without a `rows` array: this is an **error, not "no
      meeting"**. Stop and email the owner "Meeting review <date> could not run" with the HTTP
-     status and error text. Do not open a PR. (A 401 or 429 means the token is wrong.)
+     status and error text. Do not create a branch. (A 401 or 429 means the token is wrong.)
 3. Keep only rows with `source_language` starting `ro` and `target_language` starting `en`.
    **If fewer than 30 remain, stop silently: the owner did not use the app for this meeting**
    (absent, or attended an English meeting). No email, no PR, no commit.
@@ -108,7 +109,7 @@ word or phrase itself.
 
 ## 4. Verify
 
-1. Bump the version: the `<h1>` badge in `index.html` and `APP_VERSION` in server.js (they must
+1. If there are code fixes, bump the version: the `<h1>` badge in `index.html` and `APP_VERSION` in server.js (they must
    match; a test checks it).
 2. `npm ci` then `npm test`. The only acceptable failure is `Mode Integration (Talks)` (it
    needs a live server). Fix anything else you broke; if you cannot, revert that change and
@@ -116,18 +117,24 @@ word or phrase itself.
 3. Run the `app-code-reviewer` QA agent (`.claude/agents/app-code-reviewer.md`) on the diff and
    fix every issue it finds; re-run it after any further edit, then re-run `npm test`.
 
-## 5. Email report and pull request
+## 5. Branch, then email report
 
-1. **Email** the owner (Gmail connector, to the address in the routine prompt), subject
+1. If there are code fixes: create branch `review/<date>`, commit (message
+   `Meeting review <date>: <generic summary, no names>`) and push the branch. `gh` is not
+   signed in inside the routine, so it cannot open the PR itself, and deleting branches is
+   refused; both are expected. If there are no code fixes, do not create a branch.
+2. **Email** the owner (Gmail connector, to the address in the routine prompt), subject
    `Meeting review <date> — <N> rows, <one-line verdict>`. Body:
+   - If a branch was pushed, first line: the one-click PR link
+     `https://github.com/mikesibiu/GtranslateV4/compare/main...review/<date>?expand=1`, the
+     suggested PR title `Meeting review <date>`, and a short PR description (code changes and
+     test results only, no meeting text or names) to paste in.
    - Summary: rows, time span, gaps/reconnects (with times), verdict in 2–3 sentences.
    - **Pipeline problems** — each with row time, the Romanian, the English, cause, fix.
    - **Speech-recognition problems** — a table: heard as / should be / English shown / fix.
    - **Glossary suspicions** (not changed) and **Unfixable** items.
-   - Fixes made, tests added, `npm test` result, QA verdict, the PR link.
+   - Fixes made, tests added, `npm test` result, QA verdict.
    - **Lessons for the KB** — one line each, ready for `kb.py learn`.
-2. If there are code fixes: create branch `review/<date>`, commit (message
-   `Meeting review <date>: <generic summary, no names>`), push the branch, and open a PR to
-   `main` titled `Meeting review <date>`. The PR body lists the code changes and test results
-   only — no meeting text, no names. If there are no code fixes, do not create a branch or PR;
-   the email is the whole result.
+3. If sending the email fails, retry it twice. If it still fails, end the run with the branch
+   name and the full report as the routine's final output (a re-run would skip, because the
+   branch already exists).
