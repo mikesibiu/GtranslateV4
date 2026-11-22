@@ -56,7 +56,7 @@ const APP_PASSWORD = process.env.APP_PASSWORD || null;
 // App version stamped onto translation_log rows (keep in sync with the badge in index.html).
 // Was previously hardcoded 'v206', which mislabelled every logged row and undermined
 // per-version log analysis.
-const APP_VERSION = 'v236';
+const APP_VERSION = 'v237';
 
 // Guard: SESSION_SECRET must be set in production — hardcoded fallback is a security hole
 if (NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -604,22 +604,35 @@ function _reviewFailureRateOk() {
     return _reviewFailures.length < 20;
 }
 
-app.get('/internal/meeting-rows', async (req, res) => {
+/** Checks the Bearer REVIEW_TOKEN; on failure sends the error response and returns false. */
+function _requireReviewToken(req, res) {
     res.set('Cache-Control', 'no-store');
     const reviewToken = process.env.REVIEW_TOKEN;
     if (!reviewToken || reviewToken.length < 32) {
-        return res.status(503).json({ error: 'Review endpoint not configured' });
+        res.status(503).json({ error: 'Review endpoint not configured' });
+        return false;
     }
     const authHeader = req.headers['authorization'] || '';
     const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-    const tokensMatch = provided.length === reviewToken.length &&
-        crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(reviewToken));
+    // Compare fixed-length digests: timingSafeEqual throws on unequal byte lengths, which a
+    // multibyte header of equal string length would otherwise cause.
+    const digest = (x) => crypto.createHash('sha256').update(String(x)).digest();
+    const tokensMatch = provided.length > 0 && crypto.timingSafeEqual(digest(provided), digest(reviewToken));
     if (!tokensMatch) {
         // Throttle only bad attempts; a valid token is always served.
-        if (!_reviewFailureRateOk()) return res.status(429).json({ error: 'Too many requests' });
+        if (!_reviewFailureRateOk()) {
+            res.status(429).json({ error: 'Too many requests' });
+            return false;
+        }
         _reviewFailures.push(Date.now());
-        return res.status(401).json({ error: 'Unauthorized' });
+        res.status(401).json({ error: 'Unauthorized' });
+        return false;
     }
+    return true;
+}
+
+app.get('/internal/meeting-rows', async (req, res) => {
+    if (!_requireReviewToken(req, res)) return;
     const date = String(req.query.date || '');
     // Round-trip check rejects impossible dates (2026-02-30) before they reach Postgres.
     const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
@@ -627,11 +640,56 @@ app.get('/internal/meeting-rows', async (req, res) => {
         return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
     }
     try {
-        const rows = await billingDb.getMeetingRows(date);
-        res.json({ date, timezone: 'Europe/Bucharest', count: rows.length, rows });
+        const [rows, events] = await Promise.all([billingDb.getMeetingRows(date), billingDb.getMeetingEvents(date)]);
+        res.json({ date, timezone: 'Europe/Bucharest', count: rows.length, rows, events });
     } catch (error) {
         logger.error('Meeting rows query error:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ===== INTERNAL TRANSLATE-CHECK ENDPOINT (review only) =====
+// Lets the automatic review test whether a glossary entry is hurting a sentence: each Romanian
+// sentence comes back translated WITH the live ro→en glossary and WITHOUT it, in one API call.
+// Same REVIEW_TOKEN. Bounded cost: ≤20 sentences of ≤600 chars per call, ≤30 calls per hour.
+const _translateCheckCalls = [];
+app.post('/internal/translate-check', (req, res, next) => {
+    // Authenticate before parsing the body, so strangers cannot make the server parse 32 KB.
+    if (_requireReviewToken(req, res)) next();
+}, express.json({ limit: '32kb' }), async (req, res) => {
+    const cutoff = Date.now() - 3600000;
+    while (_translateCheckCalls.length && _translateCheckCalls[0] < cutoff) _translateCheckCalls.shift();
+    if (_translateCheckCalls.length >= 30) {
+        return res.status(429).json({ error: 'Hourly limit reached (30 calls)' });
+    }
+    const sentences = req.body && req.body.sentences;
+    if (!Array.isArray(sentences) || sentences.length < 1 || sentences.length > 20 ||
+        !sentences.every(x => typeof x === 'string' && x.trim().length > 0 && x.length <= 600)) {
+        return res.status(400).json({ error: 'sentences must be 1-20 non-empty strings of at most 600 chars' });
+    }
+    const glossary = getGlossaryPath('ro', 'en');
+    if (!parent || !glossary) {
+        return res.status(503).json({ error: 'Translation or glossary not configured' });
+    }
+    _translateCheckCalls.push(Date.now());
+    try {
+        const request = {
+            parent, contents: sentences, mimeType: 'text/plain',
+            sourceLanguageCode: 'ro', targetLanguageCode: 'en',
+            glossaryConfig: { glossary, ignoreCase: true },
+        };
+        if (translationModel === 'nmt') request.model = `${parent}/models/nmt`;
+        const [response] = await translateClient.translateText(request);
+        res.json({
+            results: sentences.map((source, i) => ({
+                source,
+                withGlossary: response.glossaryTranslations?.[i]?.translatedText ?? null,
+                withoutGlossary: response.translations?.[i]?.translatedText ?? null,
+            })),
+        });
+    } catch (error) {
+        logger.error('Translate-check error:', { error: error.message });
+        res.status(502).json({ error: 'Translation API error' });
     }
 });
 
@@ -822,6 +880,7 @@ io.on('connection', (socket) => {
         totalConnections: activeConnections,
         ipConnections: ipConnections + 1
     });
+    billingDb.logEvent({ clientId: socket.id.substring(0, 8), kind: 'client_connected' });
 
     let recognizeStream = null;
     let currentLanguage = 'ro-RO';
@@ -1559,6 +1618,8 @@ io.on('connection', (socket) => {
                 logger.warn('Translation added nothing for a multi-word delta; kept previous baseline', {
                     clientId, newTextWords: newText.split(/\s+/).length
                 });
+                // These words were never shown; only the event log records them (no translation row).
+                billingDb.logEvent({ clientId, kind: 'speech_skipped', detail: newText });
             }
 
             // ── Step 3: Post-processing ──
@@ -1790,6 +1851,8 @@ io.on('connection', (socket) => {
                                           error.code === 4 ||
                                           error.message.includes('maximum allowed stream duration') ||
                                           error.message.includes('Exceeded maximum allowed stream duration');
+                    // Routine ~305 s stream-limit errors are expected; record only real failures.
+                    if (!isStreamTimeout) billingDb.logEvent({ clientId, kind: 'stt_error', detail: `${error.code ?? ''} ${error.message || ''}` });
 
                     // "Audio Timeout" means Google got no audio for ~10s (silence: prayer, song, break).
                     // This is NOT a real error — reset the restart counter so silence never kills the stream.
@@ -2319,7 +2382,8 @@ io.on('connection', (socket) => {
     });
 
     // Disconnect
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
+        billingDb.logEvent({ clientId, kind: 'client_disconnected', detail: `${reason}; translations=${translationCount}` });
         activeConnections--;
         sessionActive = false;
 

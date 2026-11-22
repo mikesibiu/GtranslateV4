@@ -36,7 +36,12 @@ ADD = [('turn de veghe', 'Watchtower'), ('sclavul fidel și prevăzător', 'the 
        # 2026-11-19 row 17: the single-word entry înaintea→before turned "607 înaintea erei noastre"
        # into "607 BEFORE". A longer entry wins over the single word, so add the whole phrase.
        ('înaintea erei noastre', 'B.C.E.'), ('înainte de era noastră', 'B.C.E.'),
-       ('înainte erei noastre', 'B.C.E.')]
+       ('înainte erei noastre', 'B.C.E.'),
+       # 2026-11-22: the single-word entries încredere/încrederea→trust turned "demn de încredere"
+       # (trustworthy) into "his word is trust" / "this clear and trust translation". Whole phrases win.
+       ('demn de încredere', 'trustworthy'), ('demnă de încredere', 'trustworthy'),
+       ('demni de încredere', 'trustworthy'), ('demne de încredere', 'trustworthy'),
+       ('demnă de încrederea', 'trustworthy')]
 
 remove = {strip(x) for x in REMOVE}
 fix = {strip(k): v for k, v in FIX.items()}

@@ -163,6 +163,14 @@ describe('TranslationRulesEngine', () => {
         it('should handle trailing spaces', () => {
             expect(engine.detectSentenceEnding('This is a sentence.  ')).to.be.true;
         });
+
+        it('a web address being spoken is not a sentence end (2026-11-22 "pe site ul jw.")', () => {
+            expect(engine.detectSentenceEnding('spre site ul jw.')).to.be.false;
+            expect(engine.detectSentenceEnding('intrați pe www.')).to.be.false;
+            expect(engine.detectSentenceEnding('găsiți pe jw.org.')).to.be.false;
+            expect(engine.detectSentenceEnding('Mulțumim frumos.')).to.be.true;
+            expect(engine.detectSentenceEnding('el a fost în jwb.')).to.be.true;
+        });
     });
 
     describe('Translation Decisions - Sentence Endings', () => {

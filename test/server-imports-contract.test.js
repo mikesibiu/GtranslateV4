@@ -73,3 +73,20 @@ describe('APP_VERSION', () => {
         assert.strictEqual(appVersion, htmlVersion);
     });
 });
+
+
+// Every billingDb.<fn>( call in server.js must exist on billing-db.js exports (v237 added
+// logEvent/getMeetingEvents; a missing export would throw inside socket handlers).
+describe('server.js billingDb call contract', () => {
+    const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    const billingDb = require('../billing-db');
+    const names = [...new Set([...serverSrc.matchAll(/billingDb\.([A-Za-z_]\w*)\s*\(/g)].map(m => m[1]))];
+    it('finds billingDb calls', () => assert.ok(names.includes('logEvent') && names.includes('getMeetingEvents')));
+    names.forEach(name => {
+        it(`billing-db exports ${name}`, () => assert.strictEqual(typeof billingDb[name], 'function'));
+    });
+    it('logEvent never throws and ignores unknown kinds', async () => {
+        assert.strictEqual(await billingDb.logEvent({ kind: 'not_a_kind' }), false);
+        assert.strictEqual(await billingDb.logEvent(null), false);
+    });
+});

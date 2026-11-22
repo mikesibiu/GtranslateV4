@@ -104,6 +104,18 @@ async function createSchema(logger) {
         -- meeting is durably captured, not just the 4 scheduled Thu/Sun slots. translation_log
         -- itself purges rows older than 45 minutes; this table never purges rows on its own.
         CREATE TABLE IF NOT EXISTS translation_log_archive (LIKE translation_log INCLUDING ALL);
+
+        -- Things that happen during a meeting but never become a translation row (speech dropped
+        -- as "already shown", phone disconnects, recognition errors). Read by the automatic
+        -- after-meeting review, which cannot see the server logs. Small: a few dozen rows/meeting.
+        CREATE TABLE IF NOT EXISTS meeting_events (
+            id SERIAL PRIMARY KEY,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            client_id VARCHAR(64),
+            kind VARCHAR(40) NOT NULL,
+            detail TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_mevents_created_at ON meeting_events(created_at);
     `;
 
     try {
@@ -426,6 +438,60 @@ async function purgeOldArchive() {
     return result.rowCount;
 }
 
+const EVENT_KINDS = new Set(['client_connected', 'client_disconnected', 'speech_skipped', 'stt_error']);
+
+/**
+ * Record a meeting event (see meeting_events). Fire-and-forget: never throws, never blocks
+ * translation. Unknown kinds are ignored; detail is capped at 1000 chars.
+ * @param {{clientId?: string, kind: string, detail?: string}} entry
+ */
+const _eventTimes = [];
+async function logEvent(entry) {
+    if (!pool || !entry || !EVENT_KINDS.has(entry.kind)) return false;
+    // Cap: a phone stuck in a reconnect loop must not flood the shared pool (100 events/minute).
+    // speech_skipped is exempt (at most one per translation) so a storm cannot hide dropped speech.
+    if (entry.kind !== 'speech_skipped') {
+        const cutoff = Date.now() - 60000;
+        while (_eventTimes.length && _eventTimes[0] < cutoff) _eventTimes.shift();
+        if (_eventTimes.length >= 100) return false;
+        _eventTimes.push(Date.now());
+    }
+    try {
+        // Purge old events here too (on connects only, so rarely), in case no review reads them.
+        if (entry.kind === 'client_connected') {
+            await pool.query(`DELETE FROM meeting_events WHERE created_at < NOW() - INTERVAL '120 days'`);
+        }
+        await pool.query(
+            'INSERT INTO meeting_events (client_id, kind, detail) VALUES ($1, $2, $3)',
+            [String(entry.clientId || '').substring(0, 64), entry.kind, String(entry.detail || '').substring(0, 1000)]
+        );
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Meeting events for one Europe/Bucharest calendar day, oldest first (same day bounds as
+ * getMeetingRows). Also purges events older than 120 days.
+ * @param {string} localDate - 'YYYY-MM-DD' (validated by the caller)
+ */
+async function getMeetingEvents(localDate, limit = 2000) {
+    if (!pool) return [];
+    await pool.query(`DELETE FROM meeting_events WHERE created_at < NOW() - INTERVAL '120 days'`);
+    const result = await pool.query(
+        `SELECT to_char(created_at AT TIME ZONE 'Europe/Bucharest', 'HH24:MI:SS') AS local_time,
+                client_id, kind, detail
+         FROM meeting_events
+         WHERE created_at >= ($1::date)::timestamp AT TIME ZONE 'Europe/Bucharest'
+           AND created_at <  ($1::date + 1)::timestamp AT TIME ZONE 'Europe/Bucharest'
+         ORDER BY created_at ASC
+         LIMIT $2`,
+        [localDate, limit]
+    );
+    return result.rows;
+}
+
 /**
  * All archived translation rows for one Europe/Bucharest calendar day, oldest first.
  * Read-only; used by the automatic after-meeting review (GET /internal/meeting-rows).
@@ -471,5 +537,7 @@ module.exports = {
     purgeOldArchive,
     captureSnapshot,
     getMeetingRows,
+    getMeetingEvents,
+    logEvent,
     closeDatabase
 };

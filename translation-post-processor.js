@@ -21,6 +21,10 @@
  * @param {string} [sourceText=''] - Original STT source (Romanian) for source-aware fixes
  * @returns {string} Corrected translation
  */
+const EN_NUMBER_WORDS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+const RO_NUMBER_WORDS = ['unu|una|întâi', 'doi|două|doua', 'trei', 'patru', 'cinci', 'șase|sase', 'șapte|sapte', 'opt',
+    'nouă|noua', 'zece', 'unsprezece', 'doisprezece|douăsprezece'];
+
 function applyTermMappings(text, sourceText = '') {
     // ═══════════════════════════════════════════════════════════════════════════════
     // WHAT THIS IS
@@ -981,9 +985,21 @@ function applyTermMappings(text, sourceText = '') {
         result = result.replace(/\b(\d+)\s+(?:with|by)\s+(\d+)\b/g, '$1:$2');
         // "through" is often genuine English ("verses 10 through 20"), so only the pair the source
         // itself joins with "cu" is converted.
-        result = result.replace(/\b(\d+)\s+through\s+(\d+)\b/g, (m, a, b) =>
+        // "through" and "and" are often genuine English ("verses 10 through 20", "verses 9 and 10"),
+        // so only the pair the source itself joins with "cu" is converted ("Psalmul 9 cu 10" →
+        // "Psalm 9 and 10", 2026-11-22).
+        result = result.replace(/\b(\d+)\s+(through|and)\s+(\d+)\b/g, (m, a, _w, b) =>
             new RegExp(`(^|\\D)${a}\\s+cu\\s+${b}(\\D|$)`).test(sourceText) ? `${a}:${b}` : m);
     }
+    // Chapter spoken as a word: "maleahi trei cu 16" → "Malachi three with 16" (2026-11-22).
+    // Converted only when the source has that same number word joined by "cu" to that verse.
+    result = result.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:with|by|and|through)\s+(\d+)\b/gi,
+        (m, word, verse) => {
+            const n = EN_NUMBER_WORDS.indexOf(word.toLowerCase()) + 1;
+            const roWords = RO_NUMBER_WORDS[n - 1];
+            const re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${roWords})\\s+cu\\s+${verse}(?!\\d)`, 'iu');
+            return re.test(sourceText) ? `${n}:${verse}` : m;
+        });
     // Segment cut mid-citation: source ends on "39 cu" and the verse number arrives in the next
     // segment, so this one ends "Genesis 39 with". Close it as "Genesis 39:" instead.
     if (/\b\d+\s+cu\s*$/.test(sourceText)) {
@@ -1739,8 +1755,27 @@ const RO_STT_REPAIRS_2026_11_22 = [
     ['<agrafele (\\d+)>', 'gi', 'paragrafele $1'],                            // "time clips 10 and 11"
     ['<tonul Babel>', 'gi', 'Turnul Babel'],                                  // "the Babel tone"
 ];
-const RO_STT_REPAIRS_COMPILED = [...RO_STT_REPAIRS_2026_11_19, ...RO_STT_REPAIRS_2026_11_22]
-    .map(([p, f, r]) => [roWordRegex(p, f), r]);
+// 2026-11-22 second (manual, row-by-row) pass: mishearings the automatic review missed.
+const RO_STT_REPAIRS_2026_11_22_B = [
+    // "sora X te rugăm" (calling on a sister) heard as "fără X te rugăm" → "without <Name> please".
+    // Capitalised name only, case-sensitive; never words a prayer could use ("fără Tine te rugăm").
+    ['<fără (?!(?:Tine|Tău|El|Ea|Dumnezeu|Iehova|Isus|Iisus|Isuse|Hristos|Doamne|Domnul|Tată|Tatăl|Părinte)>)(\\p{Lu}\\p{Ll}+) te rugăm>', 'g', 'sora $1 te rugăm'],
+    ['<clanul fidel>', 'gi', 'sclavul fidel'],                                 // "faithful and discreet clan"
+    ['<(sclav(?:ul|ului)?) (?:filtel|fider|fidelile)>', 'gi', '$1 fidel'],    // "sclav filtel", "fider slave"
+    ['<pe cei urși care>', 'gi', 'pe cei unși care'],                         // "the bears who is the anointed class"
+    ['<pe cei 11 Dumnezeu>', 'gi', 'pe cei unși de Dumnezeu'],                // "represents the 11 God"
+    ['<primim un sat>', 'gi', 'primim un sfat'],                              // "when we receive a village"
+    ['<ne o fuscăm>', 'gi', 'ne ofuscăm'],                                    // "o fuscăm" is not Romanian
+    ['<lucrarea depozitare>', 'gi', 'lucrarea de predicare'],                 // "the work of storage"
+    ['<(Dumnezeul(?:ui)?) lui Iancu>', 'gi', '$1 lui Iacov'],                 // Isaiah 2:3 "the God of Iancu"
+    ['<Tudor Body>', 'gi', 'Turnul Babel'],                                   // "the effects at Tudor Body"
+    ['<fototerama>', 'gi', 'Foto-Drama'],                                     // "creation phototheraphy"
+    ['<armageddon(ul|ului)?>', 'gi', 'Armaghedon$1'],                         // English spelling, lowercase output
+    ['<(aplicați(?:a|ei)) jelui>', 'gi', '$1 JW Library'],                    // "the jelui application"
+    ['<penticostali din (\\d+)>', 'gi', 'Penticosta din $1'],               // "the Pentecostals of 33"
+];
+const RO_STT_REPAIRS_COMPILED = [...RO_STT_REPAIRS_2026_11_19, ...RO_STT_REPAIRS_2026_11_22,
+    ...RO_STT_REPAIRS_2026_11_22_B].map(([p, f, r]) => [roWordRegex(p, f), r]);
 
 /**
  * Pre-translation fixes to the Romanian STT text, for the MT call only (post-processing gates

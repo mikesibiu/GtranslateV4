@@ -483,7 +483,11 @@ class TranslationRulesEngine {
         // Exclude ellipsis (not a real sentence ending)
         const hasEllipsis = /\.{2,}\s*$/.test(trimmedText);
 
-        return hasPunctuation && !hasEllipsis;
+        // A web address being spoken is not a sentence end: STT writes "pe site-ul jw." and then
+        // "org" arrives a moment later (2026-11-22: the row was cut at "jw.").
+        const isWebAddress = /(?:^|\s)(?:jw|www|jw\.org|\S+\.(?:org|com|ro))\.$/i.test(trimmedText);
+
+        return hasPunctuation && !hasEllipsis && !isWebAddress;
     }
 
     /**

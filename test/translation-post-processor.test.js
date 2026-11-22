@@ -3092,3 +3092,58 @@ describe('normalizeSourceForMT — STT mishearing repairs (2026-11-22)', () => {
         }
     });
 });
+
+
+describe('normalizeSourceForMT — second-pass repairs (2026-11-22 B)', () => {
+    const { normalizeSourceForMT } = require('../translation-post-processor');
+    const cases = [
+        ['continuăm fără Lavinia te rugăm', 'continuăm sora Lavinia te rugăm'],
+        ['clanul fidel și prevăzător', 'sclavul fidel și prevăzător'],
+        ['A sclavului fider și', 'A sclavului fidel și'],
+        ['dar sclav filtel a înțeles', 'dar sclav fidel a înțeles'],
+        ['reprezintă pe cei urși care este clasa unsă', 'reprezintă pe cei unși care este clasa unsă'],
+        ['reprezintă pe cei 11 Dumnezeu cu Spirit', 'reprezintă pe cei unși de Dumnezeu cu Spirit'],
+        ['când primim un sat ne', 'când primim un sfat ne'],
+        ['nu ne o fuscăm sau', 'nu ne ofuscăm sau'],
+        ['să luăm parte la lucrarea depozitare', 'să luăm parte la lucrarea de predicare'],
+        ['la casa Dumnezeului lui Iancu el', 'la casa Dumnezeului lui Iacov el'],
+        ['efectele acțiunii de la Tudor Body', 'efectele acțiunii de la Turnul Babel'],
+        ['prezentau deja fototerama creațiunii', 'prezentau deja Foto-Drama creațiunii'],
+        ['este numit armageddonul acesta', 'este numit Armaghedonul acesta'],
+        ['cu ajutorul aplicației jelui el', 'cu ajutorul aplicației JW Library el'],
+        ['la penticostali din 33 era noastră', 'la Penticosta din 33 era noastră'],
+    ];
+    cases.forEach(([input, expected]) => {
+        it(`"${input}" -> "${expected}"`, () => expect(normalizeSourceForMT(input)).to.equal(expected));
+    });
+    it('leaves ordinary uses alone (2026-11-22 B rules)', () => {
+        for (const t of ['nu putem fără Tine te rugăm ajută-ne', 'fără Doamne te rugăm', 'fără Tată te rugăm', 'fără ajutorul lui te rugăm', 'fără Dumnezeu te rugăm',
+                         'fără să te rugăm', 'urșii din pădure', 'un sat frumos', 'am primit un sat întreg',
+                         'depozitare de alimente', 'fratele Iancu a citit', 'clanul lor', 'cei 11 apostoli',
+                         'penticostalii din oraș', 'jelui-te', 'sclavul fidel']) {
+            expect(normalizeSourceForMT(t)).to.equal(t);
+        }
+    });
+});
+
+describe('applyTermMappings — chapter:verse spoken as "and" or as a number word (2026-11-22)', () => {
+    const { applyTermMappings } = require('../translation-post-processor');
+    it('"Psalmul 9 cu 10" rendered "Psalm 9 and 10" becomes "Psalm 9:10"', () => {
+        expect(applyTermMappings('as it says in Psalm 9 and 10 that', 'așa cum spune la Psalmul 9 cu 10 că')).to.equal('as it says in Psalm 9:10 that');
+    });
+    it('keeps a genuine "9 and 10" (source "9 și 10")', () => {
+        expect(applyTermMappings('verses 9 and 10 say', 'versetele 9 și 10 spun')).to.equal('verses 9 and 10 say');
+    });
+    it('converts only the pair the source joins with "cu"', () => {
+        expect(applyTermMappings('Psalm 9 and 10 and verses 3 and 4', 'Psalmul 9 cu 10 și versetele 3 și 4'))
+            .to.equal('Psalm 9:10 and verses 3 and 4');
+    });
+    it('"maleahi trei cu 16" rendered "Malachi three with 16" becomes "Malachi 3:16"', () => {
+        expect(applyTermMappings('what is written in Malachi three with 16 says', 'ce scrie în maleahi trei cu 16 zice'))
+            .to.equal('what is written in Malachi 3:16 says');
+    });
+    it('leaves a number word alone when the source has no matching "word cu verse"', () => {
+        expect(applyTermMappings('three with the brothers', 'trei cu frații')).to.equal('three with the brothers');
+        expect(applyTermMappings('two with 5 others', 'doi și cu 5 alții')).to.equal('two with 5 others');
+    });
+});
