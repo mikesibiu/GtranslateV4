@@ -1726,7 +1726,21 @@ const RO_STT_REPAIRS_2026_11_19 = [
     ['<barac(u)?>', 'g', 'Barac'],                                            // lowercase → "hut"; "baracă" untouched
     ['<arma(?:geton|tedon|gedon)(ul|ului)?>', 'gi', 'Armaghedon$1'],          // "Armageddon" variants
 ];
-const RO_STT_REPAIRS_COMPILED = RO_STT_REPAIRS_2026_11_19.map(([p, f, r]) => [roWordRegex(p, f), r]);
+// 2026-11-22 Sunday meeting (public talk on prophecy; Watchtower study on translation work).
+// Each misheard form is not a Romanian word, or not valid in that position.
+const RO_STT_REPAIRS_2026_11_22 = [
+    ['<înțefania>', 'gi', 'în Țefania'],                                      // book name dropped in English
+    ['<(?:ehova|efova|epova)>', 'gi', 'Iehova'],                              // "epova" → "God" (name dropped)
+    ['<(scripturile|scripturilor) braice>', 'gi', '$1 ebraice'],              // "the Braic Scriptures"
+    ['<(traducerea|traducerii) luminoi>', 'gi', '$1 lumii noi'],              // "the illuminated translation"
+    ['<așezări fără riduri>', 'gi', 'așezări fără ziduri'],                   // Ezekiel 38:11 "wrinkle-free"
+    ['<(?:yode|iude) ul>', 'gi', 'iudeul'],                                   // Zechariah 8:23 "the yode"
+    ['<ziua unirii lui Iehova>', 'gi', 'ziua mâniei lui Iehova'],             // Zephaniah 2:3 "day of union"
+    ['<agrafele (\\d+)>', 'gi', 'paragrafele $1'],                            // "time clips 10 and 11"
+    ['<tonul Babel>', 'gi', 'Turnul Babel'],                                  // "the Babel tone"
+];
+const RO_STT_REPAIRS_COMPILED = [...RO_STT_REPAIRS_2026_11_19, ...RO_STT_REPAIRS_2026_11_22]
+    .map(([p, f, r]) => [roWordRegex(p, f), r]);
 
 /**
  * Pre-translation fixes to the Romanian STT text, for the MT call only (post-processing gates
