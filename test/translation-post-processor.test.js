@@ -3060,3 +3060,35 @@ describe('extractByAlignmentFallback (v234)', () => {
         expect(extractByAlignmentFallback('and so we went to the hall and sang', 'and so', 'a b c d e f g h', 'c d e f g h')).to.be.null;
     });
 });
+
+
+describe('normalizeSourceForMT — STT mishearing repairs (2026-11-22)', () => {
+    const { normalizeSourceForMT } = require('../translation-post-processor');
+    const cases = [
+        ['cum ne pregătim înțefania 2', 'cum ne pregătim în Țefania 2'],
+        ['și epova Dumnezeu', 'și Iehova Dumnezeu'],
+        ['numele efova în Biblie', 'numele Iehova în Biblie'],
+        ['ehova cunoaște viitorul', 'Iehova cunoaște viitorul'],
+        ['în scripturile braice totuși', 'în scripturile ebraice totuși'],
+        ['studierea traducerii luminoi asupra', 'studierea traducerii lumii noi asupra'],
+        ['ei locuiesc în așezări fără riduri', 'ei locuiesc în așezări fără ziduri'],
+        ['paragraful 3 yode ul din profeție', 'paragraful 3 iudeul din profeție'],
+        ['cei care reprezintă iude ul', 'cei care reprezintă iudeul'],
+        ['ascunși în ziua unirii lui Iehova', 'ascunși în ziua mâniei lui Iehova'],
+        ['continuăm cu agrafele 10 și 11', 'continuăm cu paragrafele 10 și 11'],
+        ['efectele de la tonul Babel', 'efectele de la Turnul Babel'],
+        ['Epova este Dumnezeu', 'Iehova este Dumnezeu'],
+        ['Yode ul reprezintă', 'iudeul reprezintă'],
+    ];
+    cases.forEach(([input, expected]) => {
+        it(`"${input}" -> "${expected}"`, () => expect(normalizeSourceForMT(input)).to.equal(expected));
+    });
+    it('leaves ordinary uses alone (2026-11-22 rules)', () => {
+        for (const t of ['o față fără riduri', 'agrafele de birou', 'tonul vocii lui', 'ziua unirii principatelor',
+                         'vreau să mă duc acasă', 'un iudeu și un grec', 'traducerea lumii noi', 'scripturile ebraice',
+                         'Lipova este un oraș', 'un ehovar', 'numele Iehova în Biblie', 'iehova',
+                         'Turnul Babel', 'în Țefania 2', 'agrafele 10a']) {
+            expect(normalizeSourceForMT(t)).to.equal(t);
+        }
+    });
+});

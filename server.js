@@ -56,7 +56,7 @@ const APP_PASSWORD = process.env.APP_PASSWORD || null;
 // App version stamped onto translation_log rows (keep in sync with the badge in index.html).
 // Was previously hardcoded 'v206', which mislabelled every logged row and undermined
 // per-version log analysis.
-const APP_VERSION = 'v235';
+const APP_VERSION = 'v236';
 
 // Guard: SESSION_SECRET must be set in production — hardcoded fallback is a security hole
 if (NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -1248,6 +1248,26 @@ io.on('connection', (socket) => {
         'studiul biblic al congregației',
         'bătrân de congregație',
         'bătrânii de congregație',
+        // 2026-11-22 Sunday meeting (public talk on prophecy; Watchtower study on translation work).
+        // Misheard: Țefania → "înțefania" (book dropped), Meșec → "am eșecului", Iacov → "Iancu",
+        // ziduri → "riduri" ("wrinkle-free"), iudeul → "yode ul", lumii noi → "luminoi",
+        // ebraice → "braice", Turnul Babel → "tonul Babel"/"Tudor Body", Foto-Drama → "fototerama".
+        'Țefania',
+        'Gog din țara lui Magog',
+        'Meșec',
+        'Meșecului',
+        'Tubal',
+        'Tubalului',
+        'așezări fără ziduri',
+        'Dumnezeul lui Iacov',
+        'Dumnezeului lui Iacov',
+        'Zaharia',
+        'unui iudeu',
+        'Traducerea lumii noi',
+        'Scripturile ebraice',
+        'Turnul Babel',
+        'Foto-Drama Creațiunii',
+        'ziua mâniei lui Iehova',
     ];
 
     // Helper function to update last activity time
