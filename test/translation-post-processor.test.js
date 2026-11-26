@@ -3147,3 +3147,44 @@ describe('applyTermMappings — chapter:verse spoken as "and" or as a number wor
         expect(applyTermMappings('two with 5 others', 'doi și cu 5 alții')).to.equal('two with 5 others');
     });
 });
+
+describe('normalizeSourceForMT — STT mishearing repairs (2026-11-26)', () => {
+    const { normalizeSourceForMT } = require('../translation-post-processor');
+    const cases = [
+        ['citim înfrângerile 9 cu 99 acum', 'citim Plângerile 9 cu 99 acum'],
+        ['omul va fiertat de datorie', 'omul va fi iertat de datorie'],
+        ['cum ajută Huawei pe oameni', 'cum ajută Iehova pe oameni'],
+        ['vrem să l lăudăm pe hoba mereu', 'vrem să l lăudăm pe Iehova mereu'],
+        ['ne ajută să pervers în ascultare', 'ne ajută să persevereze în ascultare'],
+        ['vrea să rămână lui alb mereu', 'vrea să rămână loial mereu'],
+        ['s au abătut de la Clara curată', 's au abătut de la închinarea curată'],
+        ['imităm exemplul ghidon acum', 'imităm exemplul lui Ghedeon acum'],
+        ['atunci dedon a ascultat', 'atunci Ghedeon a ascultat'],
+        ['Edeon a ascultat', 'Ghedeon a ascultat'],
+        ['curajul lui ghibion', 'curajul lui Ghedeon'],
+    ];
+    cases.forEach(([input, expected]) => {
+        it(`"${input}" -> "${expected}"`, () => expect(normalizeSourceForMT(input)).to.equal(expected));
+    });
+    ['am avut o înfrângere grea', 'înfrângerile din trecut', 'am fiert apa', 'va fi iertat',
+     'am un telefon Huawei', 'compania Huawei', 'un om pervers', 'rămâne lui alături', 'Clara curată a venit',
+     'sora Maria a citit', 'o casă curată', 'ghidonul bicicletei', 'ține ghidonul drept', 'avea alți bani',
+     'Ghedeon a ascultat', 'domnul Gedeon a sunat'].forEach(t => {
+        it(`leaves "${t}" unchanged`, () => expect(normalizeSourceForMT(t)).to.equal(t));
+    });
+});
+
+describe('applyTermMappings — chapter:verse rendered "N to M" (2026-11-26)', () => {
+    const { applyTermMappings } = require('../translation-post-processor');
+    it('"Plângerile 9 cu 99" rendered "Lamentations 9 to 99" becomes "Lamentations 9:99"', () => {
+        expect(applyTermMappings('read Lamentations 9 to 99 now', 'citim Plângerile 9 cu 99 acum'))
+            .to.equal('read Lamentations 9:99 now');
+    });
+    it('keeps a genuine "3 to 5" (source "3 la 5")', () => {
+        expect(applyTermMappings('chapters 3 to 5', 'capitolele 3 la 5')).to.equal('chapters 3 to 5');
+    });
+    it('converts only the pair the source joins with "cu"', () => {
+        expect(applyTermMappings('Psalm 9 to 10 and chapters 3 to 5', 'Psalmul 9 cu 10 și capitolele 3 la 5'))
+            .to.equal('Psalm 9:10 and chapters 3 to 5');
+    });
+});

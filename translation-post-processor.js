@@ -987,8 +987,9 @@ function applyTermMappings(text, sourceText = '') {
         // itself joins with "cu" is converted.
         // "through" and "and" are often genuine English ("verses 10 through 20", "verses 9 and 10"),
         // so only the pair the source itself joins with "cu" is converted ("Psalmul 9 cu 10" →
-        // "Psalm 9 and 10", 2026-11-22).
-        result = result.replace(/\b(\d+)\s+(through|and)\s+(\d+)\b/g, (m, a, _w, b) =>
+        // "Psalm 9 and 10", 2026-11-22). "to" likewise: "Plângerile 3 cu 24" → "Lamentations 3 to
+        // 24" (2026-11-26), while "chapters 3 to 5" is real English.
+        result = result.replace(/\b(\d+)\s+(through|and|to)\s+(\d+)\b/g, (m, a, _w, b) =>
             new RegExp(`(^|\\D)${a}\\s+cu\\s+${b}(\\D|$)`).test(sourceText) ? `${a}:${b}` : m);
     }
     // Chapter spoken as a word: "maleahi trei cu 16" → "Malachi three with 16" (2026-11-22).
@@ -1774,8 +1775,24 @@ const RO_STT_REPAIRS_2026_11_22_B = [
     ['<(aplicați(?:a|ei)) jelui>', 'gi', '$1 JW Library'],                    // "the jelui application"
     ['<penticostali din (\\d+)>', 'gi', 'Penticosta din $1'],               // "the Pentecostals of 33"
 ];
+// 2026-11-26 Thursday meeting (Lamentations reading; Bible study on Gideon, Judges 6-8).
+// Each misheard form is not a Romanian word, or not valid in that position.
+const RO_STT_REPAIRS_2026_11_26 = [
+    ['<înfrângerile (\\d+) cu (\\d+)>', 'gi', 'Plângerile $1 cu $2'],         // "defeats 3:24" (citation form only)
+    ['<fiertat>', 'gi', 'fi iertat'],                                         // not a word; "consumed by their iniquity" (inverted)
+    ['<ajută Huawei>', 'gi', 'ajută Iehova'],                                 // Iehova heard as a phone brand; also fires on "telefonul ajută Huawei" (accepted, negligible in a meeting)
+    ['<pe hoba>', 'gi', 'pe Iehova'],                                         // "serve the hoba"
+    ['<să pervers>', 'gi', 'să persevereze'],                                 // "să pervers" is ungrammatical; "to pervert"
+    ['<(rămână|rămâne|rămânem|rămâi|rămânea) lui alb>', 'gi', '$1 loial'],    // "to remain white"
+    ['<(de|din|spre|la) Clara curată>', 'g', '$1 închinarea curată'],         // "strayed from pure Clara"
+    ['<exemplul ghidon>', 'gi', 'exemplul lui Ghedeon'],                      // "the example good handlebar"
+    // Ghedeon (Gideon) heard a dozen ways in one Bible study; none of these is a Romanian word.
+    // "ghidon" (handlebar) is a real word, so it is only repaired in the anchored rule above;
+    // "Gedeon" is a real surname, so it is left alone.
+    ['<(?:gdeon|ghedon|chedeon|dedeon|dedon|edeon|edion|eghion|ghibion)>', 'gi', 'Ghedeon'],
+];
 const RO_STT_REPAIRS_COMPILED = [...RO_STT_REPAIRS_2026_11_19, ...RO_STT_REPAIRS_2026_11_22,
-    ...RO_STT_REPAIRS_2026_11_22_B].map(([p, f, r]) => [roWordRegex(p, f), r]);
+    ...RO_STT_REPAIRS_2026_11_22_B, ...RO_STT_REPAIRS_2026_11_26].map(([p, f, r]) => [roWordRegex(p, f), r]);
 
 /**
  * Pre-translation fixes to the Romanian STT text, for the MT call only (post-processing gates

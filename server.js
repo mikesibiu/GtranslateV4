@@ -56,7 +56,7 @@ const APP_PASSWORD = process.env.APP_PASSWORD || null;
 // App version stamped onto translation_log rows (keep in sync with the badge in index.html).
 // Was previously hardcoded 'v206', which mislabelled every logged row and undermined
 // per-version log analysis.
-const APP_VERSION = 'v237';
+const APP_VERSION = 'v238';
 
 // Guard: SESSION_SECRET must be set in production — hardcoded fallback is a security hole
 if (NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -1327,6 +1327,21 @@ io.on('connection', (socket) => {
         'Turnul Babel',
         'Foto-Drama Creațiunii',
         'ziua mâniei lui Iehova',
+        // 2026-11-26 review. Misheard: Ghedeon → "ghidon"/"edeon"/"dedon" (a dozen forms),
+        // nestemate spirituale → "blestemate spirituale" ("spiritual curses"), Plângerile →
+        // "înfrângerile" ("defeats"), închinarea curată → "Clara curată", madianiții → "nadianis",
+        // Alzheimer and efraimiții → unrelated words.
+        'Ghedeon',
+        'lui Ghedeon',
+        'madianiții',
+        'madianiților',
+        'nestemate spirituale',
+        'Plângerile capitolul',
+        'închinarea curată',
+        'închinării curate',
+        'Alzheimer',
+        'efraimiții',
+        'Zebah și Țalmuna',
     ];
 
     // Helper function to update last activity time
